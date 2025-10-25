@@ -1,8 +1,7 @@
 # management/fund_manager.py
 from dataclasses import dataclass
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 import pandas as pd
-from datetime import date
 import logging
 
 # Import your existing services
@@ -11,7 +10,7 @@ from services.nav_reconciliator import NAVReconciliator
 from services.reconciliator import Reconciliator
 
 # Import your domain classes
-from domain.fund import Fund
+from domain.fund import Fund, FundData, FundHoldings
 from processing.bulk_data_loader import BulkDataStore
 
 
@@ -29,6 +28,14 @@ class FundResult:
             self.errors = []
 
 
+@dataclass
+class ProcessingResults:
+    """Container for the outcome of the daily operations."""
+
+    fund_results: Dict[str, FundResult]
+    summary: Dict[str, Any]
+
+
 class FundManager:
     """Manages processing for ALL funds using bulk-loaded data"""
 
@@ -39,9 +46,15 @@ class FundManager:
         self.logger = logging.getLogger(__name__)
         self.available_funds = list(data_store.loaded_funds)
 
-    def run_daily_operations(self, operations: List[str]) -> Dict[str, FundResult]:
+    def run_daily_operations(self, operations: List[str]) -> ProcessingResults:
         """Run specified operations for ALL funds using cached data"""
-        results = {}
+        results: Dict[str, FundResult] = {}
+        summary = {
+            "requested_operations": operations,
+            "processed_funds": 0,
+            "funds_with_errors": 0,
+            "errors": [],
+        }
 
         for fund_name in self.available_funds:
             self.logger.info(f"Processing {fund_name}...")
@@ -67,14 +80,19 @@ class FundManager:
                 if 'nav_reconciliation' in operations:
                     fund_result.nav_results = self._run_nav_reconciliation(fund)
 
+                summary["processed_funds"] += 1
+
             except Exception as e:
                 error_msg = f"Error processing {fund_name}: {str(e)}"
                 fund_result.errors.append(error_msg)
                 self.logger.error(error_msg)
+                summary["errors"].append(error_msg)
+                summary["funds_with_errors"] += 1
 
             results[fund_name] = fund_result
 
-        return results
+        summary["total_funds"] = len(results)
+        return ProcessingResults(fund_results=results, summary=summary)
 
     def _create_fund_from_bulk_data(self, fund_name: str, fund_config) -> Fund:
         """Create a Fund instance populated with bulk data"""
@@ -121,49 +139,6 @@ class FundManager:
         # Adjust this based on your cash table structure
         return cash_data.get('cash_value', 0).sum() if 'cash_value' in cash_data.columns else 0.0
 
-    def _extract_nav_value(self, nav_data: pd.DataFrame) -> float:
-        """Extract NAV value from nav data DataFrame"""
-        if nav_data.empty:
-            return 0.0
-        # Adjust this based on your NAV table structure
-        return nav_data.get('nav_value', 0).sum() if 'nav_value' in nav_data.columns else 0.0
-
-    def _run_compliance(self, fund: Fund) -> Dict[str, Any]:
-        """Run compliance checks using your existing ComplianceChecker"""
-        try:
-            # Your ComplianceChecker expects a dict of funds
-            compliance_checker = ComplianceChecker(
-                session=None,  # No session needed - data is already loaded
-                funds={fund.name: fund},  # Pass as single-item dict
-                date=self.data_store.date,
-                base_cls=None
-            )
-
-            # Run all compliance tests
-            results = compliance_checker.run_compliance_tests()
-            return results.get(fund.name, {})
-
-        except Exception as e:
-            self.logger.error(f"Compliance error for {fund.name}: {e}")
-            return {'errors': [str(e)], 'violations': []}
-
-    def _run_reconciliation(self, fund: Fund) -> Dict[str, Any]:
-        """Run reconciliation using your existing Reconciliator"""
-        try:
-            # Your Reconciliator expects a Fund instance
-            reconciliator = Reconciliator(
-                fund=fund,
-                analysis_type=self.analysis_type
-            )
-
-            # Run all reconciliations
-            reconciliator.run_all_reconciliations()
-            return reconciliator.get_summary()
-
-        except Exception as e:
-            self.logger.error(f"Reconciliation error for {fund.name}: {e}")
-            return {'errors': [str(e)], 'breaks': []}
-
     def _run_nav_reconciliation(self, fund: Fund) -> Dict[str, Any]:
         """Run NAV reconciliation using your existing NAVReconciliator"""
         try:
@@ -183,9 +158,16 @@ class FundManager:
             self.logger.error(f"NAV reconciliation error for {fund.name}: {e}")
             return {'errors': [str(e)], 'differences': []}
 
-    def _get_prior_date(self, current_date: str) -> str:
+    def _get_prior_date(self, current_date: Any) -> str:
         """Get prior business date - you might want to improve this"""
-        from datetime import datetime, timedelta
-        current = datetime.strptime(current_date, '%Y-%m-%d')
+        from datetime import datetime, timedelta, date as date_cls
+
+        if isinstance(current_date, datetime):
+            current = current_date
+        elif isinstance(current_date, date_cls):
+            current = datetime.combine(current_date, datetime.min.time())
+        else:
+            current = datetime.strptime(str(current_date), '%Y-%m-%d')
+
         prior = current - timedelta(days=1)
         return prior.strftime('%Y-%m-%d')

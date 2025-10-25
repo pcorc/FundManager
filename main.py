@@ -9,7 +9,7 @@ from services.weight_analyzer import WeightAnalyzer
 
 def main():
     # 🎛️ CONFIGURATION - TOGGLE HERE!
-    TARGET_DATE = datetime(2024, 1, 15).date()  # ⚡ CHANGE DATE HERE
+    TARGET_DATE = datetime(2025, 10, 24).date()  # ⚡ CHANGE DATE HERE
     TARGET_FUNDS = ['DOGG', 'FDND', 'KNG']  # ⚡ CHANGE FUNDS HERE (empty = all)
     OPERATIONS = ['compliance', 'reconciliation', 'nav_reconciliation']  # ⚡ CHANGE OPS HERE
 
