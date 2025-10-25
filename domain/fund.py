@@ -15,31 +15,33 @@ class GainLossResult:
 
 @dataclass
 class FundMetrics:
-    """All time-specific financial metrics for a single date"""
-    # Holdings data
-    equity: pd.DataFrame = field(default_factory=pd.DataFrame)
-    options: pd.DataFrame = field(default_factory=pd.DataFrame)
-    treasury: pd.DataFrame = field(default_factory=pd.DataFrame)
-    cash: float = 0.0
+    fund_id: str
 
-    # CUSTODIAN-PROVIDED VALUES (source of truth #1)
+    fund_id: str
+
+    # CUSTODIAN-PROVIDED VALUES
     custodian_total_assets: float = 0.0
     custodian_total_net_assets: float = 0.0
     custodian_nav_per_share: float = 0.0
 
+    # CUSTODIAN HOLDINGS (position-level)
+    custodian_equity_holdings: pd.DataFrame = None
+    custodian_option_holdings: pd.DataFrame = None
+    custodian_treasury_holdings: pd.DataFrame = None
+    custodian_cash_holdings: pd.DataFrame = None
 
-@dataclass
-class FundData:
-    current: FundMetrics = field(default_factory=FundMetrics)
-    previous: FundMetrics = field(default_factory=FundMetrics)
-    expense_ratio: float = 0.0
+    # INTERNAL HOLDINGS (your definitions)
+    internal_equity_holdings: pd.DataFrame = None
+    internal_option_holdings: pd.DataFrame = None
+    internal_treasury_holdings: pd.DataFrame = None
+    internal_cash_holdings: pd.DataFrame = None
+
 
 
 class Fund:
     def __init__(self, name: str, config: Dict):
         self.name = name
         self.config = config
-        self.data = FundData()
 
     # CUSTODIAN-PROVIDED VALUES (for reconciliation)
     @property

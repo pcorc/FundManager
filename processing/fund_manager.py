@@ -10,7 +10,7 @@ from services.nav_reconciliator import NAVReconciliator
 from services.reconciliator import Reconciliator
 
 # Import your domain classes
-from domain.fund import Fund, FundData, FundMetrics
+from domain.fund import Fund, FundMetrics
 from processing.bulk_data_loader import BulkDataStore
 
 
@@ -97,21 +97,29 @@ class FundManager:
     def _create_fund_from_bulk_data(self, fund_name: str, fund_config) -> Fund:
         fund_data_dict = self.data_store.fund_data.get(fund_name, {})
 
-        fund_data = FundData()
-
-        # POPULATE WITH CUSTODIAN DATA
+        # POPULATE WITH BOTH INTERNAL AND CUSTODIAN DATA
         fund_data.current = FundMetrics(
-            equity=fund_data_dict.get('custodian_equity', pd.DataFrame()),
-            options=fund_data_dict.get('custodian_option', pd.DataFrame()),
-            treasury=fund_data_dict.get('custodian_treasury', pd.DataFrame()),
-            cash=self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
-            # EXTRACT CUSTODIAN-PROVIDED VALUES
+            fund_id=fund_name,
+
+            # CUSTODIAN-PROVIDED VALUES
             custodian_total_assets=self._extract_custodian_total_assets(fund_data_dict),
-            custodian_total_net_assets=self._extract_custodian_total_net_assets(fund_data_dict)
+            custodian_total_net_assets=self._extract_custodian_total_net_assets(fund_data_dict),
+            custodian_nav_per_share=self._extract_custodian_nav_per_share(fund_data_dict),
+
+            # CUSTODIAN HOLDINGS (existing)
+            custodian_equity_holdings=fund_data_dict.get('custodian_equity', pd.DataFrame()),
+            custodian_option_holdings=fund_data_dict.get('custodian_option', pd.DataFrame()),
+            custodian_treasury_holdings=fund_data_dict.get('custodian_treasury', pd.DataFrame()),
+            custodian_cash_holdings=fund_data_dict.get('custodian_cash', pd.DataFrame()),
+
+            # INTERNAL HOLDINGS (new - from your recon_mappings)
+            internal_equity_holdings=fund_data_dict.get('vest_equity_holdings', pd.DataFrame()),  # from tif_oms_equity_holdings
+            internal_option_holdings=fund_data_dict.get('vest_option_holdings', pd.DataFrame()),
+            internal_treasury_holdings=fund_data_dict.get('vest_treasury_holdings', pd.DataFrame()),
+            internal_cash_holdings=fund_data_dict.get('vest_cash_holdings', pd.DataFrame()),
         )
 
         fund_data.expense_ratio = fund_config.expense_ratio
-
         fund = Fund(fund_name, fund_config.mapping_data)
         fund.data = fund_data
         return fund
@@ -158,6 +166,17 @@ class FundManager:
 
         self.logger.warning("No custodian total net assets found")
         return 0.0
+
+    def _extract_custodian_nav_per_share(self, fund_data_dict: dict) -> float:
+        """Extract NAV per share using known field name from your custodian"""
+        nav_data = fund_data_dict.get('nav_per_share', 0.0)
+
+        try:
+            if hasattr(nav_data, 'iloc'):  # Handle DataFrame/Series
+                return float(nav_data.iloc[0]) if len(nav_data) > 0 else 0.0
+            return float(nav_data)
+        except (ValueError, TypeError):
+            return 0.0
 
     def _get_prior_date(self, current_date: Any) -> str:
         """Get prior business date - you might want to improve this"""
