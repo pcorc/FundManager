@@ -1,5 +1,5 @@
 # config/database.py
-from sqlalchemy import create_engine, MetaData, Table, Column, String
+from sqlalchemy import create_engine, MetaData, Table, Column, String, and_, or_, insert
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.automap import automap_base
 import os
@@ -67,6 +67,6 @@ Base.prepare()
 # Session maker
 Session = sessionmaker(bind=engine)
 
-def init_session():
-    """Initialize and return a new SQLAlchemy session."""
-    return Session()
+def initialize_database():
+    """Initialize and return a new SQLAlchemy session and Base."""
+    return Session(), Base

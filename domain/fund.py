@@ -49,19 +49,6 @@ class Holdings:
                 self.cash)
 
 
-@dataclass
-class FundSnapshot:
-    """Aggregate root for fund data at a point in time"""
-    date: date
-    nav: float
-    total_net_assets: float
-    holdings: Holdings
-    metadata: Dict
-
-    def calculate_gain_loss(self, prior_snapshot: 'FundSnapshot') -> 'GainLossResult':
-        """Calculate period-over-period gain/loss"""
-        return GainLossCalculator.calculate(self, prior_snapshot)
-
 
 class Fund(ABC):
     """Abstract base class for all funds"""
@@ -93,26 +80,6 @@ class Fund(ABC):
         """Run NAV reconciliation"""
         return NAVReconciler(self).reconcile(date)
 
-
-class ETF(Fund):
-    """40-Act ETF implementation"""
-
-    def get_snapshot(self, date: date) -> FundSnapshot:
-        current_data = self._data_loader.load_fund_data(self, date)
-        return self._build_snapshot(current_data)
-
-    def get_prior_snapshot(self, date: date) -> FundSnapshot:
-        prior_date = self._get_prior_date(date)
-        prior_data = self._data_loader.load_fund_data(self, prior_date)
-        return self._build_snapshot(prior_data)
-
-
-class PrivateFund(Fund):
-    """Private fund implementation with different data sources"""
-
-    def get_snapshot(self, date: date) -> FundSnapshot:
-        # Private funds may use different data sources
-        pass
 
 
 class Fund:
