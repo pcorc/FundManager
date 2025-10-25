@@ -17,25 +17,21 @@ class GainLossResult:
 class FundMetrics:
     fund_id: str
 
-    fund_id: str
-
     # CUSTODIAN-PROVIDED VALUES
     custodian_total_assets: float = 0.0
     custodian_total_net_assets: float = 0.0
     custodian_nav_per_share: float = 0.0
+    custodian_cash: float = 0.0
 
     # CUSTODIAN HOLDINGS (position-level)
     custodian_equity_holdings: pd.DataFrame = None
     custodian_option_holdings: pd.DataFrame = None
     custodian_treasury_holdings: pd.DataFrame = None
-    custodian_cash_holdings: pd.DataFrame = None
 
     # INTERNAL HOLDINGS (your definitions)
     internal_equity_holdings: pd.DataFrame = None
     internal_option_holdings: pd.DataFrame = None
     internal_treasury_holdings: pd.DataFrame = None
-    internal_cash_holdings: pd.DataFrame = None
-
 
 
 class Fund:

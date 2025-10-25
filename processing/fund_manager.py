@@ -98,30 +98,30 @@ class FundManager:
         fund_data_dict = self.data_store.fund_data.get(fund_name, {})
 
         # POPULATE WITH BOTH INTERNAL AND CUSTODIAN DATA
-        fund_data.current = FundMetrics(
+        fund_metrics = FundMetrics(
             fund_id=fund_name,
 
             # CUSTODIAN-PROVIDED VALUES
             custodian_total_assets=self._extract_custodian_total_assets(fund_data_dict),
             custodian_total_net_assets=self._extract_custodian_total_net_assets(fund_data_dict),
             custodian_nav_per_share=self._extract_custodian_nav_per_share(fund_data_dict),
+            custodian_cash=self._extract_cash_value(fund_data_dict.get('custodian_cash', pd.DataFrame())),
 
             # CUSTODIAN HOLDINGS (existing)
             custodian_equity_holdings=fund_data_dict.get('custodian_equity', pd.DataFrame()),
             custodian_option_holdings=fund_data_dict.get('custodian_option', pd.DataFrame()),
             custodian_treasury_holdings=fund_data_dict.get('custodian_treasury', pd.DataFrame()),
-            custodian_cash_holdings=fund_data_dict.get('custodian_cash', pd.DataFrame()),
 
             # INTERNAL HOLDINGS (new - from your recon_mappings)
             internal_equity_holdings=fund_data_dict.get('vest_equity_holdings', pd.DataFrame()),  # from tif_oms_equity_holdings
             internal_option_holdings=fund_data_dict.get('vest_option_holdings', pd.DataFrame()),
             internal_treasury_holdings=fund_data_dict.get('vest_treasury_holdings', pd.DataFrame()),
-            internal_cash_holdings=fund_data_dict.get('vest_cash_holdings', pd.DataFrame()),
+
         )
 
-        fund_data.expense_ratio = fund_config.expense_ratio
         fund = Fund(fund_name, fund_config.mapping_data)
-        fund.data = fund_data
+        fund.metrics = fund_metrics
+        fund.expense_ratio = fund_config.expense_ratio
         return fund
 
     def _extract_custodian_total_assets(self, fund_data_dict: Dict) -> float:
@@ -144,7 +144,7 @@ class FundManager:
         if cash_data.empty:
             return 0.0
 
-        cash_columns = ['cash_value', 'cash', 'amount', 'value']
+        cash_columns = ['cash_value', 'cash', 'amount', 'value', 'end_balance']
         for col in cash_columns:
             if col in cash_data.columns:
                 return cash_data[col].sum()
