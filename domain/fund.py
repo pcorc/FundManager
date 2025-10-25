@@ -93,6 +93,22 @@ class Fund:
         return self.data.expense_ratio * self.custodian_total_net_assets  # Use custodian as base
 
     @property
+    def treasury_holdings(self) -> pd.DataFrame:
+        return self.data.current.treasury
+
+    @property
+    def custodian_treasury_holdings(self) -> pd.DataFrame:
+        return self.data.current.treasury  # Or separate if you have custodian-specific treasury data
+
+    @property
+    def previous_treasury_holdings(self) -> pd.DataFrame:
+        return self.data.previous.treasury
+
+    @property
+    def previous_custodian_treasury_holdings(self) -> pd.DataFrame:
+        return self.data.previous.treasury
+
+    @property
     def total_option_delta_adjusted_notional(self) -> float:
         """For compliance checks that need delta-adjusted option values"""
         if not self.data.current.options.empty and 'delta_adjusted_notional' in self.data.current.options.columns:
@@ -113,7 +129,6 @@ class Fund:
         # You'll implement this based on your GICS logic
         return {}
 
-    # ADD THIS METHOD - it's useful!
     def calculate_gain_loss(self, current_date: str, prior_date: str, asset_class: str) -> GainLossResult:
         """
         Calculate gain/loss for specific asset class.
@@ -165,4 +180,41 @@ class Fund:
     def _calculate_options_gl(self, current_date: str, prior_date: str) -> GainLossResult:
         """Calculate options gain/loss - similar structure"""
         # Your options-specific logic here
+        return GainLossResult()
+
+    def _calculate_treasury_gl(self) -> GainLossResult:
+        """Calculate treasury gain/loss using current vs previous data"""
+        df_current = self.data.current.treasury
+        df_previous = self.data.previous.treasury
+
+        if df_current.empty or df_previous.empty:
+            return GainLossResult()
+
+        # Merge on treasury identifier (CUSIP, ticker, etc.)
+        merge_col = 'cusip' if 'cusip' in df_current.columns else 'ticker'
+
+        if merge_col not in df_current.columns or merge_col not in df_previous.columns:
+            return GainLossResult()
+
+        df_merged = pd.merge(
+            df_current, df_previous,
+            on=merge_col,
+            suffixes=('_current', '_previous'),
+            how='inner'
+        )
+
+        # Calculate gain/loss
+        if 'quantity_current' in df_merged.columns and 'price_current' in df_merged.columns:
+            df_merged['gl_raw'] = (
+                    (df_merged['price_current'] - df_merged.get('price_previous', 0)) *
+                    df_merged['quantity_current']
+            )
+
+            return GainLossResult(
+                raw_gl=df_merged['gl_raw'].sum(),
+                adjusted_gl=df_merged['gl_raw'].sum(),  # Add accrued interest adjustments if needed
+                details=df_merged,
+                price_adjustments=pd.DataFrame()  # Add treasury-specific adjustments
+            )
+
         return GainLossResult()

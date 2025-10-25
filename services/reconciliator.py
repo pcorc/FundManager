@@ -45,6 +45,8 @@ class Reconciliator:
             ("custodian_equity_t1", self.reconcile_custodian_equity_t1),
             ("custodian_option", self.reconcile_custodian_option),
             ("custodian_option_t1", self.reconcile_custodian_option_t1),
+            ("custodian_treasury", self.reconcile_custodian_treasury),  # ← ADD THIS
+            ("custodian_treasury_t1", self.reconcile_custodian_treasury_t1),  # ← ADD THIS
             ("index_equity", self.reconcile_index_equity),
         ]
 
@@ -392,3 +394,130 @@ class Reconciliator:
 
     # Keep your existing _build_equity_details, get_detailed_calculations methods
     # but update them to use self.fund instead of self.fund_data
+
+    def reconcile_custodian_equity_t1(self):
+        """Reconcile custodian equity for T-1 date (simpler version)"""
+        # Get T-1 data from Fund object
+        df_oms1 = self.fund.previous_equity_holdings.copy()
+        df_cust1 = self.fund.previous_custodian_equity_holdings.copy()
+
+        if df_oms1.empty or df_cust1.empty:
+            self.results['custodian_equity_t1'] = ReconciliationResult(
+                raw_recon=pd.DataFrame(),
+                final_recon=pd.DataFrame(),
+                price_discrepancies_T=pd.DataFrame(),
+                price_discrepancies_T1=pd.DataFrame(),
+                merged_data=pd.DataFrame()
+            )
+            return
+
+        # Set quantities for T-1
+        df_oms1['quantity'] = self._get_quantity_column(df_oms1)
+
+        # Merge T-1 data
+        df1 = pd.merge(df_oms1, df_cust1, on='equity_ticker', how='outer',
+                       suffixes=('_vest', '_cust'), indicator=True)
+        df1['in_vest'] = df1['_merge'] != 'right_only'
+        df1['in_cust'] = df1['_merge'] != 'left_only'
+        df1.drop(columns=['_merge'], inplace=True)
+
+        # Calculate T-1 discrepancies (no trades/corporate actions for T-1)
+        df1['discrepancy'] = df1['quantity'].fillna(0) - df1.get('shares_cust', 0).fillna(0)
+
+        # Identify T-1 mismatches
+        mask_missing_t1 = df1['in_vest'] != df1['in_cust']
+        mask_qty_t1 = df1['in_vest'] & df1['in_cust'] & df1['discrepancy'].abs().gt(0)
+        df_issues_t1 = df1.loc[mask_missing_t1 | mask_qty_t1].copy()
+
+        # Categorize T-1 discrepancies
+        conditions_t1 = [
+            ~df_issues_t1['in_vest'] & df_issues_t1['in_cust'],
+            df_issues_t1['in_vest'] & ~df_issues_t1['in_cust'],
+            mask_qty_t1.loc[df_issues_t1.index]
+        ]
+        df_issues_t1['discrepancy_type'] = np.select(conditions_t1,
+            ["Missing in OMS", "Missing in Custodian", "Quantity Mismatch"],
+            default="Unknown")
+
+        # T-1 breakdown
+        df_issues_t1['breakdown'] = np.where(
+            df_issues_t1['discrepancy_type'] == "Quantity Mismatch",
+            "Vest=" + df_issues_t1['quantity'].fillna(0).astype(int).astype(str)
+            + " | Cust=" + df_issues_t1.get('shares_cust', 0).fillna(0).astype(int).astype(str),
+            "Present in Vest: " + df_issues_t1['in_vest'].map({True: "Yes", False: "No"})
+            + " | Present in Cust: " + df_issues_t1['in_cust'].map({True: "Yes", False: "No"})
+        )
+
+        # Store T-1 results
+        self.results['custodian_equity_t1'] = ReconciliationResult(
+            raw_recon=df1.loc[mask_qty_t1].reset_index(drop=True),
+            final_recon=df_issues_t1.reset_index(drop=True),
+            price_discrepancies_T=pd.DataFrame(),  # No T price discrepancies for T-1 recon
+            price_discrepancies_T1=self._calculate_price_discrepancies(df1, 'equity_ticker'),
+            merged_data=df1.copy()
+        )
+
+        # Emit T-1 summary rows
+        for _, row in df_issues_t1.iterrows():
+            dtype = row['discrepancy_type']
+            desc = row.get('breakdown', '')
+            val = row['discrepancy'] if dtype == 'Quantity Mismatch' else 'N/A'
+            self.add_summary_row(f"Custodian Equity T-1: {dtype}",
+                                 row['equity_ticker'], desc, val)
+
+    def reconcile_custodian_option_t1(self):
+        """Reconcile custodian options for T-1 date"""
+        # Get T-1 data
+        df_oms1 = self.fund.previous_options_holdings.copy()
+        df_cust1 = self.fund.previous_custodian_option_holdings.copy()
+
+        if df_oms1.empty or df_cust1.empty:
+            self.results['custodian_option_t1'] = ReconciliationResult(
+                raw_recon=pd.DataFrame(),
+                final_recon=pd.DataFrame(),
+                price_discrepancies_T=pd.DataFrame(),
+                price_discrepancies_T1=pd.DataFrame(),
+                merged_data=pd.DataFrame()
+            )
+            return
+
+        # Similar logic to reconcile_custodian_option but for T-1
+        # (simplified without trades/corporate actions)
+        df1 = pd.merge(df_oms1, df_cust1, on='optticker', how='outer',
+                       suffixes=('_vest', '_cust'))
+
+        df1['in_vest'] = df1['quantity'].notnull()
+        df1['in_cust'] = df1.get('shares_cust', pd.Series()).notnull()
+        df1['discrepancy'] = df1['quantity'].fillna(0) - df1.get('shares_cust', 0).fillna(0)
+
+        # ... similar logic to categorize and store results
+        # Store in self.results['custodian_option_t1']
+
+    def reconcile_custodian_treasury(self):
+        """Reconcile custodian treasury holdings for current date"""
+        df_oms = self.fund.treasury_holdings.copy()
+        df_cust = self.fund.custodian_treasury_holdings.copy()
+
+        if df_oms.empty or df_cust.empty:
+            self.results['custodian_treasury'] = ReconciliationResult(
+                raw_recon=pd.DataFrame(),
+                final_recon=pd.DataFrame(),
+                price_discrepancies_T=pd.DataFrame(),
+                price_discrepancies_T1=pd.DataFrame(),
+                merged_data=pd.DataFrame()
+            )
+            return
+
+        # Similar logic to equity reconciliation but for treasury
+        merge_col = 'cusip' if 'cusip' in df_oms.columns else 'ticker'
+
+        df = pd.merge(df_oms, df_cust, on=merge_col, how='outer',
+                      suffixes=('_vest', '_cust'), indicator=True)
+        # ... rest of reconciliation logic similar to equity
+
+    def reconcile_custodian_treasury_t1(self):
+        """Reconcile custodian treasury holdings for T-1 date"""
+        # Similar to reconcile_custodian_treasury but using previous data
+        df_oms1 = self.fund.previous_treasury_holdings.copy()
+        df_cust1 = self.fund.previous_custodian_treasury_holdings.copy()
+        # ... similar T-1 logic

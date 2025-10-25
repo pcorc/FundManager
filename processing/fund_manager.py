@@ -159,6 +159,35 @@ class FundManager:
         self.logger.warning("No custodian total net assets found")
         return 0.0
 
+    def _get_prior_date(self, current_date: Any) -> str:
+        """Get prior business date - you might want to improve this"""
+        from datetime import datetime, timedelta, date as date_cls
+
+        if isinstance(current_date, datetime):
+            current = current_date
+        elif isinstance(current_date, date_cls):
+            current = datetime.combine(current_date, datetime.min.time())
+        else:
+            current = datetime.strptime(str(current_date), '%Y-%m-%d')
+
+        prior = current - timedelta(days=1)
+        return prior.strftime('%Y-%m-%d')
+
+    def _run_compliance(self, fund: Fund) -> Dict[str, Any]:
+        """Run compliance checks"""
+        try:
+            compliance_checker = ComplianceChecker(
+                session=None,
+                funds={fund.name: fund},
+                date=self.data_store.date,
+                base_cls=None
+            )
+            results = compliance_checker.run_compliance_tests()
+            return results.get(fund.name, {})
+        except Exception as e:
+            self.logger.error(f"Compliance error for {fund.name}: {e}")
+            return {'errors': [str(e)], 'violations': []}
+
     def _run_nav_reconciliation(self, fund: Fund) -> Dict[str, Any]:
         """Run NAV reconciliation using your existing NAVReconciliator"""
         try:
@@ -190,17 +219,3 @@ class FundManager:
         except Exception as e:
             self.logger.error(f"Reconciliation error for {fund.name}: {e}")
             return {'errors': [str(e)], 'breaks': []}
-
-    def _get_prior_date(self, current_date: Any) -> str:
-        """Get prior business date - you might want to improve this"""
-        from datetime import datetime, timedelta, date as date_cls
-
-        if isinstance(current_date, datetime):
-            current = current_date
-        elif isinstance(current_date, date_cls):
-            current = datetime.combine(current_date, datetime.min.time())
-        else:
-            current = datetime.strptime(str(current_date), '%Y-%m-%d')
-
-        prior = current - timedelta(days=1)
-        return prior.strftime('%Y-%m-%d')
