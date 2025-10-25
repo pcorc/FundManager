@@ -10,7 +10,7 @@ from services.nav_reconciliator import NAVReconciliator
 from services.reconciliator import Reconciliator
 
 # Import your domain classes
-from domain.fund import Fund, FundData, FundHoldings
+from domain.fund import Fund, FundData, FundMetrics
 from processing.bulk_data_loader import BulkDataStore
 
 
@@ -95,49 +95,69 @@ class FundManager:
         return ProcessingResults(fund_results=results, summary=summary)
 
     def _create_fund_from_bulk_data(self, fund_name: str, fund_config) -> Fund:
-        """Create a Fund instance populated with bulk data"""
-        # Get all data for this fund from bulk store
         fund_data_dict = self.data_store.fund_data.get(fund_name, {})
 
-        # Create FundData structure
         fund_data = FundData()
 
-        # Populate current holdings
-        fund_data.current = FundHoldings(
+        # POPULATE WITH CUSTODIAN DATA
+        fund_data.current = FundMetrics(
             equity=fund_data_dict.get('custodian_equity', pd.DataFrame()),
             options=fund_data_dict.get('custodian_option', pd.DataFrame()),
             treasury=fund_data_dict.get('custodian_treasury', pd.DataFrame()),
             cash=self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
-            nav=self._extract_nav_value(fund_data_dict.get('nav', pd.DataFrame()))
+            # EXTRACT CUSTODIAN-PROVIDED VALUES
+            custodian_total_assets=self._extract_custodian_total_assets(fund_data_dict),
+            custodian_total_net_assets=self._extract_custodian_total_net_assets(fund_data_dict)
         )
 
-        # Populate previous holdings (you might need to load T-1 data separately)
-        fund_data.previous = FundHoldings(
-            equity=pd.DataFrame(),  # Placeholder - you'll need to load T-1 data
-            options=pd.DataFrame(),
-            treasury=pd.DataFrame(),
-            cash=0.0,
-            nav=0.0
-        )
-
-        # Populate additional data
-        fund_data.flows = 0.0  # Calculate from flows data if available
         fund_data.expense_ratio = fund_config.expense_ratio
-        fund_data.basket = fund_data_dict.get('basket', pd.DataFrame())
-        fund_data.index = fund_data_dict.get('index', pd.DataFrame())
 
-        # Create Fund instance
         fund = Fund(fund_name, fund_config.mapping_data)
         fund.data = fund_data
-
         return fund
 
+    def _extract_custodian_total_assets(self, fund_data_dict: Dict) -> float:
+        """Extract total assets from custodian NAV data"""
+        nav_data = fund_data_dict.get('nav', pd.DataFrame())
+        if nav_data.empty:
+            return 0.0
+
+        # Look for custodian total assets
+        asset_columns = ['total_assets', 'gross_assets', 'assets', 'total_assets_value']
+        for col in asset_columns:
+            if col in nav_data.columns:
+                return nav_data[col].sum()
+
+        self.logger.warning("No custodian total assets found")
+        return 0.0
+
     def _extract_cash_value(self, cash_data: pd.DataFrame) -> float:
-        """Extract cash value from cash data DataFrame"""
+        """Extract cash value from cash data"""
         if cash_data.empty:
             return 0.0
-        # Adjust this based on your cash table structure
-        return cash_data.get('cash_value', 0).sum() if 'cash_value' in cash_data.columns else 0.0
+
+        cash_columns = ['cash_value', 'cash', 'amount', 'value']
+        for col in cash_columns:
+            if col in cash_data.columns:
+                return cash_data[col].sum()
+
+        self.logger.warning("No cash value column found")
+        return 0.0
+
+    def _extract_custodian_total_net_assets(self, fund_data_dict: Dict) -> float:
+        """Extract total net assets from custodian NAV data"""
+        nav_data = fund_data_dict.get('nav', pd.DataFrame())
+        if nav_data.empty:
+            return 0.0
+
+        # Look for custodian net assets
+        net_columns = ['net_assets', 'total_net_assets', 'nav', 'net_asset_value']
+        for col in net_columns:
+            if col in nav_data.columns:
+                return nav_data[col].sum()
+
+        self.logger.warning("No custodian total net assets found")
+        return 0.0
 
     def _run_nav_reconciliation(self, fund: Fund) -> Dict[str, Any]:
         """Run NAV reconciliation using your existing NAVReconciliator"""
@@ -157,6 +177,19 @@ class FundManager:
         except Exception as e:
             self.logger.error(f"NAV reconciliation error for {fund.name}: {e}")
             return {'errors': [str(e)], 'differences': []}
+
+    def _run_reconciliation(self, fund: Fund) -> Dict[str, Any]:
+        """Run reconciliation"""
+        try:
+            reconciliator = Reconciliator(
+                fund=fund,
+                analysis_type=self.analysis_type
+            )
+            reconciliator.run_all_reconciliations()
+            return reconciliator.get_summary()
+        except Exception as e:
+            self.logger.error(f"Reconciliation error for {fund.name}: {e}")
+            return {'errors': [str(e)], 'breaks': []}
 
     def _get_prior_date(self, current_date: Any) -> str:
         """Get prior business date - you might want to improve this"""

@@ -44,3 +44,26 @@ class NAVReconciliator:
         }
 
         return self.results
+
+    def run_nav_reconciliation_v2(self):
+        # Compare custodian vs your calculation
+        custodian_assets = self.fund.custodian_total_assets
+        calculated_assets = self.fund.calculated_total_assets
+        assets_difference = custodian_assets - calculated_assets
+
+        custodian_net_assets = self.fund.custodian_total_net_assets
+        calculated_net_assets = self.fund.calculated_total_net_assets
+        net_assets_difference = custodian_net_assets - calculated_net_assets
+
+        return {
+            'assets_reconciliation': {
+                'custodian': custodian_assets,
+                'calculated': calculated_assets,
+                'difference': assets_difference
+            },
+            'net_assets_reconciliation': {
+                'custodian': custodian_net_assets,
+                'calculated': calculated_net_assets,
+                'difference': net_assets_difference
+            }
+        }

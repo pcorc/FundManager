@@ -10,60 +10,61 @@ class GainLossResult:
     details: pd.DataFrame = field(default_factory=pd.DataFrame)
     price_adjustments: pd.DataFrame = field(default_factory=pd.DataFrame)
 
+
+# domain/fund.py - STORE BOTH SOURCES
+
 @dataclass
-class FundHoldings:
-    """Container for all holdings data"""
+class FundMetrics:
+    """All time-specific financial metrics for a single date"""
+    # Holdings data
     equity: pd.DataFrame = field(default_factory=pd.DataFrame)
     options: pd.DataFrame = field(default_factory=pd.DataFrame)
     treasury: pd.DataFrame = field(default_factory=pd.DataFrame)
     cash: float = 0.0
-    nav: float = 0.0
+
+    # CUSTODIAN-PROVIDED VALUES (source of truth #1)
+    custodian_total_assets: float = 0.0
+    custodian_total_net_assets: float = 0.0
+    custodian_nav_per_share: float = 0.0
+
 
 @dataclass
 class FundData:
-    """Complete fund data for T and T-1"""
-    current: FundHoldings = field(default_factory=FundHoldings)
-    previous: FundHoldings = field(default_factory=FundHoldings)
-    # Additional data
-    flows: float = 0.0
+    current: FundMetrics = field(default_factory=FundMetrics)
+    previous: FundMetrics = field(default_factory=FundMetrics)
     expense_ratio: float = 0.0
-    basket: pd.DataFrame = field(default_factory=pd.DataFrame)
-    index: pd.DataFrame = field(default_factory=pd.DataFrame)
 
-@dataclass
-class Holdings:
-    """Value object for holdings data"""
-    equities: pd.DataFrame
-    options: pd.DataFrame
-    treasuries: pd.DataFrame
-    cash: float
-
-    @property
-    def total_market_value(self) -> float:
-        return (self.equities.get('market_value', 0).sum() +
-                self.options.get('market_value', 0).sum() +
-                self.treasuries.get('market_value', 0).sum() +
-                self.cash)
 
 class Fund:
-    def __init__(self, name: str, config: Dict, base_cls=None):
+    def __init__(self, name: str, config: Dict):
         self.name = name
         self.config = config
-        self.base_cls = base_cls
         self.data = FundData()
 
-    # Add these properties that your services use:
+    # CUSTODIAN-PROVIDED VALUES (for reconciliation)
     @property
-    def cash_value(self) -> float:
-        return self.data.current.cash
+    def custodian_total_assets(self) -> float:
+        return self.data.current.custodian_total_assets
 
     @property
-    def total_assets(self) -> float:
-        return self.data.current.nav  # Or calculate from components
+    def custodian_total_net_assets(self) -> float:
+        return self.data.current.custodian_total_net_assets
+
+    # YOUR CALCULATED VALUES (for reconciliation)
+    @property
+    def calculated_total_assets(self) -> float:
+        """Calculate total assets from components"""
+        return (self.total_equity_value +
+                self.total_option_value +
+                self.total_treasury_value +
+                self.cash_value)
 
     @property
-    def total_net_assets(self) -> float:
-        return self.data.current.nav
+    def calculated_total_net_assets(self) -> float:
+        """Calculate net assets (assets - liabilities)"""
+        # This might be the same as total_assets for some funds
+        # or might subtract expenses, liabilities, etc.
+        return self.calculated_total_assets - self.expenses
 
     @property
     def total_equity_value(self) -> float:
@@ -84,12 +85,12 @@ class Fund:
         return 0.0
 
     @property
-    def expenses(self) -> float:
-        return self.data.expense_ratio * self.data.current.nav  # Example calculation
+    def cash_value(self) -> float:
+        return self.data.current.cash
 
     @property
-    def is_private_fund(self) -> bool:
-        return self.config.get('strategy') == 'PF'  # Adjust based on your config
+    def expenses(self) -> float:
+        return self.data.expense_ratio * self.custodian_total_net_assets  # Use custodian as base
 
     @property
     def total_option_delta_adjusted_notional(self) -> float:
