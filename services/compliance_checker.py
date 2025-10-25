@@ -4,8 +4,9 @@ from typing import Dict, Optional
 import numpy as np
 from config.constants import *  # Your existing constants
 from config.fund_classifications import DIVERSIFIED_FUNDS, NON_DIVERSIFIED_FUNDS, PRIVATE_FUNDS, CLOSED_END_FUNDS
+from domain.fund import Fund  # ← ADD THIS IMPORT
 
-logger = setup_logger("compliance_checker", "compliance/logs/compliance_checker.log")
+#logger = setup_logger("compliance_checker", "compliance/logs/compliance_checker.log")
 
 
 @dataclass

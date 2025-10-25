@@ -1,3 +1,6 @@
+from domain.fund import Fund  # ← ADD THIS IMPORT
+
+
 # services/nav_reconciliator.py
 class NAVReconciliator:
     def __init__(self, fund: Fund, analysis_date: str, prior_date: str):

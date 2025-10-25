@@ -4,7 +4,6 @@ from config.database import initialize_database
 from config.fund_registry import FundRegistry
 from processing.bulk_data_loader import BulkDataLoader
 from processing.fund_manager import FundManager
-from reporting.report_orchestrator import ReportOrchestrator
 from services.weight_analyzer import WeightAnalyzer
 
 
@@ -41,8 +40,8 @@ def main():
     results = fund_manager.run_daily_operations(OPERATIONS)
 
     # STEP 6: Generate reports
-    report_orchestrator = ReportOrchestrator(OUTPUT_DIR)
-    report_orchestrator.generate_reports(results, TARGET_DATE)
+    # report_orchestrator = ReportOrchestrator(OUTPUT_DIR)
+    # report_orchestrator.generate_reports(results, TARGET_DATE)
 
     print(f"✅ Done! Processed {len(results.fund_results)} funds")
     print(f"📊 Summary: {results.summary}")

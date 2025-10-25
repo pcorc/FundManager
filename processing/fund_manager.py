@@ -5,11 +5,14 @@ import pandas as pd
 from datetime import date
 import logging
 
-from processing.bulk_data_loader import BulkDataStore, DataStoreAccess
+# Import your existing services
+from services.compliance_checker import ComplianceChecker
+from services.nav_reconciliator import NAVReconciliator
+from services.reconciliator import Reconciliator
+
+# Import your domain classes
 from domain.fund import Fund
-from processing.compliance_engine import ComplianceEngine
-from processing.reconciliation_engine import ReconciliationEngine
-from processing.nav_engine import NAVEngine
+from processing.bulk_data_loader import BulkDataStore
 
 
 @dataclass
@@ -26,52 +29,33 @@ class FundResult:
             self.errors = []
 
 
-@dataclass
-class DailyResults:
-    """Results from processing all funds for a day"""
-    date: str
-    fund_results: Dict[str, FundResult]
-    summary: Dict[str, Any] = None
-
-    def __post_init__(self):
-        if self.summary is None:
-            self.summary = {}
-        if self.fund_results is None:
-            self.fund_results = {}
-
-
 class FundManager:
     """Manages processing for ALL funds using bulk-loaded data"""
 
-    def __init__(self, fund_registry, data_store: BulkDataStore):
+    def __init__(self, fund_registry, data_store: BulkDataStore, analysis_type: str = "eod"):
         self.fund_registry = fund_registry
         self.data_store = data_store
-        self.data_access = DataStoreAccess(data_store)
+        self.analysis_type = analysis_type
         self.logger = logging.getLogger(__name__)
+        self.available_funds = list(data_store.loaded_funds)
 
-        # Initialize engines (they work with cached data)
-        self.compliance_engine = ComplianceEngine(self.data_access)
-        self.reconciliation_engine = ReconciliationEngine(self.data_access)
-        self.nav_engine = NAVEngine(self.data_access)
-
-        # Track which funds we're processing
-        self.available_funds = self.data_access.get_all_funds_with_data()
-
-    def run_daily_operations(self, operations: List[str]) -> DailyResults:
+    def run_daily_operations(self, operations: List[str]) -> Dict[str, FundResult]:
         """Run specified operations for ALL funds using cached data"""
-        daily_results = DailyResults(date=self.data_store.date)
+        results = {}
 
         for fund_name in self.available_funds:
             self.logger.info(f"Processing {fund_name}...")
-
             fund_result = FundResult(fund_name=fund_name)
 
             try:
-                # Get fund domain object
-                fund = self.fund_registry.get_fund(fund_name)
-                if not fund:
+                # Get fund configuration from registry
+                fund_config = self.fund_registry.get_fund(fund_name)
+                if not fund_config:
                     fund_result.errors.append(f"Fund not found in registry")
                     continue
+
+                # Create Fund instance with bulk data
+                fund = self._create_fund_from_bulk_data(fund_name, fund_config)
 
                 # Run requested operations
                 if 'compliance' in operations:
@@ -88,119 +72,120 @@ class FundManager:
                 fund_result.errors.append(error_msg)
                 self.logger.error(error_msg)
 
-            daily_results.fund_results[fund_name] = fund_result
+            results[fund_name] = fund_result
 
-        # Generate summary statistics
-        daily_results.summary = self._generate_summary(daily_results)
+        return results
 
-        return daily_results
+    def _create_fund_from_bulk_data(self, fund_name: str, fund_config) -> Fund:
+        """Create a Fund instance populated with bulk data"""
+        # Get all data for this fund from bulk store
+        fund_data_dict = self.data_store.fund_data.get(fund_name, {})
+
+        # Create FundData structure
+        fund_data = FundData()
+
+        # Populate current holdings
+        fund_data.current = FundHoldings(
+            equity=fund_data_dict.get('custodian_equity', pd.DataFrame()),
+            options=fund_data_dict.get('custodian_option', pd.DataFrame()),
+            treasury=fund_data_dict.get('custodian_treasury', pd.DataFrame()),
+            cash=self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
+            nav=self._extract_nav_value(fund_data_dict.get('nav', pd.DataFrame()))
+        )
+
+        # Populate previous holdings (you might need to load T-1 data separately)
+        fund_data.previous = FundHoldings(
+            equity=pd.DataFrame(),  # Placeholder - you'll need to load T-1 data
+            options=pd.DataFrame(),
+            treasury=pd.DataFrame(),
+            cash=0.0,
+            nav=0.0
+        )
+
+        # Populate additional data
+        fund_data.flows = 0.0  # Calculate from flows data if available
+        fund_data.expense_ratio = fund_config.expense_ratio
+        fund_data.basket = fund_data_dict.get('basket', pd.DataFrame())
+        fund_data.index = fund_data_dict.get('index', pd.DataFrame())
+
+        # Create Fund instance
+        fund = Fund(fund_name, fund_config.mapping_data)
+        fund.data = fund_data
+
+        return fund
+
+    def _extract_cash_value(self, cash_data: pd.DataFrame) -> float:
+        """Extract cash value from cash data DataFrame"""
+        if cash_data.empty:
+            return 0.0
+        # Adjust this based on your cash table structure
+        return cash_data.get('cash_value', 0).sum() if 'cash_value' in cash_data.columns else 0.0
+
+    def _extract_nav_value(self, nav_data: pd.DataFrame) -> float:
+        """Extract NAV value from nav data DataFrame"""
+        if nav_data.empty:
+            return 0.0
+        # Adjust this based on your NAV table structure
+        return nav_data.get('nav_value', 0).sum() if 'nav_value' in nav_data.columns else 0.0
 
     def _run_compliance(self, fund: Fund) -> Dict[str, Any]:
-        """Run compliance checks using cached data"""
+        """Run compliance checks using your existing ComplianceChecker"""
         try:
-            # Get all necessary data from cache
-            fund_data = {
-                'custodian_equity': self.data_access.get_fund_data(fund.name, 'custodian_equity'),
-                'custodian_options': self.data_access.get_fund_data(fund.name, 'custodian_option'),
-                'custodian_treasury': self.data_access.get_fund_data(fund.name, 'custodian_treasury'),
-                'index': self.data_access.get_fund_data(fund.name, 'index'),
-                'nav': self.data_access.get_fund_data(fund.name, 'nav')
-            }
+            # Your ComplianceChecker expects a dict of funds
+            compliance_checker = ComplianceChecker(
+                session=None,  # No session needed - data is already loaded
+                funds={fund.name: fund},  # Pass as single-item dict
+                date=self.data_store.date,
+                base_cls=None
+            )
 
-            return self.compliance_engine.run_checks(fund, fund_data)
+            # Run all compliance tests
+            results = compliance_checker.run_compliance_tests()
+            return results.get(fund.name, {})
 
         except Exception as e:
             self.logger.error(f"Compliance error for {fund.name}: {e}")
             return {'errors': [str(e)], 'violations': []}
 
     def _run_reconciliation(self, fund: Fund) -> Dict[str, Any]:
-        """Run holdings reconciliation using cached data"""
+        """Run reconciliation using your existing Reconciliator"""
         try:
-            # Get reconciliation data from cache
-            reconciliation_data = {
-                'custodian_equity': self.data_access.get_fund_data(fund.name, 'custodian_equity'),
-                'custodian_options': self.data_access.get_fund_data(fund.name, 'custodian_option'),
-                'custodian_treasury': self.data_access.get_fund_data(fund.name, 'custodian_treasury'),
-                'vest_equity': self.data_access.get_fund_data(fund.name, 'vest_equity'),
-                'vest_options': self.data_access.get_fund_data(fund.name, 'vest_option'),
-                'vest_treasury': self.data_access.get_fund_data(fund.name, 'vest_treasury')
-            }
+            # Your Reconciliator expects a Fund instance
+            reconciliator = Reconciliator(
+                fund=fund,
+                analysis_type=self.analysis_type
+            )
 
-            return self.reconciliation_engine.reconcile(fund, reconciliation_data)
+            # Run all reconciliations
+            reconciliator.run_all_reconciliations()
+            return reconciliator.get_summary()
 
         except Exception as e:
             self.logger.error(f"Reconciliation error for {fund.name}: {e}")
             return {'errors': [str(e)], 'breaks': []}
 
     def _run_nav_reconciliation(self, fund: Fund) -> Dict[str, Any]:
-        """Run NAV reconciliation using cached data"""
+        """Run NAV reconciliation using your existing NAVReconciliator"""
         try:
-            # Get NAV data from cache
-            nav_data = {
-                'custodian_nav': self.data_access.get_fund_data(fund.name, 'nav'),
-                'custodian_cash': self.data_access.get_fund_data(fund.name, 'cash'),
-                'custodian_equity': self.data_access.get_fund_data(fund.name, 'custodian_equity'),
-                'custodian_options': self.data_access.get_fund_data(fund.name, 'custodian_option'),
-                'custodian_treasury': self.data_access.get_fund_data(fund.name, 'custodian_treasury')
-            }
+            # Determine prior date
+            prior_date = self._get_prior_date(self.data_store.date)
 
-            return self.nav_engine.reconcile(fund, nav_data)
+            # Your NAVReconciliator expects Fund instance and dates
+            nav_reconciliator = NAVReconciliator(
+                fund=fund,
+                analysis_date=self.data_store.date,
+                prior_date=prior_date
+            )
+
+            return nav_reconciliator.run_nav_reconciliation()
 
         except Exception as e:
             self.logger.error(f"NAV reconciliation error for {fund.name}: {e}")
             return {'errors': [str(e)], 'differences': []}
 
-    def _generate_summary(self, daily_results: DailyResults) -> Dict[str, Any]:
-        """Generate summary statistics for the day"""
-        total_funds = len(daily_results.fund_results)
-        funds_with_errors = sum(1 for r in daily_results.fund_results.values() if r.errors)
-
-        # Compliance summary
-        compliance_violations = 0
-        for result in daily_results.fund_results.values():
-            if result.compliance_results and 'violations' in result.compliance_results:
-                compliance_violations += len(result.compliance_results['violations'])
-
-        # Reconciliation summary
-        reconciliation_breaks = 0
-        for result in daily_results.fund_results.values():
-            if result.reconciliation_results and 'breaks' in result.reconciliation_results:
-                reconciliation_breaks += len(result.reconciliation_results['breaks'])
-
-        return {
-            'total_funds_processed': total_funds,
-            'funds_with_errors': funds_with_errors,
-            'compliance_violations': compliance_violations,
-            'reconciliation_breaks': reconciliation_breaks,
-            'success_rate': ((total_funds - funds_with_errors) / total_funds * 100) if total_funds > 0 else 0
-        }
-
-    def get_fund_data_availability(self) -> Dict[str, List[str]]:
-        """Check what data is available for each fund"""
-        availability = {}
-        for fund_name in self.available_funds:
-            availability[fund_name] = self.data_access.get_available_data_types(fund_name)
-        return availability
-
-    def validate_data_completeness(self) -> Dict[str, List[str]]:
-        """Validate that we have all required data for each fund"""
-        issues = {}
-
-        for fund_name in self.available_funds:
-            fund = self.fund_registry.get_fund(fund_name)
-            if not fund:
-                continue
-
-            missing_data = []
-            available_types = self.data_access.get_available_data_types(fund_name)
-
-            # Check required data types based on fund type
-            required_data = fund.get_required_data_types()
-            for data_type in required_data:
-                if data_type not in available_types:
-                    missing_data.append(data_type)
-
-            if missing_data:
-                issues[fund_name] = missing_data
-
-        return issues
+    def _get_prior_date(self, current_date: str) -> str:
+        """Get prior business date - you might want to improve this"""
+        from datetime import datetime, timedelta
+        current = datetime.strptime(current_date, '%Y-%m-%d')
+        prior = current - timedelta(days=1)
+        return prior.strftime('%Y-%m-%d')

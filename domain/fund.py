@@ -2,85 +2,13 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional, List
 import pandas as pd
 
-
 @dataclass
-class FundHoldings:
-    """Container for all holdings data"""
-    equity: pd.DataFrame = field(default_factory=pd.DataFrame)
-    options: pd.DataFrame = field(default_factory=pd.DataFrame)
-    treasury: pd.DataFrame = field(default_factory=pd.DataFrame)
-    cash: float = 0.0
-    nav: float = 0.0
-
-
-@dataclass
-class FundData:
-    """Complete fund data for T and T-1"""
-    current: FundHoldings = field(default_factory=FundHoldings)
-    previous: FundHoldings = field(default_factory=FundHoldings)
-    # Additional data
-    flows: float = 0.0
-    expense_ratio: float = 0.0
-    basket: pd.DataFrame = field(default_factory=pd.DataFrame)
-    index: pd.DataFrame = field(default_factory=pd.DataFrame)
-
-
-# domain/fund.py
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Dict, List, Optional
-import pandas as pd
-from datetime import date
-
-
-@dataclass
-class Holdings:
-    """Value object for holdings data"""
-    equities: pd.DataFrame
-    options: pd.DataFrame
-    treasuries: pd.DataFrame
-    cash: float
-
-    @property
-    def total_market_value(self) -> float:
-        return (self.equities.get('market_value', 0).sum() +
-                self.options.get('market_value', 0).sum() +
-                self.treasuries.get('market_value', 0).sum() +
-                self.cash)
-
-
-
-class Fund(ABC):
-    """Abstract base class for all funds"""
-
-    def __init__(self, name: str, config: Dict):
-        self.name = name
-        self.config = config
-        self._data_loader = None
-
-    @abstractmethod
-    def get_snapshot(self, date: date) -> FundSnapshot:
-        """Get complete fund snapshot for date"""
-        pass
-
-    @abstractmethod
-    def get_prior_snapshot(self, date: date) -> FundSnapshot:
-        """Get previous period snapshot"""
-        pass
-
-    def reconcile_holdings(self, date: date) -> 'ReconciliationResult':
-        """Run holdings reconciliation"""
-        return HoldingsReconciler(self).reconcile(date)
-
-    def check_compliance(self, date: date) -> 'ComplianceResult':
-        """Run compliance checks"""
-        return ComplianceChecker(self).check(date)
-
-    def reconcile_nav(self, date: date) -> 'NAVReconciliationResult':
-        """Run NAV reconciliation"""
-        return NAVReconciler(self).reconcile(date)
-
-
+class GainLossResult:
+    """Simple container for gain/loss calculations"""
+    raw_gl: float = 0.0
+    adjusted_gl: float = 0.0
+    details: pd.DataFrame = field(default_factory=pd.DataFrame)
+    price_adjustments: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 class Fund:
     def __init__(self, name: str, config: Dict, base_cls=None):
@@ -89,91 +17,109 @@ class Fund:
         self.base_cls = base_cls
         self.data = FundData()
 
-    def load_data(self, session, date: date_class) -> 'Fund':
-        """Load all data for this fund"""
-        data_loader = FundDataLoader(self, session, date)
-        self.data = data_loader.load_all_data()
-        return self
-
-    # Property accessors
+    # Add these properties that your services use:
     @property
-    def nav(self) -> float:
+    def cash_value(self) -> float:
+        return self.data.current.cash
+
+    @property
+    def total_assets(self) -> float:
+        return self.data.current.nav  # Or calculate from components
+
+    @property
+    def total_net_assets(self) -> float:
         return self.data.current.nav
 
     @property
-    def equity_holdings(self) -> pd.DataFrame:
-        return self.data.current.equity
-
-    @property
     def total_equity_value(self) -> float:
-        if not self.equity_holdings.empty:
-            return (self.equity_holdings['price'] * self.equity_holdings['quantity']).sum()
+        if not self.data.current.equity.empty:
+            return (self.data.current.equity['price'] * self.data.current.equity['quantity']).sum()
         return 0.0
 
-    # Business logic properties
     @property
-    def uses_block_trading(self) -> bool:
-        return self.config.get('uses_block_trading', False)
+    def total_option_value(self) -> float:
+        if not self.data.current.options.empty:
+            return (self.data.current.options['price'] * self.data.current.options['quantity']).sum()
+        return 0.0
 
     @property
-    def custodian_type(self) -> str:
-        return self.config.get('custodian')
+    def total_treasury_value(self) -> float:
+        if not self.data.current.treasury.empty:
+            return (self.data.current.treasury['price'] * self.data.current.treasury['quantity']).sum()
+        return 0.0
 
-    def calculate_gain_loss(self, date: str, prior_date: str, asset_class: str) -> GainLossResult:
+    @property
+    def expenses(self) -> float:
+        return self.data.expense_ratio * self.data.current.nav  # Example calculation
+
+    @property
+    def is_private_fund(self) -> bool:
+        return self.config.get('strategy') == 'PF'  # Adjust based on your config
+
+    # Method stubs that your services might call
+    def get_irs_holdings_data(self) -> pd.DataFrame:
+        """Return data formatted for IRS checks"""
+        return self.data.current.equity
+
+    def get_40act_holdings_data(self) -> pd.DataFrame:
+        """Return data formatted for 40 Act checks"""
+        return self.data.current.equity
+
+    def get_gics_exposure(self) -> Dict:
+        """Return GICS exposure data"""
+        # You'll implement this based on your GICS logic
+        return {}
+
+    # ADD THIS METHOD - it's useful!
+    def calculate_gain_loss(self, current_date: str, prior_date: str, asset_class: str) -> GainLossResult:
         """
         Calculate gain/loss for specific asset class.
-        This can be used by NAV recon, performance attribution, etc.
+        Used by NAV reconciliation and performance attribution.
         """
         if asset_class == 'equity':
-            return self._calculate_equity_gl(date, prior_date)
+            return self._calculate_equity_gl(current_date, prior_date)
         elif asset_class == 'options':
-            return self._calculate_options_gl(date, prior_date)
+            return self._calculate_options_gl(current_date, prior_date)
         elif asset_class == 'treasury':
-            return self._calculate_treasury_gl(date, prior_date)
-        elif asset_class == 'flex_options':
-            return self._calculate_flex_options_gl(date, prior_date)
+            return self._calculate_treasury_gl(current_date, prior_date)
 
-        return GainLossResult(0.0, 0.0, pd.DataFrame(), pd.DataFrame())
+        # Default empty result
+        return GainLossResult()
 
-    def _calculate_equity_gl(self, date: str, prior_date: str) -> GainLossResult:
-        """Calculate equity gain/loss - moved from NAV recon"""
-        # Get current and prior data
-        current_request = DataRequest('holdings', date, self.name, asset_class='equity')
-        prior_request = DataRequest('holdings', prior_date, self.name, asset_class='equity')
-
-        df_current = self.data_access.get_data(current_request)
-        df_prior = self.data_access.get_data(prior_request)
+    def _calculate_equity_gl(self, current_date: str, prior_date: str) -> GainLossResult:
+        """Calculate equity gain/loss using bulk data"""
+        # Get data from self.data (already loaded from bulk store)
+        df_current = self.data.current.equity
+        df_prior = self.data.previous.equity
 
         if df_current.empty or df_prior.empty:
-            return GainLossResult(0.0, 0.0, pd.DataFrame(), pd.DataFrame())
+            return GainLossResult()
 
-        # Merge and calculate G/L
-        df_merged = self._merge_holdings_data(df_current, df_prior, 'equity_ticker')
-
-        # Calculate raw G/L
-        quantity_col = self._get_quantity_column(df_merged)
-        df_merged['gl_raw'] = (df_merged['price_t'] - df_merged['price_t1']) * df_merged[quantity_col]
-
-        # Apply price adjustments
-        df_adjusted = self._apply_price_adjustments(df_merged, 'equity')
-        df_adjusted['gl_adj'] = (df_adjusted['price_t_adj'] - df_adjusted['price_t1_adj']) * df_adjusted[quantity_col]
-
-        return GainLossResult(
-            raw_gl=df_merged['gl_raw'].sum(),
-            adjusted_gl=df_adjusted['gl_adj'].sum(),
-            details=df_adjusted,
-            price_adjustments=self._get_price_adjustments('equity')
+        # Simple merge on ticker
+        df_merged = pd.merge(
+            df_current, df_prior,
+            on='equity_ticker',
+            suffixes=('_current', '_prior'),
+            how='inner'
         )
 
-    def _calculate_options_gl(self, date: str, prior_date: str) -> GainLossResult:
-        """Calculate options gain/loss - moved from NAV recon"""
-        # Similar structure to equity but with option-specific logic
-        pass
+        # Calculate gain/loss
+        if 'quantity_current' in df_merged.columns and 'price_current' in df_merged.columns:
+            df_merged['gl_raw'] = (
+                    (df_merged['price_current'] - df_merged.get('price_prior', 0)) *
+                    df_merged['quantity_current']
+            )
 
-    def get_holdings_reconciliation_data(self, date: str, reconciliation_type: str) -> pd.DataFrame:
-        """
-        Get normalized data for reconciliation.
-        This replaces the complex data merging in Reconciliator.
-        """
-        request = DataRequest('holdings', date, self.name, asset_class=reconciliation_type)
-        return self.data_access.get_data(request)
+            return GainLossResult(
+                raw_gl=df_merged['gl_raw'].sum(),
+                adjusted_gl=df_merged['gl_raw'].sum(),  # Add adjustments if needed
+                details=df_merged,
+                price_adjustments=pd.DataFrame()  # Add if you have price adjustments
+            )
+
+        return GainLossResult()
+
+    def _calculate_options_gl(self, current_date: str, prior_date: str) -> GainLossResult:
+        """Calculate options gain/loss - similar structure"""
+        # Your options-specific logic here
+        return GainLossResult()

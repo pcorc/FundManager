@@ -11,10 +11,3 @@ class MutualFund(Fund):
 
     def calculate_share_class_nav(self):
         pass
-
-
-class HedgeFund(Fund):
-    """Hedge fund specific logic"""
-
-    def calculate_management_fees(self):
-        pass

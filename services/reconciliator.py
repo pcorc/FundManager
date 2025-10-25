@@ -7,6 +7,7 @@ from config.fund_classifications import (
     DIVERSIFIED_FUNDS, NON_DIVERSIFIED_FUNDS, PRIVATE_FUNDS,
     CLOSED_END_FUNDS, FUNDS_WITH_SG_EQUITY
 )
+from domain.fund import Fund  # ← ADD THIS IMPORT
 
 
 @dataclass
