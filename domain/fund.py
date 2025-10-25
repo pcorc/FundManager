@@ -10,6 +10,41 @@ class GainLossResult:
     details: pd.DataFrame = field(default_factory=pd.DataFrame)
     price_adjustments: pd.DataFrame = field(default_factory=pd.DataFrame)
 
+@dataclass
+class FundHoldings:
+    """Container for all holdings data"""
+    equity: pd.DataFrame = field(default_factory=pd.DataFrame)
+    options: pd.DataFrame = field(default_factory=pd.DataFrame)
+    treasury: pd.DataFrame = field(default_factory=pd.DataFrame)
+    cash: float = 0.0
+    nav: float = 0.0
+
+@dataclass
+class FundData:
+    """Complete fund data for T and T-1"""
+    current: FundHoldings = field(default_factory=FundHoldings)
+    previous: FundHoldings = field(default_factory=FundHoldings)
+    # Additional data
+    flows: float = 0.0
+    expense_ratio: float = 0.0
+    basket: pd.DataFrame = field(default_factory=pd.DataFrame)
+    index: pd.DataFrame = field(default_factory=pd.DataFrame)
+
+@dataclass
+class Holdings:
+    """Value object for holdings data"""
+    equities: pd.DataFrame
+    options: pd.DataFrame
+    treasuries: pd.DataFrame
+    cash: float
+
+    @property
+    def total_market_value(self) -> float:
+        return (self.equities.get('market_value', 0).sum() +
+                self.options.get('market_value', 0).sum() +
+                self.treasuries.get('market_value', 0).sum() +
+                self.cash)
+
 class Fund:
     def __init__(self, name: str, config: Dict, base_cls=None):
         self.name = name
@@ -55,6 +90,13 @@ class Fund:
     @property
     def is_private_fund(self) -> bool:
         return self.config.get('strategy') == 'PF'  # Adjust based on your config
+
+    @property
+    def total_option_delta_adjusted_notional(self) -> float:
+        """For compliance checks that need delta-adjusted option values"""
+        if not self.data.current.options.empty and 'delta_adjusted_notional' in self.data.current.options.columns:
+            return self.data.current.options['delta_adjusted_notional'].sum()
+        return 0.0
 
     # Method stubs that your services might call
     def get_irs_holdings_data(self) -> pd.DataFrame:
