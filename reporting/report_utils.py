@@ -1,15 +1,49 @@
-"""Utility helpers shared by compliance reporting components."""
+"""Utility helpers shared by reporting components."""
 
 from __future__ import annotations
 
 import numbers
-from datetime import date
-from typing import Any, Dict, Mapping, Tuple
+from collections.abc import Iterable, Mapping, Sequence
+from datetime import date, datetime
+from typing import Any, Dict, Tuple
+
+import pandas as pd
 
 try:  # pragma: no cover - optional import for typing only
     from services.compliance_checker import ComplianceResult
 except Exception:  # pragma: no cover - safeguard during cold starts
     ComplianceResult = Any  # type: ignore
+
+
+# ---------------------------------------------------------------------------
+# Generic helpers
+# ---------------------------------------------------------------------------
+
+def normalize_report_date(value: date | datetime | str) -> str:
+    """Normalise user supplied dates to the ``YYYY-MM-DD`` format."""
+
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value)
+
+
+def ensure_dataframe(value: Any) -> pd.DataFrame:
+    """Coerce arbitrary objects into a :class:`pandas.DataFrame`."""
+
+    if value is None:
+        return pd.DataFrame()
+    if isinstance(value, pd.DataFrame):
+        return value.copy()
+    if isinstance(value, Mapping):
+        # If mapping already looks like {column: sequence}
+        if value and all(isinstance(v, Sequence) and not isinstance(v, (str, bytes)) for v in value.values()):
+            return pd.DataFrame(value)
+        return pd.DataFrame([value])
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+        return pd.DataFrame(list(value))
+    return pd.DataFrame({"value": [value]})
 
 
 def format_number(value: Any, digits: int = 0) -> str:
@@ -22,6 +56,10 @@ def format_number(value: Any, digits: int = 0) -> str:
         return format_spec.format(value)
     return str(value)
 
+
+# ---------------------------------------------------------------------------
+# Compliance helpers
+# ---------------------------------------------------------------------------
 
 def normalize_compliance_results(raw_results: Mapping[str, Any]) -> Dict[str, Any]:
     """Normalize the mapping returned by :class:`ComplianceChecker`."""
@@ -49,6 +87,113 @@ def flatten_compliance_results(results_by_date: Mapping[str, Mapping[str, Any]])
             flattened[(fund_name, date_str)] = data
     return flattened
 
+
+def summarise_compliance_status(normalized_results: Mapping[str, Any]) -> Dict[str, int]:
+    """Return aggregate PASS/FAIL counts from normalized compliance data."""
+
+    summary = {
+        "funds": 0,
+        "funds_in_breach": 0,
+        "total_checks": 0,
+        "failed_checks": 0,
+    }
+
+    for fund_results in normalized_results.values():
+        summary["funds"] += 1
+        fund_failed = False
+        for check_name, payload in fund_results.items():
+            if check_name == "summary_metrics":
+                continue
+            summary["total_checks"] += 1
+            if isinstance(payload, Mapping):
+                status = payload.get("is_compliant")
+                if status is False:
+                    summary["failed_checks"] += 1
+                    fund_failed = True
+                elif isinstance(status, str) and status.upper() == "FAIL":
+                    summary["failed_checks"] += 1
+                    fund_failed = True
+            elif isinstance(payload, str) and payload.upper() == "FAIL":
+                summary["failed_checks"] += 1
+                fund_failed = True
+        if fund_failed:
+            summary["funds_in_breach"] += 1
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Reconciliation helpers
+# ---------------------------------------------------------------------------
+
+def normalize_reconciliation_payload(raw_results: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Ensure reconciliation results expose ``summary`` and ``details`` keys."""
+
+    normalized: Dict[str, Dict[str, Any]] = {}
+    for fund_name, payload in (raw_results or {}).items():
+        if not payload:
+            continue
+        if "summary" in payload or "details" in payload:
+            summary = payload.get("summary", {})
+            details = payload.get("details", {})
+        else:
+            summary = payload
+            details = {}
+        normalized[fund_name] = {"summary": summary, "details": details}
+    return normalized
+
+
+def summarise_reconciliation_breaks(normalized_results: Mapping[str, Dict[str, Any]]) -> Dict[str, int]:
+    """Aggregate break counts across all funds."""
+
+    totals: Dict[str, int] = {}
+    for fund_payload in normalized_results.values():
+        summary = fund_payload.get("summary", {})
+        for recon_type, metrics in summary.items():
+            total_breaks = 0
+            for value in (metrics or {}).values():
+                if isinstance(value, numbers.Number):
+                    total_breaks += int(value)
+            totals[recon_type] = totals.get(recon_type, 0) + total_breaks
+    return totals
+
+
+# ---------------------------------------------------------------------------
+# NAV reconciliation helpers
+# ---------------------------------------------------------------------------
+
+def normalize_nav_payload(raw_results: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Ensure NAV reconciliation payload exposes ``summary`` and ``details``."""
+
+    normalized: Dict[str, Dict[str, Any]] = {}
+    for fund_name, payload in (raw_results or {}).items():
+        if not payload:
+            continue
+        summary = payload.get("summary", {}) if isinstance(payload, Mapping) else {}
+        details = payload.get("detailed_calculations", {}) if isinstance(payload, Mapping) else {}
+        normalized[fund_name] = {"summary": summary, "details": details}
+    return normalized
+
+
+def summarise_nav_differences(normalized_results: Mapping[str, Dict[str, Any]]) -> Dict[str, float]:
+    """Aggregate NAV differences across funds."""
+
+    totals = {"funds": 0, "absolute_difference": 0.0}
+    for payload in normalized_results.values():
+        summary = payload.get("summary", {})
+        if not summary:
+            continue
+        totals["funds"] += 1
+        diff = summary.get("difference")
+        try:
+            totals["absolute_difference"] += abs(float(diff)) if diff is not None else 0.0
+        except (TypeError, ValueError):
+            continue
+    return totals
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 def _is_compliance_result(value: Any) -> bool:
     return hasattr(value, "is_compliant") and hasattr(value, "details")

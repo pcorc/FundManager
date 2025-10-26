@@ -1,204 +1,183 @@
-import pandas as pd
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
-from openpyxl.utils.dataframe import dataframe_to_rows
-import logging
+"""Analytics for comparing ex-ante and ex-post compliance results."""
 
-logger = logging.getLogger(__name__)
+from __future__ import annotations
 
-
-def generate_trading_excel_report(comparison_data, output_path):
-    """
-    Generate Excel report from trading comparison data.
-
-    Args:
-        comparison_data: Dictionary with structure from TradingComplianceAnalyzer.analyze()
-        output_path: Path where Excel file should be saved
-    """
-    import pandas as pd
-    import os
-
-    # Ensure output directory exists
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-        # 1. Summary Sheet
-        summary_data = comparison_data.get('summary', {})
-        summary_df = pd.DataFrame([{
-            'Date': comparison_data.get('date', ''),
-            'Total Funds Analyzed': summary_data.get('total_funds_analyzed', 0),
-            'Funds Out of Compliance': summary_data.get('funds_out_of_compliance', 0),
-            'Funds Into Compliance': summary_data.get('funds_into_compliance', 0),
-            'Funds Unchanged': summary_data.get('funds_unchanged', 0),
-            'Total Violations Before': summary_data.get('total_violations_before', 0),
-            'Total Violations After': summary_data.get('total_violations_after', 0),
-        }])
-        summary_df.to_excel(writer, sheet_name='Summary', index=False)
-
-        # 2. Fund Details Sheet
-        funds_data = comparison_data.get('funds', {})
-
-        if funds_data:
-            # Create a list to hold all fund check data
-            all_checks_data = []
-
-            for fund_name, fund_info in funds_data.items():
-                checks = fund_info.get('checks', {})
-
-                for check_name, check_info in checks.items():
-                    all_checks_data.append({
-                        'Fund': fund_name,
-                        'Compliance Check': check_name,
-                        'Status Before': check_info.get('status_before', 'UNKNOWN'),
-                        'Status After': check_info.get('status_after', 'UNKNOWN'),
-                        'Violations Before': check_info.get('violations_before', 0),
-                        'Violations After': check_info.get('violations_after', 0),
-                        'Changed': 'Yes' if check_info.get('changed', False) else 'No',
-                    })
-
-            # Convert to DataFrame
-            checks_df = pd.DataFrame(all_checks_data)
-
-            # Sort by Fund, then by Compliance Check
-            checks_df = checks_df.sort_values(['Fund', 'Compliance Check'])
-
-            # Write to Excel
-            checks_df.to_excel(writer, sheet_name='Compliance Details', index=False)
-
-        # 3. Individual Fund Sheets (optional - one sheet per fund)
-        for fund_name, fund_info in funds_data.items():
-            checks = fund_info.get('checks', {})
-
-            fund_check_data = []
-            for check_name, check_info in checks.items():
-                fund_check_data.append({
-                    'Compliance Check': check_name,
-                    'Status Before': check_info.get('status_before', 'UNKNOWN'),
-                    'Status After': check_info.get('status_after', 'UNKNOWN'),
-                    'Violations Before': check_info.get('violations_before', 0),
-                    'Violations After': check_info.get('violations_after', 0),
-                    'Changed': 'Yes' if check_info.get('changed', False) else 'No',
-                })
-
-            if fund_check_data:
-                fund_df = pd.DataFrame(fund_check_data)
-                # Excel sheet names are limited to 31 characters
-                sheet_name = fund_name[:31]
-                fund_df.to_excel(writer, sheet_name=sheet_name, index=False)
-
-    print(f"Trading comparison report saved to: {output_path}")
-
-def _create_summary_sheet(wb: Workbook, data: dict):
-    """Creates executive summary sheet."""
-    ws = wb.create_sheet("Executive Summary", 0)
-
-    # Title
-    ws['A1'] = "Trading Compliance Analysis - Executive Summary"
-    ws['A1'].font = Font(size=14, bold=True)
-    ws['A2'] = f"Date: {data['date']}"
-
-    # Summary metrics
-    summary = data['summary']
-    row = 4
-
-    metrics = [
-        ("Total Funds Analyzed", summary['total_funds_analyzed']),
-        ("", ""),
-        ("Funds Moving OUT of Compliance", summary['funds_out_of_compliance']),
-        ("Funds Moving INTO Compliance", summary['funds_into_compliance']),
-        ("Funds with Unchanged Status", summary['funds_unchanged']),
-        ("", ""),
-        ("Total Violations (Ex-Ante)", summary['total_violations_before']),
-        ("Total Violations (Ex-Post)", summary['total_violations_after']),
-        ("Net Change in Violations", summary['total_violations_after'] - summary['total_violations_before'])
-    ]
-
-    for label, value in metrics:
-        ws[f'A{row}'] = label
-        ws[f'B{row}'] = value
-        ws[f'A{row}'].font = Font(bold=True)
-
-        # Color coding for critical metrics
-        if label == "Funds Moving OUT of Compliance" and value > 0:
-            ws[f'B{row}'].fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
-        elif label == "Funds Moving INTO Compliance" and value > 0:
-            ws[f'B{row}'].fill = PatternFill(start_color="CCFFCC", end_color="CCFFCC", fill_type="solid")
-
-        row += 1
-
-    # Adjust column widths
-    ws.column_dimensions['A'].width = 40
-    ws.column_dimensions['B'].width = 20
+from dataclasses import dataclass
+from typing import Any, Dict, Mapping
 
 
-def _create_compliance_changes_sheet(wb: Workbook, data: dict):
-    """Creates sheet showing compliance status changes."""
-    ws = wb.create_sheet("Compliance Changes")
+@dataclass
+class FundComplianceComparison:
+    """Summary of compliance changes for a single fund."""
 
-    # Headers
-    headers = ["Fund Name", "Status Change", "Violations Before", "Violations After", "Net Change"]
-    for col, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col, value=header)
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
-
-    # Data rows
-    row = 2
-    for fund_name, fund_data in data['funds'].items():
-        ws.cell(row=row, column=1, value=fund_name)
-        ws.cell(row=row, column=2, value=fund_data['status_change'])
-        ws.cell(row=row, column=3, value=fund_data['violations_before'])
-        ws.cell(row=row, column=4, value=fund_data['violations_after'])
-        ws.cell(row=row, column=5, value=fund_data['violations_after'] - fund_data['violations_before'])
-
-        # Color code status change
-        status_cell = ws.cell(row=row, column=2)
-        if fund_data['status_change'] == 'OUT_OF_COMPLIANCE':
-            status_cell.fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
-        elif fund_data['status_change'] == 'INTO_COMPLIANCE':
-            status_cell.fill = PatternFill(start_color="CCFFCC", end_color="CCFFCC", fill_type="solid")
-
-        row += 1
-
-    # Auto-fit columns
-    for col in range(1, 6):
-        ws.column_dimensions[chr(64 + col)].width = 20
+    fund_name: str
+    trade_info: Dict[str, float]
+    overall_before: str
+    overall_after: str
+    status_change: str
+    violations_before: int
+    violations_after: int
+    num_changes: int
+    checks: Dict[str, Dict[str, Any]]
 
 
-def _create_detailed_comparison_sheet(wb: Workbook, data: dict):
-    """Creates sheet with detailed check-by-check comparison."""
-    ws = wb.create_sheet("Detailed Comparison")
+class TradingComplianceAnalyzer:
+    """Compare ex-ante and ex-post compliance outcomes for traded funds."""
 
-    # Headers
-    headers = ["Fund Name", "Compliance Check", "Status Before", "Status After",
-               "Violations Before", "Violations After", "Changed"]
-    for col, header in enumerate(headers, 1):
-        cell = ws.cell(row=1, column=col, value=header)
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
+    def __init__(
+        self,
+        results_ex_ante: Mapping[str, Any],
+        results_ex_post: Mapping[str, Any],
+        date: Any,
+        traded_funds_info: Mapping[str, Mapping[str, float]],
+    ) -> None:
+        self.results_ex_ante = results_ex_ante or {}
+        self.results_ex_post = results_ex_post or {}
+        self.date = str(date)
+        self.traded_funds_info = {
+            fund: dict(info) for fund, info in (traded_funds_info or {}).items()
+        }
 
-    # Data rows
-    row = 2
-    for fund_name, fund_data in data['funds'].items():
-        for check_name, check_data in fund_data['checks'].items():
-            ws.cell(row=row, column=1, value=fund_name)
-            ws.cell(row=row, column=2, value=check_name)
-            ws.cell(row=row, column=3, value=check_data['status_before'])
-            ws.cell(row=row, column=4, value=check_data['status_after'])
-            ws.cell(row=row, column=5, value=check_data['violations_before'])
-            ws.cell(row=row, column=6, value=check_data['violations_after'])
-            ws.cell(row=row, column=7, value="YES" if check_data['changed'] else "NO")
+    # ------------------------------------------------------------------
+    def analyze(self) -> Dict[str, Any]:
+        """Return a serialisable comparison of compliance changes."""
 
-            # Highlight changed rows
-            if check_data['changed']:
-                for col in range(1, 8):
-                    ws.cell(row=row, column=col).fill = PatternFill(
-                        start_color="FFFFCC", end_color="FFFFCC", fill_type="solid"
-                    )
+        fund_names = sorted(
+            set(self.results_ex_ante) | set(self.results_ex_post) | set(self.traded_funds_info)
+        )
 
-            row += 1
+        summary = {
+            "total_funds_analyzed": len(fund_names),
+            "total_funds_traded": len(self.traded_funds_info),
+            "funds_with_compliance_changes": 0,
+            "funds_into_compliance": 0,
+            "funds_out_of_compliance": 0,
+            "funds_unchanged": 0,
+            "total_checks_changed": 0,
+            "total_violations_before": 0,
+            "total_violations_after": 0,
+            "total_traded_notional": 0.0,
+        }
 
-    # Auto-fit columns
-    for col in range(1, 8):
-        ws.column_dimensions[chr(64 + col)].width = 20
+        fund_details: Dict[str, Dict[str, Any]] = {}
 
+        for fund_name in fund_names:
+            comparison = self._compare_fund(fund_name)
+            fund_details[fund_name] = comparison
+
+            if comparison["num_changes"]:
+                summary["funds_with_compliance_changes"] += 1
+            if comparison["status_change"] == "INTO_COMPLIANCE":
+                summary["funds_into_compliance"] += 1
+            elif comparison["status_change"] == "OUT_OF_COMPLIANCE":
+                summary["funds_out_of_compliance"] += 1
+            else:
+                summary["funds_unchanged"] += 1
+
+            summary["total_checks_changed"] += comparison["num_changes"]
+            summary["total_violations_before"] += comparison["violations_before"]
+            summary["total_violations_after"] += comparison["violations_after"]
+
+            trade_total = comparison["trade_info"].get("total_traded", 0.0)
+            summary["total_traded_notional"] += trade_total
+
+        return {
+            "date": self.date,
+            "summary": summary,
+            "funds": fund_details,
+        }
+
+    # ------------------------------------------------------------------
+    def _compare_fund(self, fund_name: str) -> Dict[str, Any]:
+        ante_results = self._as_mapping(self.results_ex_ante.get(fund_name))
+        post_results = self._as_mapping(self.results_ex_post.get(fund_name))
+        trade_info = dict(self.traded_funds_info.get(fund_name, {}))
+
+        checks = {}
+        violations_before = 0
+        violations_after = 0
+        num_changes = 0
+
+        check_names = sorted(
+            set(ante_results.keys()) | set(post_results.keys()) - {"summary_metrics", "fund_object"}
+        )
+
+        for check in check_names:
+            ante_status = self._extract_status(ante_results.get(check))
+            post_status = self._extract_status(post_results.get(check))
+            changed = ante_status != post_status
+
+            if ante_status == "FAIL":
+                violations_before += 1
+            if post_status == "FAIL":
+                violations_after += 1
+            if changed:
+                num_changes += 1
+
+            checks[check] = {
+                "status_before": ante_status,
+                "status_after": post_status,
+                "changed": changed,
+            }
+
+        overall_before = self._overall_status(ante_results)
+        overall_after = self._overall_status(post_results)
+
+        status_change = "UNCHANGED"
+        if overall_before != overall_after:
+            if overall_after == "PASS":
+                status_change = "INTO_COMPLIANCE"
+            elif overall_after == "FAIL":
+                status_change = "OUT_OF_COMPLIANCE"
+
+        return {
+            "fund_name": fund_name,
+            "trade_info": trade_info,
+            "overall_before": overall_before,
+            "overall_after": overall_after,
+            "status_change": status_change,
+            "violations_before": violations_before,
+            "violations_after": violations_after,
+            "num_changes": num_changes,
+            "checks": checks,
+        }
+
+    # ------------------------------------------------------------------
+    def _overall_status(self, payload: Mapping[str, Any]) -> str:
+        failures = 0
+        for name, result in payload.items():
+            if name == "summary_metrics":
+                continue
+            status = self._extract_status(result)
+            if status == "FAIL":
+                failures += 1
+        if failures:
+            return "FAIL"
+        return "PASS" if payload else "UNKNOWN"
+
+    def _extract_status(self, result: Any) -> str:
+        if not isinstance(result, Mapping):
+            if isinstance(result, str):
+                value = result.upper()
+                if value in {"PASS", "FAIL"}:
+                    return value
+            return "UNKNOWN"
+
+        status = result.get("is_compliant")
+        if isinstance(status, bool):
+            return "PASS" if status else "FAIL"
+        if isinstance(status, str):
+            upper = status.upper()
+            if upper in {"PASS", "FAIL"}:
+                return upper
+        if "status" in result and isinstance(result["status"], str):
+            upper = result["status"].upper()
+            if upper in {"PASS", "FAIL"}:
+                return upper
+        return "UNKNOWN"
+
+    @staticmethod
+    def _as_mapping(value: Any) -> Dict[str, Any]:
+        if isinstance(value, Mapping):
+            return dict(value)
+        return {}

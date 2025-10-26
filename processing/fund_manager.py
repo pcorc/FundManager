@@ -251,11 +251,32 @@ class FundManager:
                 analysis_type=self.analysis_type
             )
             reconciliator.run_all_reconciliations()
-            return reconciliator.get_summary()
+            summary = reconciliator.get_summary()
+
+            detail_payload: Dict[str, Dict[str, Any]] = {}
+            for name, result in reconciliator.results.items():
+                sections: Dict[str, Any] = {}
+                for attr in [
+                    "raw_recon",
+                    "final_recon",
+                    "price_discrepancies_T",
+                    "price_discrepancies_T1",
+                    "merged_data",
+                    "regular_options",
+                    "flex_options",
+                ]:
+                    value = getattr(result, attr, None)
+                    if value is not None:
+                        sections[attr] = value
+                detail_payload[name] = sections
+
+            return {
+                "summary": summary,
+                "details": detail_payload,
+            }
         except Exception as e:
             self.logger.error(f"Reconciliation error for {fund.name}: {e}")
             return {'errors': [str(e)], 'breaks': []}
-
 
     def _extract_nav_per_share(self, nav_source, custodian_type=None):
         """Extract NAV per share from either a mapping or direct DataFrame."""

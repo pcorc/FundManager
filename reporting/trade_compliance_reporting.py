@@ -1,247 +1,177 @@
-from fpdf import FPDF
-import logging
+"""Generate Excel and PDF outputs for trading compliance comparisons."""
 
-logger = logging.getLogger(__name__)
+from __future__ import annotations
 
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Mapping, Optional
 
-class TradingCompliancePDF(FPDF):
-    """Custom PDF class for trading compliance reports."""
+import pandas as pd
 
-    def __init__(self, date):
-        super().__init__()
-        self.date = date
-        self.set_auto_page_break(auto=True, margin=15)
-
-    def header(self):
-        """Page header."""
-        self.set_font('Arial', 'B', 16)
-        self.cell(0, 10, 'Trading Compliance Analysis', 0, 1, 'C')
-        self.set_font('Arial', '', 10)
-        self.cell(0, 8, f'Ex-Ante vs Ex-Post Comparison - {self.date}', 0, 1, 'C')
-        self.ln(5)
-
-    def footer(self):
-        """Page footer."""
-        self.set_y(-15)
-        self.set_font('Arial', 'I', 8)
-        self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+from reporting.base_report_pdf import BaseReportPDF
+from reporting.report_utils import format_number, normalize_report_date
 
 
-def generate_trading_pdf_report(comparison_data: dict, output_path: str):
-    """
-    Generates PDF report for trading compliance analysis using FPDF.
-    """
-    try:
-        pdf = TradingCompliancePDF(date=comparison_data['date'])
-        pdf.add_page()
+@dataclass
+class GeneratedTradingComplianceReport:
+    """Excel/PDF artefacts for trading compliance."""
 
-        # Executive Summary
-        _add_executive_summary(pdf, comparison_data)
-
-        # Compliance Changes
-        pdf.add_page()
-        _add_compliance_changes(pdf, comparison_data)
-
-        # Trade Activity
-        pdf.add_page()
-        _add_trade_activity(pdf, comparison_data)
-
-        # Detailed Comparison
-        pdf.add_page()
-        _add_detailed_comparison(pdf, comparison_data)
-
-        # Save PDF
-        pdf.output(output_path)
-        logger.info(f"Trading PDF report saved to: {output_path}")
-
-    except Exception as e:
-        logger.error(f"Error generating trading PDF report: {str(e)}")
-        raise
+    excel_path: Optional[str]
+    pdf_path: Optional[str]
 
 
-def _add_executive_summary(pdf: FPDF, data: dict):
-    """Adds executive summary section."""
-    pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 10, 'Executive Summary', 0, 1, 'L')
-    pdf.ln(2)
+class TradingComplianceExcelReport:
+    """Export trading compliance comparisons to Excel."""
 
-    summary = data['summary']
+    def __init__(self, comparison_data: Mapping[str, Any], output_path: Path) -> None:
+        self.data = comparison_data
+        self.output_path = output_path
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._export()
 
-    # Summary metrics
-    pdf.set_font('Arial', 'B', 11)
-    pdf.cell(120, 8, 'Metric', 1, 0, 'L')
-    pdf.cell(60, 8, 'Value', 1, 1, 'C')
+    def _export(self) -> None:
+        with pd.ExcelWriter(self.output_path, engine="openpyxl") as writer:
+            self._write_summary_sheet(writer)
+            self._write_fund_sheet(writer)
+            self._write_check_sheet(writer)
 
-    pdf.set_font('Arial', '', 10)
+    def _write_summary_sheet(self, writer: pd.ExcelWriter) -> None:
+        summary = self.data.get("summary", {})
+        rows = [(self._format_metric_name(key), value) for key, value in summary.items()]
+        df = pd.DataFrame(rows, columns=["Metric", "Value"])
+        df.to_excel(writer, sheet_name="Summary", index=False)
 
-    metrics = [
-        ('Total Funds with Trading Activity', summary.get('total_funds_traded', 0)),
-        ('', ''),
-        ('Funds Moving OUT of Compliance', summary['funds_out_of_compliance']),
-        ('Funds Moving INTO Compliance', summary['funds_into_compliance']),
-        ('Funds with Unchanged Status', summary['funds_unchanged']),
-        ('', ''),
-        ('Total Violations (Ex-Ante)', summary['total_violations_before']),
-        ('Total Violations (Ex-Post)', summary['total_violations_after']),
-        ('Net Change in Violations', summary['total_violations_after'] - summary['total_violations_before'])
-    ]
+    def _write_fund_sheet(self, writer: pd.ExcelWriter) -> None:
+        funds = self.data.get("funds", {})
+        rows: list[Dict[str, Any]] = []
+        for fund_name, info in funds.items():
+            trade_info = info.get("trade_info", {})
+            rows.append(
+                {
+                    "Fund": fund_name,
+                    "Total Traded": trade_info.get("total_traded", 0.0),
+                    "Equity": trade_info.get("equity", 0.0),
+                    "Options": trade_info.get("options", 0.0),
+                    "Treasury": trade_info.get("treasury", 0.0),
+                    "Status Before": info.get("overall_before"),
+                    "Status After": info.get("overall_after"),
+                    "Status Change": info.get("status_change"),
+                    "Violations Before": info.get("violations_before"),
+                    "Violations After": info.get("violations_after"),
+                    "Checks Changed": info.get("num_changes"),
+                }
+            )
+        df = pd.DataFrame(rows)
+        df.to_excel(writer, sheet_name="Funds", index=False)
 
-    for label, value in metrics:
-        if label == '':
-            pdf.cell(120, 6, '', 0, 0)
-            pdf.cell(60, 6, '', 0, 1)
-        else:
-            # Color coding for critical metrics
-            if label == 'Funds Moving OUT of Compliance' and value > 0:
-                pdf.set_fill_color(255, 204, 204)  # Light red
-                pdf.cell(120, 8, label, 1, 0, 'L', True)
-                pdf.cell(60, 8, str(value), 1, 1, 'C', True)
-            elif label == 'Funds Moving INTO Compliance' and value > 0:
-                pdf.set_fill_color(204, 255, 204)  # Light green
-                pdf.cell(120, 8, label, 1, 0, 'L', True)
-                pdf.cell(60, 8, str(value), 1, 1, 'C', True)
-            else:
-                pdf.cell(120, 8, label, 1, 0, 'L')
-                pdf.cell(60, 8, str(value), 1, 1, 'C')
+    def _write_check_sheet(self, writer: pd.ExcelWriter) -> None:
+        rows: list[Dict[str, Any]] = []
+        for fund_name, info in self.data.get("funds", {}).items():
+            for check_name, check in info.get("checks", {}).items():
+                rows.append(
+                    {
+                        "Fund": fund_name,
+                        "Check": check_name,
+                        "Status Before": check.get("status_before"),
+                        "Status After": check.get("status_after"),
+                        "Changed": check.get("changed"),
+                    }
+                )
+        df = pd.DataFrame(rows)
+        df.to_excel(writer, sheet_name="Check Changes", index=False)
 
-
-def _add_compliance_changes(pdf: FPDF, data: dict):
-    """Adds compliance changes detail section."""
-    pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 10, 'Compliance Status Changes by Fund', 0, 1, 'L')
-    pdf.ln(2)
-
-    # Table headers
-    pdf.set_font('Arial', 'B', 9)
-    pdf.set_fill_color(200, 200, 200)
-
-    col_widths = [50, 40, 25, 25, 25]
-    headers = ['Fund', 'Status Change', 'Viol. Before', 'Viol. After', 'Net Change']
-
-    for i, header in enumerate(headers):
-        pdf.cell(col_widths[i], 8, header, 1, 0, 'C', True)
-    pdf.ln()
-
-    # Data rows
-    pdf.set_font('Arial', '', 8)
-
-    for fund_name, fund_data in data['funds'].items():
-        # Truncate fund name if too long
-        display_name = fund_name if len(fund_name) <= 20 else fund_name[:17] + '...'
-
-        status_change = fund_data['status_change']
-        viol_before = fund_data['violations_before']
-        viol_after = fund_data['violations_after']
-        net_change = viol_after - viol_before
-
-        # Color coding for status changes
-        if status_change == 'OUT_OF_COMPLIANCE':
-            pdf.set_fill_color(255, 204, 204)  # Light red
-            fill = True
-        elif status_change == 'INTO_COMPLIANCE':
-            pdf.set_fill_color(204, 255, 204)  # Light green
-            fill = True
-        else:
-            fill = False
-
-        pdf.cell(col_widths[0], 7, display_name, 1, 0, 'L', fill)
-        pdf.cell(col_widths[1], 7, status_change, 1, 0, 'C', fill)
-        pdf.cell(col_widths[2], 7, str(viol_before), 1, 0, 'C', fill)
-        pdf.cell(col_widths[3], 7, str(viol_after), 1, 0, 'C', fill)
-        pdf.cell(col_widths[4], 7, str(net_change), 1, 1, 'C', fill)
+    @staticmethod
+    def _format_metric_name(name: str) -> str:
+        return name.replace("_", " ").title()
 
 
-def _add_trade_activity(pdf, comparison_data):
-    """Add trade activity section showing changes between ex_ante and ex_post"""
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "Trade Activity", ln=True)
-    pdf.ln(5)
+class TradingCompliancePDF(BaseReportPDF):
+    """PDF rendering for trading compliance comparisons."""
 
-    # Table headers
-    pdf.set_font("Arial", "B", 9)
-    pdf.set_fill_color(200, 200, 200)
+    def __init__(self, output_path: str, comparison_data: Mapping[str, Any]) -> None:
+        super().__init__(output_path)
+        self.data = comparison_data
 
-    col_widths = [50, 30, 25, 25, 25]
-    headers = ['Fund', 'Total Traded', 'Equity', 'Treasury', 'Options']
+    def render(self) -> None:
+        date_str = self.data.get("date", "")
+        subtitle = f"Ex-Ante vs Ex-Post Comparison - {date_str}" if date_str else None
+        self.add_title("Trading Compliance Analysis", subtitle)
 
-    for i, header in enumerate(headers):
-        pdf.cell(col_widths[i], 8, header, 1, 0, 'C', True)
-    pdf.ln()
+        summary_rows = [
+            (self._format_metric_name(key), value)
+            for key, value in self.data.get("summary", {}).items()
+        ]
+        if summary_rows:
+            self.add_section_heading("Executive Summary")
+            self.add_key_value_table(summary_rows, header=("Metric", "Value"))
 
-    # Data rows
-    pdf.set_font("Arial", "", 8)
+        for fund_name, info in sorted(self.data.get("funds", {}).items()):
+            self.add_section_heading(fund_name)
+            trade_info = info.get("trade_info", {})
+            trade_rows = [
+                ("Total Traded", format_number(trade_info.get("total_traded", 0.0), 2)),
+                ("Equity", format_number(trade_info.get("equity", 0.0), 2)),
+                ("Options", format_number(trade_info.get("options", 0.0), 2)),
+                ("Treasury", format_number(trade_info.get("treasury", 0.0), 2)),
+                ("Status Before", info.get("overall_before")),
+                ("Status After", info.get("overall_after")),
+                ("Status Change", info.get("status_change")),
+                ("Violations Before", info.get("violations_before")),
+                ("Violations After", info.get("violations_after")),
+                ("Checks Changed", info.get("num_changes")),
+            ]
+            self.add_key_value_table(trade_rows, header=("Metric", "Value"))
 
-    funds_dict = comparison_data.get('funds', {})
+            check_rows = [
+                (
+                    check_name,
+                    check.get("status_before"),
+                    check.get("status_after"),
+                    "Yes" if check.get("changed") else "No",
+                )
+                for check_name, check in sorted(info.get("checks", {}).items())
+            ]
+            if check_rows:
+                self.add_table(
+                    ["Check", "Before", "After", "Changed"],
+                    check_rows,
+                    column_widths=[70, 35, 35, 35],
+                    alignments=["L", "C", "C", "C"],
+                )
 
-    for fund_name, fund_data in funds_dict.items():
-        # Get trade info if it exists
-        trade_info = fund_data.get('trade_info', {})
+        self.output()
 
-        if not trade_info:
-            continue
-
-        # Extract values safely
-        total_traded = trade_info.get('total_traded', 0)
-        equity = trade_info.get('equity', 0)
-        treasury = trade_info.get('treasury', 0)
-        options = trade_info.get('options', 0)
-
-        # Truncate fund name if needed
-        display_name = fund_name if len(fund_name) <= 20 else fund_name[:17] + '...'
-
-        pdf.cell(col_widths[0], 7, display_name, 1, 0, 'L')
-        pdf.cell(col_widths[1], 7, f"{total_traded:.2f}", 1, 0, 'R')
-        pdf.cell(col_widths[2], 7, f"{equity:.2f}", 1, 0, 'R')
-        pdf.cell(col_widths[3], 7, f"{treasury:.2f}", 1, 0, 'R')
-        pdf.cell(col_widths[4], 7, f"{options:.2f}", 1, 1, 'R')
+    @staticmethod
+    def _format_metric_name(name: str) -> str:
+        return name.replace("_", " ").title()
 
 
-def _add_detailed_comparison(pdf: FPDF, data: dict):
-    """Adds detailed check-by-check comparison."""
-    pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 10, 'Detailed Comparison by Compliance Check', 0, 1, 'L')
-    pdf.ln(2)
+def generate_trading_compliance_reports(
+    comparison_data: Mapping[str, Any],
+    report_date: Any,
+    output_dir: str,
+    *,
+    file_name_prefix: str = "trading_compliance_results",
+    create_pdf: bool = True,
+) -> GeneratedTradingComplianceReport:
+    """Generate Excel and PDF outputs for trading compliance comparisons."""
 
-    for fund_name, fund_data in data['funds'].items():
-        # Fund header
-        pdf.set_font('Arial', 'B', 11)
-        pdf.set_fill_color(230, 230, 230)
-        pdf.cell(0, 8, fund_name, 1, 1, 'L', True)
+    if not comparison_data:
+        return GeneratedTradingComplianceReport(None, None)
 
-        # Check headers
-        pdf.set_font('Arial', 'B', 8)
-        pdf.set_fill_color(200, 200, 200)
+    date_str = normalize_report_date(report_date)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
 
-        col_widths = [60, 25, 25, 20, 20, 15]
-        headers = ['Compliance Check', 'Before', 'After', 'Viol. B', 'Viol. A', 'Changed']
+    excel_path = output_path / f"{file_name_prefix}_{date_str}.xlsx"
+    pdf_path = output_path / f"{file_name_prefix}_{date_str}.pdf"
 
-        for i, header in enumerate(headers):
-            pdf.cell(col_widths[i], 7, header, 1, 0, 'C', True)
-        pdf.ln()
+    TradingComplianceExcelReport(comparison_data, excel_path)
 
-        # Check data
-        pdf.set_font('Arial', '', 7)
+    pdf_result: Optional[str] = None
+    if create_pdf:
+        pdf = TradingCompliancePDF(str(pdf_path), comparison_data)
+        pdf.render()
+        pdf_result = str(pdf_path)
 
-        for check_name, check_data in fund_data['checks'].items():
-            # Truncate check name if too long
-            display_check = check_name if len(check_name) <= 30 else check_name[:27] + '...'
-
-            # Highlight changed rows
-            if check_data['changed']:
-                pdf.set_fill_color(255, 255, 204)  # Light yellow
-                fill = True
-            else:
-                fill = False
-
-            pdf.cell(col_widths[0], 6, display_check, 1, 0, 'L', fill)
-            pdf.cell(col_widths[1], 6, check_data['status_before'], 1, 0, 'C', fill)
-            pdf.cell(col_widths[2], 6, check_data['status_after'], 1, 0, 'C', fill)
-            pdf.cell(col_widths[3], 6, str(check_data['violations_before']), 1, 0, 'C', fill)
-            pdf.cell(col_widths[4], 6, str(check_data['violations_after']), 1, 0, 'C', fill)
-            pdf.cell(col_widths[5], 6, 'YES' if check_data['changed'] else 'NO', 1, 1, 'C', fill)
-
-        pdf.ln(3)
-
-        # Check if we need a new page
-        if pdf.get_y() > 250:
-            pdf.add_page()
+    return GeneratedTradingComplianceReport(str(excel_path), pdf_result)
