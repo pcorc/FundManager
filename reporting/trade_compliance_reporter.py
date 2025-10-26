@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from reporting.trade_compliance_analyzer import TradingComplianceAnalyzer
 from reporting.trade_compliance_reporting import (
@@ -18,7 +18,7 @@ def build_trading_compliance_reports(
     report_date: date | datetime | str,
     output_dir: str,
     *,
-    traded_funds_info: Mapping[str, Mapping[str, float]] | None = None,
+        traded_funds_info: Mapping[str, Mapping[str, Any]] | None = None,
     create_pdf: bool = True,
 ) -> Optional[GeneratedTradingComplianceReport]:
     """Generate trading compliance comparison reports."""

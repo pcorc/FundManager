@@ -11,7 +11,7 @@ class FundComplianceComparison:
     """Summary of compliance changes for a single fund."""
 
     fund_name: str
-    trade_info: Dict[str, float]
+    trade_info: Dict[str, Any]
     overall_before: str
     overall_after: str
     status_change: str
@@ -29,7 +29,7 @@ class TradingComplianceAnalyzer:
         results_ex_ante: Mapping[str, Any],
         results_ex_post: Mapping[str, Any],
         date: Any,
-        traded_funds_info: Mapping[str, Mapping[str, float]],
+        traded_funds_info: Mapping[str, Mapping[str, Any]],
     ) -> None:
         self.results_ex_ante = results_ex_ante or {}
         self.results_ex_post = results_ex_post or {}

@@ -46,9 +46,25 @@ class TradingComplianceExcelReport:
         rows: list[Dict[str, Any]] = []
         for fund_name, info in funds.items():
             trade_info = info.get("trade_info", {})
+
+            final_shares = trade_info.get("final_shares", {})
+            net_trades = trade_info.get("net_trades", {})
+
+            def _net_value(asset: str, field: str) -> float:
+                return float(net_trades.get(asset, {}).get(field, 0.0) or 0.0)
+
             rows.append(
                 {
                     "Fund": fund_name,
+                    "Final Shares (Equity)": final_shares.get("equity", 0.0),
+                    "Final Shares (Options)": final_shares.get("option", 0.0),
+                    "Final Shares (Treasury)": final_shares.get("treasury", 0.0),
+                    "Net Buys (Equity)": _net_value("equity", "buys"),
+                    "Net Sells (Equity)": _net_value("equity", "sells"),
+                    "Net Buys (Options)": _net_value("option", "buys"),
+                    "Net Sells (Options)": _net_value("option", "sells"),
+                    "Net Buys (Treasury)": _net_value("treasury", "buys"),
+                    "Net Sells (Treasury)": _net_value("treasury", "sells"),
                     "Total Traded": trade_info.get("total_traded", 0.0),
                     "Equity": trade_info.get("equity", 0.0),
                     "Options": trade_info.get("options", 0.0),
@@ -108,11 +124,23 @@ class TradingCompliancePDF(BaseReportPDF):
         for fund_name, info in sorted(self.data.get("funds", {}).items()):
             self.add_section_heading(fund_name)
             trade_info = info.get("trade_info", {})
-            trade_rows = [
+            final_shares = trade_info.get("final_shares", {})
+            net_trades = trade_info.get("net_trades", {})
+
+            metric_rows = [
+                ("Final Equity Shares", format_number(final_shares.get("equity", 0.0), 2)),
+                ("Final Option Shares", format_number(final_shares.get("option", 0.0), 2)),
+                ("Final Treasury Shares", format_number(final_shares.get("treasury", 0.0), 2)),
                 ("Total Traded", format_number(trade_info.get("total_traded", 0.0), 2)),
-                ("Equity", format_number(trade_info.get("equity", 0.0), 2)),
-                ("Options", format_number(trade_info.get("options", 0.0), 2)),
-                ("Treasury", format_number(trade_info.get("treasury", 0.0), 2)),
+                ("Net Equity Buys", format_number(net_trades.get("equity", {}).get("buys", 0.0), 2)),
+                ("Net Equity Sells", format_number(net_trades.get("equity", {}).get("sells", 0.0), 2)),
+                ("Net Equity Change", format_number(net_trades.get("equity", {}).get("net", 0.0), 2)),
+                ("Net Option Buys", format_number(net_trades.get("option", {}).get("buys", 0.0), 2)),
+                ("Net Option Sells", format_number(net_trades.get("option", {}).get("sells", 0.0), 2)),
+                ("Net Option Change", format_number(net_trades.get("option", {}).get("net", 0.0), 2)),
+                ("Net Treasury Buys", format_number(net_trades.get("treasury", {}).get("buys", 0.0), 2)),
+                ("Net Treasury Sells", format_number(net_trades.get("treasury", {}).get("sells", 0.0), 2)),
+                ("Net Treasury Change", format_number(net_trades.get("treasury", {}).get("net", 0.0), 2)),
                 ("Status Before", info.get("overall_before")),
                 ("Status After", info.get("overall_after")),
                 ("Status Change", info.get("status_change")),
@@ -120,7 +148,7 @@ class TradingCompliancePDF(BaseReportPDF):
                 ("Violations After", info.get("violations_after")),
                 ("Checks Changed", info.get("num_changes")),
             ]
-            self.add_key_value_table(trade_rows, header=("Metric", "Value"))
+            self.add_key_value_table(metric_rows, header=("Metric", "Value"))
 
             check_rows = [
                 (
