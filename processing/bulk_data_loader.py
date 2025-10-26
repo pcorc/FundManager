@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Set
 import logging
 from sqlalchemy import literal
+from utilities.ticker_utils import normalize_all_holdings
 
 
 
@@ -45,6 +46,8 @@ class BulkDataLoader:
         self._bulk_load_nav_data(data_store, all_funds, target_date)
         self._bulk_load_cash_data(data_store, all_funds, target_date)
         self._bulk_load_index_data(data_store, all_funds, target_date)
+        self._normalise_loaded_holdings(data_store)
+
 
         # Ensure every fund has an entry even if a data set was empty
         for fund_name in all_funds.keys():
@@ -79,6 +82,73 @@ class BulkDataLoader:
 
             except Exception as e:
                 self.logger.warning(f"Failed to load {table_name}: {e}")
+
+    def _normalise_loaded_holdings(self, data_store: BulkDataStore) -> None:
+        for fund_name, fund_payload in data_store.fund_data.items():
+            if fund_payload is None:
+                continue
+
+            normalized = normalize_all_holdings(
+                {
+                    "equity_holdings": fund_payload.get("vest_equity", pd.DataFrame()),
+                    "options_holdings": fund_payload.get("vest_option", pd.DataFrame()),
+                    "treasury_holdings": fund_payload.get("vest_treasury", pd.DataFrame()),
+                    "custodian_equity_holdings": fund_payload.get(
+                        "custodian_equity", pd.DataFrame()
+                    ),
+                    "custodian_option_holdings": fund_payload.get(
+                        "custodian_option", pd.DataFrame()
+                    ),
+                    "custodian_treasury_holdings": fund_payload.get(
+                        "custodian_treasury", pd.DataFrame()
+                    ),
+                    "t1_equity_holdings": fund_payload.get("vest_equity_t1", pd.DataFrame()),
+                    "t1_options_holdings": fund_payload.get("vest_option_t1", pd.DataFrame()),
+                    "t1_treasury_holdings": fund_payload.get("vest_treasury_t1", pd.DataFrame()),
+                    "t1_custodian_equity_holdings": fund_payload.get(
+                        "custodian_equity_t1", pd.DataFrame()
+                    ),
+                    "t1_custodian_option_holdings": fund_payload.get(
+                        "custodian_option_t1", pd.DataFrame()
+                    ),
+                    "t1_custodian_treasury_holdings": fund_payload.get(
+                        "custodian_treasury_t1", pd.DataFrame()
+                    ),
+                },
+                logger=self.logger,
+            )
+
+            fund_payload["vest_equity_raw"] = normalized.get("equity_holdings_raw", pd.DataFrame())
+            fund_payload["vest_option_raw"] = normalized.get("options_holdings_raw", pd.DataFrame())
+            fund_payload["vest_treasury_raw"] = normalized.get("treasury_holdings_raw", pd.DataFrame())
+
+            fund_payload["vest_equity"] = normalized.get("equity_holdings", pd.DataFrame())
+            fund_payload["vest_option"] = normalized.get("options_holdings", pd.DataFrame())
+            fund_payload["vest_treasury"] = normalized.get("treasury_holdings", pd.DataFrame())
+
+            fund_payload["custodian_equity"] = normalized.get(
+                "custodian_equity_holdings", pd.DataFrame()
+            )
+            fund_payload["custodian_option"] = normalized.get(
+                "custodian_option_holdings", pd.DataFrame()
+            )
+            fund_payload["custodian_treasury"] = normalized.get(
+                "custodian_treasury_holdings", pd.DataFrame()
+            )
+
+            fund_payload["vest_equity_t1"] = normalized.get("t1_equity_holdings", pd.DataFrame())
+            fund_payload["vest_option_t1"] = normalized.get("t1_options_holdings", pd.DataFrame())
+            fund_payload["vest_treasury_t1"] = normalized.get("t1_treasury_holdings", pd.DataFrame())
+
+            fund_payload["custodian_equity_t1"] = normalized.get(
+                "t1_custodian_equity_holdings", pd.DataFrame()
+            )
+            fund_payload["custodian_option_t1"] = normalized.get(
+                "t1_custodian_option_holdings", pd.DataFrame()
+            )
+            fund_payload["custodian_treasury_t1"] = normalized.get(
+                "t1_custodian_treasury_holdings", pd.DataFrame()
+            )
 
     def _bulk_load_vest_holdings(self, data_store: BulkDataStore, all_funds: Dict, target_date: str):
         """Load ALL Vest holdings for ALL funds in one query"""

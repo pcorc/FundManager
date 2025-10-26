@@ -108,26 +108,24 @@ class FundManager:
             equity=fund_data_dict.get('vest_equity', pd.DataFrame()),
             options=fund_data_dict.get('vest_option', pd.DataFrame()),
             treasury=fund_data_dict.get('vest_treasury', pd.DataFrame()),
+            custodian_equity=fund_data_dict.get('custodian_equity', pd.DataFrame()),
+            custodian_option=fund_data_dict.get('custodian_option', pd.DataFrame()),
+            custodian_treasury=fund_data_dict.get('custodian_treasury', pd.DataFrame()),
             cash=self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
             nav=self._extract_nav_per_share(fund_data_dict.get('nav', pd.DataFrame())),
         )
 
         # Populate previous holdings (T-1) if available
         fund_data.previous = FundSnapshot(
-            equity=pd.DataFrame(),
-            options=pd.DataFrame(),
-            treasury=pd.DataFrame(),
+            equity=fund_data_dict.get('vest_equity_t1', pd.DataFrame()),
+            options=fund_data_dict.get('vest_option_t1', pd.DataFrame()),
+            treasury=fund_data_dict.get('vest_treasury_t1', pd.DataFrame()),
+            custodian_equity=fund_data_dict.get('custodian_equity_t1', pd.DataFrame()),
+            custodian_option=fund_data_dict.get('custodian_option_t1', pd.DataFrame()),
+            custodian_treasury=fund_data_dict.get('custodian_treasury_t1', pd.DataFrame()),
             cash=0.0,
             nav=0.0,
         )
-
-        # Store custodian data separately for reconciliation
-        fund_data.custodian_equity = fund_data_dict.get('custodian_equity', pd.DataFrame())
-        fund_data.custodian_option = fund_data_dict.get('custodian_option', pd.DataFrame())
-        fund_data.custodian_treasury = fund_data_dict.get('custodian_treasury', pd.DataFrame())
-        fund_data.vest_equity = fund_data_dict.get('vest_equity', pd.DataFrame())
-        fund_data.vest_option = fund_data_dict.get('vest_option', pd.DataFrame())
-        fund_data.vest_treasury = fund_data_dict.get('vest_treasury', pd.DataFrame())
 
         # Populate additional data
         fund_data.flows = 0.0  # Calculate from flows data if available

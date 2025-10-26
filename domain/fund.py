@@ -29,6 +29,9 @@ class FundSnapshot:
         equity: Optional[pd.DataFrame] = None,
         options: Optional[pd.DataFrame] = None,
         treasury: Optional[pd.DataFrame] = None,
+        custodian_equity: Optional[pd.DataFrame] = None,
+        custodian_option: Optional[pd.DataFrame] = None,
+        custodian_treasury: Optional[pd.DataFrame] = None,
         cash: float = 0.0,
         nav: float = 0.0,
     ) -> None:
@@ -36,6 +39,15 @@ class FundSnapshot:
         self.options = options if isinstance(options, pd.DataFrame) else pd.DataFrame()
         self.treasury = (
             treasury if isinstance(treasury, pd.DataFrame) else pd.DataFrame()
+        )
+        self.custodian_equity = (
+            custodian_equity if isinstance(custodian_equity, pd.DataFrame) else pd.DataFrame()
+        )
+        self.custodian_option = (
+            custodian_option if isinstance(custodian_option, pd.DataFrame) else pd.DataFrame()
+        )
+        self.custodian_treasury = (
+            custodian_treasury if isinstance(custodian_treasury, pd.DataFrame) else pd.DataFrame()
         )
         self.cash = float(cash or 0.0)
         self.nav = float(nav or 0.0)
@@ -63,12 +75,46 @@ class FundData:
         self.basket = basket if isinstance(basket, pd.DataFrame) else pd.DataFrame()
         self.index = index if isinstance(index, pd.DataFrame) else pd.DataFrame()
 
+
 class Fund:
     def __init__(self, name: str, config: Dict, base_cls=None):
         self.name = name
         self.config = config or {}
         self.base_cls = base_cls
         self._data: Optional[FundData] = FundData()
+
+    @staticmethod
+    def _extract_numeric_value(source, candidates: Optional[list[str]] = None) -> float:
+        """Attempt to coerce ``source`` into a float using optional column hints."""
+        if source is None:
+            return 0.0
+
+        if isinstance(source, (int, float)):
+            return float(source)
+
+        if isinstance(source, pd.Series):
+            try:
+                return float(pd.to_numeric(source, errors="coerce").fillna(0.0).sum())
+            except (ValueError, TypeError):
+                return 0.0
+
+        if isinstance(source, pd.DataFrame):
+            candidates = candidates or []
+            for column in candidates:
+                if column in source.columns:
+                    try:
+                        return float(
+                            pd.to_numeric(source[column], errors="coerce").fillna(0.0).sum()
+                        )
+                    except (ValueError, TypeError):
+                        continue
+            numeric_cols = source.select_dtypes(include=["number"]).columns
+            if len(numeric_cols) > 0:
+                try:
+                    return float(source[numeric_cols[0]].fillna(0.0).sum())
+                except (ValueError, TypeError):
+                    return 0.0
+        return 0.0
 
     @staticmethod
     def _copy_dataframe(df: Optional[pd.DataFrame]) -> pd.DataFrame:
@@ -110,9 +156,9 @@ class Fund:
         )
 
     @property
-    def total_net_assets(self) -> float:
-        nav = getattr(self.data.current, "nav", 0.0) or 0.0
-        return nav if nav else self.total_assets
+    def total_net_assets(self) -> float:␊
+        nav = getattr(self.data.current, "nav", 0.0) or 0.0␊
+        return nav if nav else self.total_assets␊
 
     @property
     def total_equity_value(self) -> float:
@@ -137,14 +183,14 @@ class Fund:
         return 0.0
 
     @property
-    def total_treasury_value(self) -> float:
-        treasury = getattr(self.data.current, "treasury", pd.DataFrame())
-        if isinstance(treasury, pd.DataFrame) and not treasury.empty:
-            if {"price", "quantity"}.issubset(treasury.columns):
-                return (treasury["price"] * treasury["quantity"]).sum()
-            if "market_value" in treasury.columns:
-                return treasury["market_value"].sum()
-        return 0.0
+    def total_treasury_value(self) -> float:␊
+        treasury = getattr(self.data.current, "treasury", pd.DataFrame())␊
+        if isinstance(treasury, pd.DataFrame) and not treasury.empty:␊
+            if {"price", "quantity"}.issubset(treasury.columns):␊
+                return (treasury["price"] * treasury["quantity"]).sum()␊
+            if "market_value" in treasury.columns:␊
+                return treasury["market_value"].sum()␊
+        return 0.0␊
 
     @property
     def expenses(self) -> float:
@@ -167,6 +213,77 @@ class Fund:
         ):
             return options["delta_adjusted_notional"].sum()
         return 0.0
+
+    def get_dividends(self, analysis_date: str) -> float:
+        """Return dividend impact for the requested analysis date."""
+
+        dividends = getattr(self.data, "dividends", 0.0)
+        return self._extract_numeric_value(dividends, ["dividend", "dividends", "amount", "value"])
+
+    def get_expenses(self, analysis_date: str) -> float:
+        """Return total expenses using stored expense ratio and NAV."""
+
+        expenses = getattr(self.data, "expenses", None)
+        if expenses not in (None, ""):
+            try:
+                return float(expenses)
+            except (TypeError, ValueError):
+                pass
+        try:
+            return float(self.expenses)
+        except Exception:
+            return 0.0
+
+    def get_distributions(self, analysis_date: str) -> float:
+        """Return distributions paid on the analysis date."""
+
+        distributions = getattr(self.data, "distributions", 0.0)
+        return self._extract_numeric_value(
+            distributions,
+            ["distribution", "distributions", "amount", "value"],
+        )
+
+    def get_flows_adjustment(self, analysis_date: str, prior_date: str) -> float:
+        """Return flows adjustment between the two analysis dates."""
+
+        flows = getattr(self.data, "flows", 0.0)
+        return float(flows or 0.0)
+
+
+    def get_dividends(self, analysis_date: str) -> float:
+        """Return dividend impact for the requested analysis date."""
+
+        dividends = getattr(self.data, "dividends", 0.0)
+        return self._extract_numeric_value(dividends, ["dividend", "dividends", "amount", "value"])
+
+    def get_expenses(self, analysis_date: str) -> float:
+        """Return total expenses using stored expense ratio and NAV."""
+
+        expenses = getattr(self.data, "expenses", None)
+        if expenses not in (None, ""):
+            try:
+                return float(expenses)
+            except (TypeError, ValueError):
+                pass
+        try:
+            return float(self.expenses)
+        except Exception:
+            return 0.0
+
+    def get_distributions(self, analysis_date: str) -> float:
+        """Return distributions paid on the analysis date."""
+
+        distributions = getattr(self.data, "distributions", 0.0)
+        return self._extract_numeric_value(
+            distributions,
+            ["distribution", "distributions", "amount", "value"],
+        )
+
+    def get_flows_adjustment(self, analysis_date: str, prior_date: str) -> float:
+        """Return flows adjustment between the two analysis dates."""
+
+        flows = getattr(self.data, "flows", 0.0)
+        return float(flows or 0.0)
 
 
     # Method stubs that your services might call
@@ -198,11 +315,17 @@ class Fund:
 
     @property
     def previous_equity_holdings(self) -> pd.DataFrame:
+        vest_prev = getattr(self.data, "vest_equity_t1", None)
+        if isinstance(vest_prev, pd.DataFrame) and not vest_prev.empty:
+            return self._copy_dataframe(vest_prev)
         return self._copy_dataframe(getattr(self.data.previous, "equity", pd.DataFrame()))
 
     @property
     def previous_custodian_equity_holdings(self) -> pd.DataFrame:
-        return self._copy_dataframe(getattr(self.data.previous, "equity", pd.DataFrame()))
+        cust_prev = getattr(self.data, "previous_custodian_equity", None)
+        if isinstance(cust_prev, pd.DataFrame) and not cust_prev.empty:
+            return self._copy_dataframe(cust_prev)
+        return pd.DataFrame()
 
     @property
     def options_holdings(self) -> pd.DataFrame:
@@ -220,11 +343,17 @@ class Fund:
 
     @property
     def previous_options_holdings(self) -> pd.DataFrame:
+        vest_prev = getattr(self.data, "vest_option_t1", None)
+        if isinstance(vest_prev, pd.DataFrame) and not vest_prev.empty:
+            return self._copy_dataframe(vest_prev)
         return self._copy_dataframe(getattr(self.data.previous, "options", pd.DataFrame()))
 
     @property
     def previous_custodian_option_holdings(self) -> pd.DataFrame:
-        return self._copy_dataframe(getattr(self.data.previous, "options", pd.DataFrame()))
+        cust_prev = getattr(self.data, "previous_custodian_option", None)
+        if isinstance(cust_prev, pd.DataFrame) and not cust_prev.empty:
+            return self._copy_dataframe(cust_prev)
+        return pd.DataFrame()
 
     @property
     def treasury_holdings(self) -> pd.DataFrame:
@@ -242,11 +371,17 @@ class Fund:
 
     @property
     def previous_treasury_holdings(self) -> pd.DataFrame:
+        vest_prev = getattr(self.data, "vest_treasury_t1", None)
+        if isinstance(vest_prev, pd.DataFrame) and not vest_prev.empty:
+            return self._copy_dataframe(vest_prev)
         return self._copy_dataframe(getattr(self.data.previous, "treasury", pd.DataFrame()))
 
     @property
     def previous_custodian_treasury_holdings(self) -> pd.DataFrame:
-        return self._copy_dataframe(getattr(self.data.previous, "treasury", pd.DataFrame()))
+        cust_prev = getattr(self.data, "previous_custodian_treasury", None)
+        if isinstance(cust_prev, pd.DataFrame) and not cust_prev.empty:
+            return self._copy_dataframe(cust_prev)
+        return pd.DataFrame()
 
     @property
     def equity_trades(self) -> pd.DataFrame:
@@ -272,83 +407,3 @@ class Fund:
             return self._calculate_equity_gl(current_date, prior_date)
         elif asset_class == 'options':
             return self._calculate_options_gl(current_date, prior_date)
-        elif asset_class == 'treasury':
-            return self._calculate_treasury_gl(current_date, prior_date)
-
-        # Default empty result
-        return GainLossResult()
-
-    def _calculate_equity_gl(self, current_date: str, prior_date: str) -> GainLossResult:
-        """Calculate equity gain/loss using bulk data"""
-        # Get data from self.data (already loaded from bulk store)
-        df_current = self.data.current.equity
-        df_prior = self.data.previous.equity
-
-        if df_current.empty or df_prior.empty:
-            return GainLossResult()
-
-        # Simple merge on ticker
-        df_merged = pd.merge(
-            df_current, df_prior,
-            on='equity_ticker',
-            suffixes=('_current', '_prior'),
-            how='inner'
-        )
-
-        # Calculate gain/loss
-        if 'quantity_current' in df_merged.columns and 'price_current' in df_merged.columns:
-            df_merged['gl_raw'] = (
-                    (df_merged['price_current'] - df_merged.get('price_prior', 0)) *
-                    df_merged['quantity_current']
-            )
-
-            return GainLossResult(
-                raw_gl=df_merged['gl_raw'].sum(),
-                adjusted_gl=df_merged['gl_raw'].sum(),  # Add adjustments if needed
-                details=df_merged,
-                price_adjustments=pd.DataFrame()  # Add if you have price adjustments
-            )
-
-        return GainLossResult()
-
-    def _calculate_options_gl(self, current_date: str, prior_date: str) -> GainLossResult:
-        """Calculate options gain/loss - similar structure"""
-        # Your options-specific logic here
-        return GainLossResult()
-
-    def _calculate_treasury_gl(self, current_date: str, prior_date: str) -> GainLossResult:
-        """Calculate treasury gain/loss using current vs previous data"""
-        df_current = self.data.current.treasury
-        df_previous = self.data.previous.treasury
-
-        if df_current.empty or df_previous.empty:
-            return GainLossResult()
-
-        # Merge on treasury identifier (CUSIP, ticker, etc.)
-        merge_col = 'cusip' if 'cusip' in df_current.columns else 'ticker'
-
-        if merge_col not in df_current.columns or merge_col not in df_previous.columns:
-            return GainLossResult()
-
-        df_merged = pd.merge(
-            df_current, df_previous,
-            on=merge_col,
-            suffixes=('_current', '_previous'),
-            how='inner'
-        )
-
-        # Calculate gain/loss
-        if 'quantity_current' in df_merged.columns and 'price_current' in df_merged.columns:
-            df_merged['gl_raw'] = (
-                    (df_merged['price_current'] - df_merged.get('price_previous', 0)) *
-                    df_merged['quantity_current']
-            )
-
-            return GainLossResult(
-                raw_gl=df_merged['gl_raw'].sum(),
-                adjusted_gl=df_merged['gl_raw'].sum(),  # Add accrued interest adjustments if needed
-                details=df_merged,
-                price_adjustments=pd.DataFrame()  # Add treasury-specific adjustments
-            )
-
-        return GainLossResult()

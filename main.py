@@ -12,8 +12,10 @@ def main():
     TARGET_DATE = datetime(2025, 10, 24).date()  # ⚡ CHANGE DATE HERE
     TARGET_FUNDS = ['DOGG']  # ⚡ CHANGE FUNDS HERE (empty = all)
     OPERATIONS = ['compliance', 'reconciliation', 'nav_reconciliation']  # ⚡ CHANGE OPS HERE
+    OPERATIONS = ['compliance']
 
     OUTPUT_DIR = './reports'
+    OUTPUT_DIR = os.getenv("EXPORT_PATH", "G:/Shared drives/Portfolio Management/Funds/Archive/Daily_Compliance")
 
     # STEP 1: Initialize database
     session, Base = initialize_database()
@@ -40,7 +42,7 @@ def main():
     results = fund_manager.run_daily_operations(OPERATIONS)
 
     # STEP 6: Generate reports
-    # report_orchestrator = ReportOrchestrator(OUTPUT_DIR)
+    report_orchestrator = ReportOrchestrator(OUTPUT_DIR)
     # report_orchestrator.generate_reports(results, TARGET_DATE)
 
     print(f"✅ Done! Processed {len(results.fund_results)} funds")
