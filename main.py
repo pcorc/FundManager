@@ -19,13 +19,21 @@ from processing.run_modes import (
     run_trading_mode,
 )
 from utilities.cli_options import (
+    apply_overrides,
     parse_arguments,
     resolve_eod_parameters,
     resolve_trading_parameters,
 )
 
+# Optional runtime overrides for quick local tweaking without CLI arguments.
+RUNTIME_OVERRIDES: Optional[Mapping[str, object]] = None
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+
+def main(
+    argv: Optional[Sequence[str]] = None,
+    *,
+    overrides: Optional[Mapping[str, object]] = None,
+) -> int:
     """Program entry point used by ``python -m`` or direct execution."""
 
     logging.basicConfig(
@@ -35,6 +43,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     logger = logging.getLogger("fund_manager.main")
 
     options = parse_arguments(argv)
+    options = apply_overrides(options, overrides or RUNTIME_OVERRIDES)
     output_dir = Path(options.output_dir).expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -55,6 +64,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not registry.funds:
             logger.error("No funds available after applying filters")
             return 1
+
+        if options.compliance_tests:
+            logger.info(
+                "Limiting compliance checks to: %s",
+                ", ".join(options.compliance_tests),
+            )
+        else:
+            logger.info("Compliance checks: all available tests will run")
 
         if options.analysis_type == "trading_compliance":
             params = resolve_trading_parameters(options)
@@ -144,4 +161,13 @@ def _log_generated_paths(logger: logging.Logger, paths: Mapping[str, str]) -> No
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    RUNTIME_OVERRIDES = {
+        "analysis_type": "eod",
+        "as_of_date": "2023-05-15",
+        "funds": ["ABCIX"],
+        "previous_date": "2023-05-12",
+        "compliance_tests": ["limit-checks", "trade-size"],
+        "create_pdf": False,
+        "output_dir": "./reports/smoke",
+    }
+    raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
