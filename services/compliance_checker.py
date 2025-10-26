@@ -2,9 +2,9 @@ import pandas as pd
 from dataclasses import dataclass
 from typing import Dict, Optional
 import numpy as np
-from config.constants import *  # Your existing constants
+from config.constants import *
 from config.fund_classifications import DIVERSIFIED_FUNDS, NON_DIVERSIFIED_FUNDS, PRIVATE_FUNDS, CLOSED_END_FUNDS
-from domain.fund import Fund  # ← ADD THIS IMPORT
+from domain.fund import Fund
 from utilities.logger import setup_logger
 logger = setup_logger("compliance_checker", "compliance/logs/compliance_checker.log")
 

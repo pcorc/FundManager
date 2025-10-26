@@ -381,3 +381,13 @@ Traceback (most recent call last):
     if fund.is_private_fund:
        ^^^^^^^^^^^^^^^^^^^^
 AttributeError: 'Fund' object has no attribute 'is_private_fund'
+2025-10-25 19:33:45,657 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-25 19:33:45,659 - compliance_checker - ERROR - Error executing gics_compliance for fund DOGG: 'ComplianceChecker' object has no attribute 'fund_results'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 320, in gics_compliance
+    fund_data = self.fund_results.get(etf, {})
+                ^^^^^^^^^^^^^^^^^
+AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
