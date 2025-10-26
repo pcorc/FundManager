@@ -3,6 +3,8 @@ import pandas as pd
 from dataclasses import dataclass
 from typing import Dict, List, Set
 import logging
+from sqlalchemy import literal
+
 
 
 @dataclass
@@ -170,29 +172,191 @@ class BulkDataLoader:
                 self.logger.warning(f"Failed to load cash {table_name}: {e}")
 
     def _bulk_load_index_data(self, data_store: BulkDataStore, all_funds: Dict, target_date: str):
-        """Load ALL index data"""
+        """Load ALL index data with provider-specific logic."""
         table_to_funds = self._group_funds_by_table(all_funds, 'index_holdings')
 
         for table_name, funds in table_to_funds.items():
             if not table_name or table_name == 'NULL':
                 continue
 
-            try:
-                table = getattr(self.base_cls.classes, table_name)
-                date_column = self._get_table_column(table, 'date', 'effective_date', 'business_date', 'trade_date')
-                query = self.session.query(table)
-                if date_column is not None:
-                    query = query.filter(date_column == target_date)
-                all_index_data = pd.read_sql(query.statement, self.session.bind)
+            for fund in funds:
+                try:
+                    fund_index = self._get_index_data(table_name, target_date, fund)
+                    self._store_fund_data(data_store, fund.name, 'index', fund_index)
+                except Exception as exc:
+                    self.logger.warning(
+                        "Failed to load index %s for %s: %s", table_name, fund.name, exc
+                    )
+                    self._store_fund_data(data_store, fund.name, 'index', pd.DataFrame())
 
-                # Index data might not have fund column - handle accordingly
-                for fund in funds:
-                    fund_name = fund.name
-                    # Store same index data for all funds that use this index
-                    self._store_fund_data(data_store, fund_name, 'index', all_index_data.copy())
+    def _get_index_data(self, table_name: str, target_date: str, fund) -> pd.DataFrame:
+        """Dispatch to the appropriate index provider query."""
+        provider_map = {
+            'nasdaq_holdings': self._get_nasdaq_holdings,
+            'sp_holdings': self._get_sp_holdings,
+            'cboe_holdings': self._get_cboe_holdings,
+            'dogg_index': self._get_dogg_index,
+        }
 
-            except Exception as e:
-                self.logger.warning(f"Failed to load index {table_name}: {e}")
+        handler = provider_map.get(table_name)
+        if handler:
+            return handler(target_date, fund)
+
+        # Generic fallback: query table and filter by fund when possible
+        table = getattr(self.base_cls.classes, table_name)
+        date_column = self._get_table_column(
+            table, 'date', 'effective_date', 'business_date', 'trade_date'
+        )
+        query = self.session.query(table)
+        if date_column is not None:
+            query = query.filter(date_column == target_date)
+        df = pd.read_sql(query.statement, self.session.bind)
+        return self._filter_by_fund(df, fund.name, fund.mapping_data)
+
+    def _resolve_index_identifier(self, fund) -> str:
+        """Determine which identifier to use when filtering provider data."""
+        mapping = fund.mapping_data
+        for key in (
+            'index_identifier',
+            'index_fund_code',
+            'index_ticker',
+            'index_name',
+            'account_number_index',
+        ):
+            value = mapping.get(key)
+            if value and value != 'NULL':
+                return value
+        return fund.index_identifier or fund.name
+
+    def _get_nasdaq_holdings(self, target_date: str, fund) -> pd.DataFrame:
+        nasdaq = getattr(self.base_cls.classes, 'nasdaq_holdings', None)
+        if nasdaq is None:
+            raise AttributeError('nasdaq_holdings table is not reflected')
+
+        bbg = getattr(self.base_cls.classes, 'bbg_equity_flds_blotter', None)
+        columns = [
+            nasdaq.date.label('date'),
+            nasdaq.fund.label('fund'),
+            nasdaq.ticker.label('equity_ticker'),
+            nasdaq.index_weight.label('weight_index'),
+            nasdaq.price.label('price_index'),
+        ]
+        if bbg is not None:
+            columns.extend(
+                [
+                    bbg.GICS_SECTOR_NAME,
+                    bbg.GICS_INDUSTRY_NAME,
+                    bbg.GICS_INDUSTRY_GROUP_NAME,
+                ]
+            )
+
+        query = self.session.query(*columns)
+        if bbg is not None:
+            query = query.join(bbg, nasdaq.ticker == bbg.TICKER)
+        query = (
+            query
+            .filter(
+                nasdaq.date == target_date,
+                nasdaq.time_of_day == 'EOD',
+                nasdaq.fund == self._resolve_index_identifier(fund),
+            )
+            .group_by(nasdaq.ticker)
+        )
+
+        return pd.read_sql(query.statement, self.session.bind)
+
+    def _get_sp_holdings(self, target_date: str, fund) -> pd.DataFrame:
+        sp = getattr(self.base_cls.classes, 'sp_holdings', None)
+        if sp is None:
+            raise AttributeError('sp_holdings table is not reflected')
+
+        bbg = getattr(self.base_cls.classes, 'bbg_equity_flds_blotter', None)
+        columns = [
+            sp.EFFECTIVE_DATE.label('date'),
+            sp.INDEX_CODE.label('fund'),
+            sp.TICKER.label('equity_ticker'),
+            sp.INDEX_WEIGHT.label('weight_index'),
+            sp.LOCAL_PRICE.label('price_index'),
+        ]
+        if bbg is not None:
+            columns.extend(
+                [
+                    bbg.GICS_SECTOR_NAME,
+                    bbg.GICS_INDUSTRY_NAME,
+                    bbg.GICS_INDUSTRY_GROUP_NAME,
+                ]
+            )
+
+        query = self.session.query(*columns)
+        if bbg is not None:
+            query = query.join(bbg, sp.TICKER == bbg.TICKER)
+        query = query.filter(
+            sp.EFFECTIVE_DATE == target_date,
+            sp.INDEX_CODE == self._resolve_index_identifier(fund),
+        )
+
+        return pd.read_sql(query.statement, self.session.bind)
+
+    def _get_cboe_holdings(self, target_date: str, fund) -> pd.DataFrame:
+        cboe = getattr(self.base_cls.classes, 'cboe_holdings', None)
+        if cboe is None:
+            raise AttributeError('cboe_holdings table is not reflected')
+
+        bbg = getattr(self.base_cls.classes, 'bbg_equity_flds_blotter', None)
+        identifier = self._resolve_index_identifier(fund) or 'SPATI'
+        columns = [
+            cboe.date.label('date'),
+            cboe.index_name.label('fund'),
+            cboe.ticker.label('equity_ticker'),
+            cboe.stock_weight.label('weight_index'),
+            cboe.price.label('price_index'),
+        ]
+        if bbg is not None:
+            columns.extend(
+                [
+                    bbg.GICS_SECTOR_NAME,
+                    bbg.GICS_INDUSTRY_NAME,
+                    bbg.GICS_INDUSTRY_GROUP_NAME,
+                ]
+            )
+
+        query = self.session.query(*columns)
+        if bbg is not None:
+            query = query.join(bbg, cboe.ticker == bbg.TICKER)
+        query = query.filter(
+            cboe.date == target_date,
+            cboe.index_name == identifier,
+        )
+
+        return pd.read_sql(query.statement, self.session.bind)
+
+    def _get_dogg_index(self, target_date: str, fund) -> pd.DataFrame:
+        dogg = getattr(self.base_cls.classes, 'dogg_index', None)
+        if dogg is None:
+            raise AttributeError('dogg_index table is not reflected')
+
+        bbg = getattr(self.base_cls.classes, 'bbg_equity_flds_blotter', None)
+        columns = [
+            dogg.DATE.label('date'),
+            literal(fund.name).label('fund'),
+            dogg.TICKER.label('equity_ticker'),
+            literal(0.10).label('weight_index'),
+        ]
+        if bbg is not None:
+            columns.extend(
+                [
+                    bbg.GICS_SECTOR_NAME,
+                    bbg.GICS_INDUSTRY_NAME,
+                    bbg.GICS_INDUSTRY_GROUP_NAME,
+                ]
+            )
+
+        query = self.session.query(*columns)
+        if bbg is not None:
+            query = query.join(bbg, dogg.TICKER == bbg.TICKER)
+        query = query.filter(dogg.DATE == target_date)
+
+        return pd.read_sql(query.statement, self.session.bind)
 
     def _group_funds_by_table(self, all_funds: Dict, config_key: str) -> Dict[str, List]:
         """Group funds by which table they use for a given data type"""

@@ -25,6 +25,7 @@ class FundClass:
     index_table: Optional[str]
     basket_table: Optional[str]
     flows_table: Optional[str]
+    index_identifier: Optional[str]
 
     # Operational parameters
     expense_ratio: float
@@ -152,6 +153,7 @@ class FundRegistry:
                 index_table=row['index_holdings'],
                 basket_table=row.get('basket'),
                 flows_table=row.get('flows'),
+                index_identifier=_get_index_identifier(row),
                 expense_ratio=float(row['expense_ratio']),
                 option_roll_tenor=row['option_roll_tenor'],
                 overwrite_rate=float(row.get('overwrite', 0.0)),
@@ -183,3 +185,17 @@ class FundRegistry:
         for fund in self.funds.values():
             all_tables.update(fund.get_required_tables())
         return list(all_tables)
+
+def _get_index_identifier(row: pd.Series) -> Optional[str]:
+    """Extract an index identifier from registry metadata when provided."""
+    for key in (
+        'index_identifier',
+        'index_fund_code',
+        'index_ticker',
+        'index_name',
+        'account_number_index',
+    ):
+        value = row.get(key)
+        if isinstance(value, str) and value and value != 'NULL':
+            return value
+    return None

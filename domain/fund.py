@@ -1,117 +1,167 @@
-from dataclasses import dataclass, field
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 import pandas as pd
 
-@dataclass
+
 class GainLossResult:
-    """Simple container for gain/loss calculations"""
-    raw_gl: float = 0.0
-    adjusted_gl: float = 0.0
-    details: pd.DataFrame = field(default_factory=pd.DataFrame)
-    price_adjustments: pd.DataFrame = field(default_factory=pd.DataFrame)
+    """Simple container for gain/loss calculations."""
+
+    def __init__(
+        self,
+        raw_gl: float = 0.0,
+        adjusted_gl: float = 0.0,
+        details: Optional[pd.DataFrame] = None,
+        price_adjustments: Optional[pd.DataFrame] = None,
+    ) -> None:
+        self.raw_gl = raw_gl
+        self.adjusted_gl = adjusted_gl
+        self.details = details if details is not None else pd.DataFrame()
+        self.price_adjustments = (
+            price_adjustments if price_adjustments is not None else pd.DataFrame()
+        )
 
 
-# domain/fund.py - STORE BOTH SOURCES
+class FundSnapshot:
+    """Container for all holdings data at a point in time."""
 
-@dataclass
-class FundMetrics:
-    fund_id: str
+    def __init__(
+        self,
+        *,
+        equity: Optional[pd.DataFrame] = None,
+        options: Optional[pd.DataFrame] = None,
+        treasury: Optional[pd.DataFrame] = None,
+        cash: float = 0.0,
+        nav: float = 0.0,
+    ) -> None:
+        self.equity = equity if isinstance(equity, pd.DataFrame) else pd.DataFrame()
+        self.options = options if isinstance(options, pd.DataFrame) else pd.DataFrame()
+        self.treasury = (
+            treasury if isinstance(treasury, pd.DataFrame) else pd.DataFrame()
+        )
+        self.cash = float(cash or 0.0)
+        self.nav = float(nav or 0.0)
 
-    # CUSTODIAN-PROVIDED VALUES
-    custodian_total_assets: float = 0.0
-    custodian_total_net_assets: float = 0.0
-    custodian_nav_per_share: float = 0.0
-    custodian_cash: float = 0.0
 
-    # CUSTODIAN HOLDINGS (position-level)
-    custodian_equity_holdings: pd.DataFrame = None
-    custodian_option_holdings: pd.DataFrame = None
-    custodian_treasury_holdings: pd.DataFrame = None
+class FundData:
+    """Complete fund data for current day (T) and prior day (T-1)."""
 
-    # INTERNAL HOLDINGS (your definitions)
-    internal_equity_holdings: pd.DataFrame = None
-    internal_option_holdings: pd.DataFrame = None
-    internal_treasury_holdings: pd.DataFrame = None
-
+    def __init__(
+        self,
+        *,
+        current: Optional[FundSnapshot] = None,
+        previous: Optional[FundSnapshot] = None,
+        flows: float = 0.0,
+        expense_ratio: float = 0.0,
+        basket: Optional[pd.DataFrame] = None,
+        index: Optional[pd.DataFrame] = None,
+    ) -> None:
+        self.current = current if isinstance(current, FundSnapshot) else FundSnapshot()
+        self.previous = (
+            previous if isinstance(previous, FundSnapshot) else FundSnapshot()
+        )
+        self.flows = float(flows or 0.0)
+        self.expense_ratio = float(expense_ratio or 0.0)
+        self.basket = basket if isinstance(basket, pd.DataFrame) else pd.DataFrame()
+        self.index = index if isinstance(index, pd.DataFrame) else pd.DataFrame()
 
 class Fund:
-    def __init__(self, name: str, config: Dict):
+    def __init__(self, name: str, config: Dict, base_cls=None):
         self.name = name
-        self.config = config
+        self.config = config or {}
+        self.base_cls = base_cls
+        self._data: Optional[FundData] = FundData()
 
-    # CUSTODIAN-PROVIDED VALUES (for reconciliation)
+    # ------------------------------------------------------------------
+    # Data management helpers
+    # ------------------------------------------------------------------
     @property
-    def custodian_total_assets(self) -> float:
-        return self.data.current.custodian_total_assets
+    def data(self) -> FundData:
+        """Fund processing data; always returns a valid FundData instance."""
+        if self._data is None:
+            self._data = FundData()
+        return self._data
+
+    @data.setter
+    def data(self, value: Optional[FundData]) -> None:
+        self._data = value if isinstance(value, FundData) else FundData()
+
+    # Add these properties that your services use:
+    @property
+    def cash_value(self) -> float:
+        current = self.data.current
+        return getattr(current, "cash", 0.0) or 0.0
 
     @property
-    def custodian_total_net_assets(self) -> float:
-        return self.data.current.custodian_total_net_assets
+    def total_assets(self) -> float:
+        current = self.data.current
+        nav = getattr(current, "nav", 0.0) or 0.0
+        if nav:
+            return nav
+        return (
+            self.total_equity_value
+            + self.total_option_value
+            + self.total_treasury_value
+            + self.cash_value
+        )
 
-    # YOUR CALCULATED VALUES (for reconciliation)
     @property
-    def calculated_total_assets(self) -> float:
-        """Calculate total assets from components"""
-        return (self.total_equity_value +
-                self.total_option_value +
-                self.total_treasury_value +
-                self.cash_value)
-
-    @property
-    def calculated_total_net_assets(self) -> float:
-        """Calculate net assets (assets - liabilities)"""
-        # This might be the same as total_assets for some funds
-        # or might subtract expenses, liabilities, etc.
-        return self.calculated_total_assets - self.expenses
+    def total_net_assets(self) -> float:
+        nav = getattr(self.data.current, "nav", 0.0) or 0.0
+        return nav if nav else self.total_assets
 
     @property
     def total_equity_value(self) -> float:
-        if not self.data.current.equity.empty:
-            return (self.data.current.equity['price'] * self.data.current.equity['quantity']).sum()
+        equity = getattr(self.data.current, "equity", pd.DataFrame())
+        if isinstance(equity, pd.DataFrame) and not equity.empty:
+            price_col = "price" if "price" in equity.columns else None
+            quantity_col = "quantity" if "quantity" in equity.columns else None
+            if price_col and quantity_col:
+                return (equity[price_col] * equity[quantity_col]).sum()
+            if "market_value" in equity.columns:
+                return equity["market_value"].sum()
         return 0.0
 
     @property
     def total_option_value(self) -> float:
-        if not self.data.current.options.empty:
-            return (self.data.current.options['price'] * self.data.current.options['quantity']).sum()
+        options = getattr(self.data.current, "options", pd.DataFrame())
+        if isinstance(options, pd.DataFrame) and not options.empty:
+            if {"price", "quantity"}.issubset(options.columns):
+                return (options["price"] * options["quantity"]).sum()
+            if "market_value" in options.columns:
+                return options["market_value"].sum()
         return 0.0
 
     @property
     def total_treasury_value(self) -> float:
-        if not self.data.current.treasury.empty:
-            return (self.data.current.treasury['price'] * self.data.current.treasury['quantity']).sum()
+        treasury = getattr(self.data.current, "treasury", pd.DataFrame())
+        if isinstance(treasury, pd.DataFrame) and not treasury.empty:
+            if {"price", "quantity"}.issubset(treasury.columns):
+                return (treasury["price"] * treasury["quantity"]).sum()
+            if "market_value" in treasury.columns:
+                return treasury["market_value"].sum()
         return 0.0
 
     @property
-    def cash_value(self) -> float:
-        return self.data.current.cash
-
-    @property
     def expenses(self) -> float:
-        return self.data.expense_ratio * self.custodian_total_net_assets  # Use custodian as base
+        nav = getattr(self.data.current, "nav", 0.0) or 0.0
+        expense_ratio = getattr(self.data, "expense_ratio", 0.0) or 0.0
+        return expense_ratio * nav
 
     @property
-    def treasury_holdings(self) -> pd.DataFrame:
-        return self.data.current.treasury
-
-    @property
-    def custodian_treasury_holdings(self) -> pd.DataFrame:
-        return self.data.current.treasury  # Or separate if you have custodian-specific treasury data
-
-    @property
-    def previous_treasury_holdings(self) -> pd.DataFrame:
-        return self.data.previous.treasury
-
-    @property
-    def previous_custodian_treasury_holdings(self) -> pd.DataFrame:
-        return self.data.previous.treasury
+    def is_private_fund(self) -> bool:
+        return self.config.get('strategy') == 'PF'  # Adjust based on your config
 
     @property
     def total_option_delta_adjusted_notional(self) -> float:
         """For compliance checks that need delta-adjusted option values"""
-        if not self.data.current.options.empty and 'delta_adjusted_notional' in self.data.current.options.columns:
-            return self.data.current.options['delta_adjusted_notional'].sum()
+        options = getattr(self.data.current, "options", pd.DataFrame())
+        if (
+            isinstance(options, pd.DataFrame)
+            and not options.empty
+            and "delta_adjusted_notional" in options.columns
+        ):
+            return options["delta_adjusted_notional"].sum()
         return 0.0
+
 
     # Method stubs that your services might call
     def get_irs_holdings_data(self) -> pd.DataFrame:

@@ -10,7 +10,7 @@ from services.nav_reconciliator import NAVReconciliator
 from services.reconciliator import Reconciliator
 
 # Import your domain classes
-from domain.fund import Fund, FundMetrics
+from domain.fund import Fund, FundData, FundSnapshot
 from processing.bulk_data_loader import BulkDataStore
 
 
@@ -95,33 +95,41 @@ class FundManager:
         return ProcessingResults(fund_results=results, summary=summary)
 
     def _create_fund_from_bulk_data(self, fund_name: str, fund_config) -> Fund:
+        """Create a Fund instance populated with bulk data"""
+        # Get all data for this fund from bulk store
         fund_data_dict = self.data_store.fund_data.get(fund_name, {})
 
-        # POPULATE WITH BOTH INTERNAL AND CUSTODIAN DATA
-        fund_metrics = FundMetrics(
-            fund_id=fund_name,
+        # Create FundData structure
+        fund_data = FundData()
 
-            # CUSTODIAN-PROVIDED VALUES
-            custodian_total_assets=self._extract_custodian_total_assets(fund_data_dict),
-            custodian_total_net_assets=self._extract_custodian_total_net_assets(fund_data_dict),
-            custodian_nav_per_share=self._extract_custodian_nav_per_share(fund_data_dict),
-            custodian_cash=self._extract_cash_value(fund_data_dict.get('custodian_cash', pd.DataFrame())),
-
-            # CUSTODIAN HOLDINGS (existing)
-            custodian_equity_holdings=fund_data_dict.get('custodian_equity', pd.DataFrame()),
-            custodian_option_holdings=fund_data_dict.get('custodian_option', pd.DataFrame()),
-            custodian_treasury_holdings=fund_data_dict.get('custodian_treasury', pd.DataFrame()),
-
-            # INTERNAL HOLDINGS (new - from your recon_mappings)
-            internal_equity_holdings=fund_data_dict.get('vest_equity_holdings', pd.DataFrame()),  # from tif_oms_equity_holdings
-            internal_option_holdings=fund_data_dict.get('vest_option_holdings', pd.DataFrame()),
-            internal_treasury_holdings=fund_data_dict.get('vest_treasury_holdings', pd.DataFrame()),
-
+        # Populate current holdings
+        fund_data.current = FundSnapshot(
+            equity=fund_data_dict.get('custodian_equity', pd.DataFrame()),
+        options = fund_data_dict.get('custodian_option', pd.DataFrame()),
+        treasury = fund_data_dict.get('custodian_treasury', pd.DataFrame()),
+        cash = self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
+        nav = self._extract_nav_value(fund_data_dict.get('nav', pd.DataFrame()))
         )
 
+        # Populate previous holdings (you might need to load T-1 data separately)
+        fund_data.previous = FundSnapshot(
+            equity=pd.DataFrame(),  # Placeholder - you'll need to load T-1 data
+            options=pd.DataFrame(),
+        treasury = pd.DataFrame(),
+        cash = 0.0,
+        nav = 0.0
+        )
+
+        # Populate additional data
+        fund_data.flows = 0.0  # Calculate from flows data if available
+        fund_data.expense_ratio = fund_config.expense_ratio
+        fund_data.basket = fund_data_dict.get('basket', pd.DataFrame())
+        fund_data.index = fund_data_dict.get('index', pd.DataFrame())
+
+        # Create Fund instance
         fund = Fund(fund_name, fund_config.mapping_data)
-        fund.metrics = fund_metrics
-        fund.expense_ratio = fund_config.expense_ratio
+        fund.data = fund_data
+
         return fund
 
     def _extract_custodian_total_assets(self, fund_data_dict: Dict) -> float:
