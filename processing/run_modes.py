@@ -12,7 +12,7 @@ from config.fund_registry import FundRegistry
 from processing.bulk_data_loader import BulkDataLoader, BulkDataStore
 from processing.fund_manager import FundManager, ProcessingResults
 from reporting.compliance_reporter import build_compliance_reports
-from reporting.nav_recon_reporter import build_reconciliation_reports
+from reporting.nav_recon_reporter import build_nav_reconciliation_reports
 from reporting.trade_compliance_reporter import build_trading_compliance_reports
 
 

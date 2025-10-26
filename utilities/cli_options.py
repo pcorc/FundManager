@@ -1,4 +1,4 @@
-"""CLI parsing helpers and parameter resolution for FundManager."""
+"""Command-line parsing and run-parameter helpers for FundManager."""
 
 from __future__ import annotations
 
@@ -46,11 +46,6 @@ class TradingComplianceParameters:
     custodian_date: date
     custodian_previous_date: date
     create_pdf: bool
-
-
-# ---------------------------------------------------------------------------
-# CLI parsing helpers
-# ---------------------------------------------------------------------------
 
 
 def parse_arguments(argv: Optional[Sequence[str]] = None) -> CLIOptions:
@@ -153,7 +148,7 @@ def resolve_eod_parameters(options: CLIOptions) -> EODRunParameters:
     if not operations:
         raise ValueError("At least one report family must be selected for an EOD run")
 
-    previous_date = options.previous_date or _business_day_offset(options.as_of_date, -1)
+    previous_date = options.previous_date or business_day_offset(options.as_of_date, -1)
     return EODRunParameters(
         trade_date=options.as_of_date,
         previous_trade_date=previous_date,
@@ -165,9 +160,9 @@ def resolve_eod_parameters(options: CLIOptions) -> EODRunParameters:
 def resolve_trading_parameters(options: CLIOptions) -> TradingComplianceParameters:
     ex_ante_date = options.ex_ante_date or options.as_of_date
     ex_post_date = options.ex_post_date or ex_ante_date
-    vest_previous = _business_day_offset(ex_ante_date, -1)
-    custodian_date = options.custodian_date or _business_day_offset(ex_ante_date, -1)
-    custodian_previous = options.custodian_previous_date or _business_day_offset(custodian_date, -1)
+    vest_previous = business_day_offset(ex_ante_date, -1)
+    custodian_date = options.custodian_date or business_day_offset(ex_ante_date, -1)
+    custodian_previous = options.custodian_previous_date or business_day_offset(custodian_date, -1)
 
     return TradingComplianceParameters(
         ex_ante_date=ex_ante_date,
@@ -179,28 +174,7 @@ def resolve_trading_parameters(options: CLIOptions) -> TradingComplianceParamete
     )
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _parse_date(value: str) -> date:
-    """Parse an ISO-like date string into a :class:`datetime.date`."""
-
-    if isinstance(value, date):  # argparse may already pass date objects
-        return value
-    value = value.strip()
-    if value.lower() == "today":
-        return date.today()
-    if value.lower() == "yesterday":
-        return _business_day_offset(date.today(), -1)
-    try:
-        return datetime.fromisoformat(value).date()
-    except ValueError:
-        return datetime.strptime(value, "%Y-%m-%d").date()
-
-
-def _business_day_offset(anchor: date, offset: int) -> date:
+def business_day_offset(anchor: date, offset: int) -> date:
     """Shift ``anchor`` by ``offset`` business days (weekends only)."""
 
     if offset == 0:
@@ -214,6 +188,22 @@ def _business_day_offset(anchor: date, offset: int) -> date:
         if current.weekday() < 5:  # Monday=0 .. Friday=4
             remaining -= 1
     return current
+
+
+def _parse_date(value: str) -> date:
+    """Parse an ISO-like date string into a :class:`datetime.date`."""
+
+    if isinstance(value, date):  # argparse may already pass date objects
+        return value
+    value = value.strip()
+    if value.lower() == "today":
+        return date.today()
+    if value.lower() == "yesterday":
+        return business_day_offset(date.today(), -1)
+    try:
+        return datetime.fromisoformat(value).date()
+    except ValueError:
+        return datetime.strptime(value, "%Y-%m-%d").date()
 
 
 def _determine_eod_operations(report_tokens: Iterable[str]) -> List[str]:
@@ -234,13 +224,3 @@ def _determine_eod_operations(report_tokens: Iterable[str]) -> List[str]:
 
     operation_order = ["compliance", "reconciliation", "nav_reconciliation"]
     return [name for name in operation_order if name in desired]
-
-
-__all__ = [
-    "CLIOptions",
-    "EODRunParameters",
-    "TradingComplianceParameters",
-    "parse_arguments",
-    "resolve_eod_parameters",
-    "resolve_trading_parameters",
-]
