@@ -108,7 +108,7 @@ class FundManager:
         options = fund_data_dict.get('custodian_option', pd.DataFrame()),
         treasury = fund_data_dict.get('custodian_treasury', pd.DataFrame()),
         cash = self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
-        nav = self._extract_nav_value(fund_data_dict.get('nav', pd.DataFrame()))
+        nav = self._extract_nav_per_share(fund_data_dict.get('nav', pd.DataFrame()))
         )
 
         # Populate previous holdings (you might need to load T-1 data separately)
@@ -246,3 +246,38 @@ class FundManager:
         except Exception as e:
             self.logger.error(f"Reconciliation error for {fund.name}: {e}")
             return {'errors': [str(e)], 'breaks': []}
+
+
+    def _extract_nav_per_share(self, fund_data_dict, custodian_type=None):
+        """Extract NAV per share with custodian awareness"""
+        nav_data = fund_data_dict.get('custodian_nav', pd.DataFrame())
+        if nav_data.empty:
+            return 0.0
+
+        row = nav_data.iloc[0]
+
+        # Custodian-specific column mapping
+        custodian_columns = {
+            'bny': 'nav',
+            'umb': 'cntnetvalue',
+            'socgen': 'nav_per_share'  # if you have SocGen
+        }
+
+        # If we know the custodian, try their specific column first
+        if custodian_type and custodian_type in custodian_columns:
+            custodian_col = custodian_columns[custodian_type]
+            if custodian_col in row and pd.notna(row[custodian_col]):
+                try:
+                    return float(row[custodian_col])
+                except (ValueError, TypeError):
+                    pass
+
+        # Fallback: try all common column names
+        for col in ['nav_per_share', 'nav', 'cntnetvalue', 'navps']:
+            if col in row and pd.notna(row[col]):
+                try:
+                    return float(row[col])
+                except (ValueError, TypeError):
+                    continue
+
+        return 0.0
