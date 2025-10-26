@@ -197,7 +197,7 @@ def normalize_option_ticker(ticker: str, logger=None, verbose: bool = False) -> 
     raw = raw.replace("BRK/B", "BRKB").replace("BRK.B", "BRKB").replace("BRK B", "BRKB")
 
     if raw.startswith("SPX0"):
-        raw = "SPX"  raw[4:]
+        raw = "SPX" + raw[4:]
         if verbose and logger:
             logger.debug("SPX0 edge case handled: converting to SPX")
 

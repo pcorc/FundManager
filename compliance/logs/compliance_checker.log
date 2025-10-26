@@ -404,3 +404,4 @@ AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
 2025-10-25 20:09:49,607 - compliance_checker - INFO - Running compliance tests for DOGG
 2025-10-25 21:20:39,165 - compliance_checker - INFO - Running compliance tests for DOGG
 2025-10-25 21:23:51,292 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-25 21:51:20,572 - compliance_checker - INFO - Running compliance tests for DOGG

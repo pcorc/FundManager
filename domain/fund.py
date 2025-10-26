@@ -156,9 +156,9 @@ class Fund:
         )
 
     @property
-    def total_net_assets(self) -> float:␊
-        nav = getattr(self.data.current, "nav", 0.0) or 0.0␊
-        return nav if nav else self.total_assets␊
+    def total_net_assets(self) -> float:
+        nav = getattr(self.data.current, "nav", 0.0) or 0.0
+        return nav if nav else self.total_assets
 
     @property
     def total_equity_value(self) -> float:
@@ -183,14 +183,14 @@ class Fund:
         return 0.0
 
     @property
-    def total_treasury_value(self) -> float:␊
-        treasury = getattr(self.data.current, "treasury", pd.DataFrame())␊
-        if isinstance(treasury, pd.DataFrame) and not treasury.empty:␊
-            if {"price", "quantity"}.issubset(treasury.columns):␊
-                return (treasury["price"] * treasury["quantity"]).sum()␊
-            if "market_value" in treasury.columns:␊
-                return treasury["market_value"].sum()␊
-        return 0.0␊
+    def total_treasury_value(self) -> float:
+        treasury = getattr(self.data.current, "treasury", pd.DataFrame())
+        if isinstance(treasury, pd.DataFrame) and not treasury.empty:
+            if {"price", "quantity"}.issubset(treasury.columns):
+                return (treasury["price"] * treasury["quantity"]).sum()
+            if "market_value" in treasury.columns:
+                return treasury["market_value"].sum()
+        return 0.0
 
     @property
     def expenses(self) -> float:

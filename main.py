@@ -5,7 +5,7 @@ from config.fund_registry import FundRegistry
 from processing.bulk_data_loader import BulkDataLoader
 from processing.fund_manager import FundManager
 from services.weight_analyzer import WeightAnalyzer
-
+import os
 
 def main():
     # 🎛️ CONFIGURATION - TOGGLE HERE!
