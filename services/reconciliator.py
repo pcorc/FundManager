@@ -178,6 +178,125 @@ class Reconciliator:
         # Emit summary rows
         self._emit_equity_summary_rows(df_issues, price_disc_T, price_disc_T1)
 
+
+    def reconcile_index_equity(self):
+        """Compare fund equity holdings against benchmark weights."""
+
+        df_fund = getattr(self.fund, "equity_holdings", pd.DataFrame()).copy()
+        df_index = getattr(self.fund, "index_holdings", pd.DataFrame()).copy()
+
+        if df_fund.empty or df_index.empty:
+            self.results["index_equity"] = ReconciliationResult(
+                raw_recon=pd.DataFrame(),
+                final_recon=pd.DataFrame(),
+                price_discrepancies_T=pd.DataFrame(),
+                price_discrepancies_T1=pd.DataFrame(),
+                merged_data=pd.DataFrame(),
+            )
+            self.add_summary_row(
+                "Index Equity",
+                "",
+                "Missing fund or benchmark holdings; reconciliation skipped",
+                "N/A",
+            )
+            return
+
+        if "equity_ticker" not in df_fund.columns or "equity_ticker" not in df_index.columns:
+            self.results["index_equity"] = ReconciliationResult(
+                raw_recon=pd.DataFrame(),
+                final_recon=pd.DataFrame(),
+                price_discrepancies_T=pd.DataFrame(),
+                price_discrepancies_T1=pd.DataFrame(),
+                merged_data=pd.DataFrame(),
+            )
+            self.add_summary_row(
+                "Index Equity",
+                "",
+                "equity_ticker column missing on fund or index data",
+                "N/A",
+            )
+            return
+
+        fund_weights = self._get_weight_series(df_fund)
+        index_weights = self._get_weight_series(
+            df_index,
+            preferred_columns=["weight_index", "index_weight", "benchmark_weight"],
+        )
+
+        if fund_weights is None or index_weights is None:
+            self.results["index_equity"] = ReconciliationResult(
+                raw_recon=pd.DataFrame(),
+                final_recon=pd.DataFrame(),
+                price_discrepancies_T=pd.DataFrame(),
+                price_discrepancies_T1=pd.DataFrame(),
+                merged_data=pd.DataFrame(),
+            )
+            self.add_summary_row(
+                "Index Equity",
+                "",
+                "Unable to derive weights for comparison",
+                "N/A",
+            )
+            return
+
+        df_fund = df_fund.assign(_fund_weight=fund_weights)
+        df_index = df_index.assign(_index_weight=index_weights)
+
+        merged = pd.merge(
+            df_fund[["equity_ticker", "_fund_weight"]],
+            df_index[["equity_ticker", "_index_weight"]],
+            on="equity_ticker",
+            how="outer",
+            indicator=True,
+        )
+
+        merged["_fund_weight"] = merged["_fund_weight"].fillna(0.0)
+        merged["_index_weight"] = merged["_index_weight"].fillna(0.0)
+        merged["weight_diff"] = merged["_fund_weight"] - merged["_index_weight"]
+        merged["abs_weight_diff"] = merged["weight_diff"].abs()
+
+        tolerance = 0.0005
+        issues = merged[(merged["_merge"] != "both") | merged["abs_weight_diff"].gt(tolerance)].copy()
+
+        if not issues.empty:
+            issues["issue_type"] = np.where(
+                issues["_merge"] == "both",
+                "Weight Mismatch",
+                np.where(issues["_merge"] == "left_only", "Missing in Index", "Missing in Fund"),
+            )
+        else:
+            issues = pd.DataFrame(columns=[
+                "equity_ticker",
+                "_fund_weight",
+                "_index_weight",
+                "weight_diff",
+                "abs_weight_diff",
+                "_merge",
+                "issue_type",
+            ])
+
+        self.results["index_equity"] = ReconciliationResult(
+            raw_recon=issues.copy(),
+            final_recon=issues.copy(),
+            price_discrepancies_T=pd.DataFrame(),
+            price_discrepancies_T1=pd.DataFrame(),
+            merged_data=merged.drop(columns=["_merge"]),
+        )
+
+        for _, row in issues.iterrows():
+            description = (
+                f"Fund {row['_fund_weight']:.6f} vs Index {row['_index_weight']:.6f}"
+                if row["issue_type"] == "Weight Mismatch"
+                else row["issue_type"]
+            )
+            self.add_summary_row(
+                "Index Equity",
+                row.get("equity_ticker", ""),
+                description,
+                row.get("weight_diff", "N/A"),
+            )
+
+
     def _calculate_price_discrepancies(self, df: pd.DataFrame, ticker_col: str) -> pd.DataFrame:
         """Calculate price discrepancies between vest and custodian"""
         if {'price_vest', 'price_cust'}.issubset(df.columns):
@@ -521,3 +640,34 @@ class Reconciliator:
         df_oms1 = self.fund.previous_treasury_holdings.copy()
         df_cust1 = self.fund.previous_custodian_treasury_holdings.copy()
         # ... similar T-1 logic
+
+    def _get_weight_series(self, df: pd.DataFrame, preferred_columns: Optional[list[str]] = None) -> Optional[pd.Series]:
+        columns = list(preferred_columns or []) + [
+            "start_wgt",
+            "weight",
+            "fund_weight",
+            "portfolio_weight",
+        ]
+
+        for column in columns:
+            if column in df.columns:
+                series = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
+                total = series.sum()
+                if total != 0 and total != 1:
+                    series = series / total
+                return series
+
+        if {"price", "quantity"}.issubset(df.columns):
+            prices = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
+            quantities = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
+            market_values = prices * quantities
+            total_mv = market_values.sum()
+            if total_mv:
+                return market_values / total_mv
+        elif "market_value" in df.columns:
+            market_values = pd.to_numeric(df["market_value"], errors="coerce").fillna(0.0)
+            total_mv = market_values.sum()
+            if total_mv:
+                return market_values / total_mv
+
+        return None

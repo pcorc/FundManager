@@ -70,6 +70,12 @@ class Fund:
         self.base_cls = base_cls
         self._data: Optional[FundData] = FundData()
 
+    @staticmethod
+    def _copy_dataframe(df: Optional[pd.DataFrame]) -> pd.DataFrame:
+        if isinstance(df, pd.DataFrame):
+            return df.copy()
+        return pd.DataFrame()
+
     # ------------------------------------------------------------------
     # Data management helpers
     # ------------------------------------------------------------------
@@ -172,10 +178,90 @@ class Fund:
         """Return data formatted for 40 Act checks"""
         return self.data.current.equity
 
-    def get_gics_exposure(self) -> Dict:
-        """Return GICS exposure data"""
-        # You'll implement this based on your GICS logic
-        return {}
+
+    # ------------------------------------------------------------------
+    # DataFrame accessors used by reconciliation services
+    # ------------------------------------------------------------------
+    @property
+    def equity_holdings(self) -> pd.DataFrame:
+        vest = getattr(self.data, "vest_equity", None)
+        if isinstance(vest, pd.DataFrame) and not vest.empty:
+            return self._copy_dataframe(vest)
+        return self._copy_dataframe(getattr(self.data.current, "equity", pd.DataFrame()))
+
+    @property
+    def custodian_equity_holdings(self) -> pd.DataFrame:
+        custodian = getattr(self.data, "custodian_equity", None)
+        if isinstance(custodian, pd.DataFrame) and not custodian.empty:
+            return self._copy_dataframe(custodian)
+        return self._copy_dataframe(getattr(self.data.current, "equity", pd.DataFrame()))
+
+    @property
+    def previous_equity_holdings(self) -> pd.DataFrame:
+        return self._copy_dataframe(getattr(self.data.previous, "equity", pd.DataFrame()))
+
+    @property
+    def previous_custodian_equity_holdings(self) -> pd.DataFrame:
+        return self._copy_dataframe(getattr(self.data.previous, "equity", pd.DataFrame()))
+
+    @property
+    def options_holdings(self) -> pd.DataFrame:
+        vest = getattr(self.data, "vest_option", None)
+        if isinstance(vest, pd.DataFrame) and not vest.empty:
+            return self._copy_dataframe(vest)
+        return self._copy_dataframe(getattr(self.data.current, "options", pd.DataFrame()))
+
+    @property
+    def custodian_option_holdings(self) -> pd.DataFrame:
+        custodian = getattr(self.data, "custodian_option", None)
+        if isinstance(custodian, pd.DataFrame) and not custodian.empty:
+            return self._copy_dataframe(custodian)
+        return self._copy_dataframe(getattr(self.data.current, "options", pd.DataFrame()))
+
+    @property
+    def previous_options_holdings(self) -> pd.DataFrame:
+        return self._copy_dataframe(getattr(self.data.previous, "options", pd.DataFrame()))
+
+    @property
+    def previous_custodian_option_holdings(self) -> pd.DataFrame:
+        return self._copy_dataframe(getattr(self.data.previous, "options", pd.DataFrame()))
+
+    @property
+    def treasury_holdings(self) -> pd.DataFrame:
+        vest = getattr(self.data, "vest_treasury", None)
+        if isinstance(vest, pd.DataFrame) and not vest.empty:
+            return self._copy_dataframe(vest)
+        return self._copy_dataframe(getattr(self.data.current, "treasury", pd.DataFrame()))
+
+    @property
+    def custodian_treasury_holdings(self) -> pd.DataFrame:
+        custodian = getattr(self.data, "custodian_treasury", None)
+        if isinstance(custodian, pd.DataFrame) and not custodian.empty:
+            return self._copy_dataframe(custodian)
+        return self._copy_dataframe(getattr(self.data.current, "treasury", pd.DataFrame()))
+
+    @property
+    def previous_treasury_holdings(self) -> pd.DataFrame:
+        return self._copy_dataframe(getattr(self.data.previous, "treasury", pd.DataFrame()))
+
+    @property
+    def previous_custodian_treasury_holdings(self) -> pd.DataFrame:
+        return self._copy_dataframe(getattr(self.data.previous, "treasury", pd.DataFrame()))
+
+    @property
+    def equity_trades(self) -> pd.DataFrame:
+        trades = getattr(self.data, "equity_trades", pd.DataFrame())
+        return self._copy_dataframe(trades)
+
+    @property
+    def cr_rd_data(self) -> pd.DataFrame:
+        corporate_actions = getattr(self.data, "cr_rd_data", pd.DataFrame())
+        return self._copy_dataframe(corporate_actions)
+
+    @property
+    def index_holdings(self) -> pd.DataFrame:
+        index_df = getattr(self.data, "index", pd.DataFrame())
+        return self._copy_dataframe(index_df)
 
     def calculate_gain_loss(self, current_date: str, prior_date: str, asset_class: str) -> GainLossResult:
         """
@@ -230,7 +316,7 @@ class Fund:
         # Your options-specific logic here
         return GainLossResult()
 
-    def _calculate_treasury_gl(self) -> GainLossResult:
+    def _calculate_treasury_gl(self, current_date: str, prior_date: str) -> GainLossResult:
         """Calculate treasury gain/loss using current vs previous data"""
         df_current = self.data.current.treasury
         df_previous = self.data.previous.treasury

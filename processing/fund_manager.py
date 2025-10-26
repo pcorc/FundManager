@@ -94,6 +94,7 @@ class FundManager:
         summary["total_funds"] = len(results)
         return ProcessingResults(fund_results=results, summary=summary)
 
+
     def _create_fund_from_bulk_data(self, fund_name: str, fund_config) -> Fund:
         """Create a Fund instance populated with bulk data"""
         # Get all data for this fund from bulk store
@@ -102,29 +103,39 @@ class FundManager:
         # Create FundData structure
         fund_data = FundData()
 
-        # Populate current holdings
+        # Populate current holdings with Vest (OMS) data when available
         fund_data.current = FundSnapshot(
-            equity=fund_data_dict.get('custodian_equity', pd.DataFrame()),
-        options = fund_data_dict.get('custodian_option', pd.DataFrame()),
-        treasury = fund_data_dict.get('custodian_treasury', pd.DataFrame()),
-        cash = self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
-        nav = self._extract_nav_per_share(fund_data_dict.get('nav', pd.DataFrame()))
+            equity=fund_data_dict.get('vest_equity', pd.DataFrame()),
+            options=fund_data_dict.get('vest_option', pd.DataFrame()),
+            treasury=fund_data_dict.get('vest_treasury', pd.DataFrame()),
+            cash=self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
+            nav=self._extract_nav_per_share(fund_data_dict.get('nav', pd.DataFrame())),
         )
 
-        # Populate previous holdings (you might need to load T-1 data separately)
+        # Populate previous holdings (T-1) if available
         fund_data.previous = FundSnapshot(
-            equity=pd.DataFrame(),  # Placeholder - you'll need to load T-1 data
+            equity=pd.DataFrame(),
             options=pd.DataFrame(),
-        treasury = pd.DataFrame(),
-        cash = 0.0,
-        nav = 0.0
+            treasury=pd.DataFrame(),
+            cash=0.0,
+            nav=0.0,
         )
+
+        # Store custodian data separately for reconciliation
+        fund_data.custodian_equity = fund_data_dict.get('custodian_equity', pd.DataFrame())
+        fund_data.custodian_option = fund_data_dict.get('custodian_option', pd.DataFrame())
+        fund_data.custodian_treasury = fund_data_dict.get('custodian_treasury', pd.DataFrame())
+        fund_data.vest_equity = fund_data_dict.get('vest_equity', pd.DataFrame())
+        fund_data.vest_option = fund_data_dict.get('vest_option', pd.DataFrame())
+        fund_data.vest_treasury = fund_data_dict.get('vest_treasury', pd.DataFrame())
 
         # Populate additional data
         fund_data.flows = 0.0  # Calculate from flows data if available
         fund_data.expense_ratio = fund_config.expense_ratio
         fund_data.basket = fund_data_dict.get('basket', pd.DataFrame())
         fund_data.index = fund_data_dict.get('index', pd.DataFrame())
+        fund_data.equity_trades = fund_data_dict.get('equity_trades', pd.DataFrame())
+        fund_data.cr_rd_data = fund_data_dict.get('cr_rd', pd.DataFrame())
 
         # Create Fund instance
         fund = Fund(fund_name, fund_config.mapping_data)
@@ -248,10 +259,14 @@ class FundManager:
             return {'errors': [str(e)], 'breaks': []}
 
 
-    def _extract_nav_per_share(self, fund_data_dict, custodian_type=None):
-        """Extract NAV per share with custodian awareness"""
-        nav_data = fund_data_dict.get('custodian_nav', pd.DataFrame())
-        if nav_data.empty:
+    def _extract_nav_per_share(self, nav_source, custodian_type=None):
+        """Extract NAV per share from either a mapping or direct DataFrame."""
+        if isinstance(nav_source, dict):
+            nav_data = nav_source.get('custodian_nav', pd.DataFrame())
+        else:
+            nav_data = nav_source
+
+        if not isinstance(nav_data, pd.DataFrame) or nav_data.empty:
             return 0.0
 
         row = nav_data.iloc[0]
