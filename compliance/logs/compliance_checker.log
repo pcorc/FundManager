@@ -1,0 +1,383 @@
+2025-10-25 17:33:34,927 - compliance_checker - INFO - Running compliance tests for KNG
+2025-10-25 17:33:34,927 - compliance_checker - ERROR - Error calculating summary metrics for KNG: 'price'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\indexes\base.py", line 3791, in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "index.pyx", line 152, in pandas._libs.index.IndexEngine.get_loc
+  File "index.pyx", line 181, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas\_libs\hashtable_class_helper.pxi", line 7080, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File "pandas\_libs\hashtable_class_helper.pxi", line 7088, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'price'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 73, in run_compliance_tests
+    summary_metrics = self.calculate_summary_metrics(fund)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 103, in calculate_summary_metrics
+    'equity_market_value': fund.total_equity_value,
+                           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\domain\fund.py", line 72, in total_equity_value
+    return (self.data.current.equity['price'] * self.data.current.equity['quantity']).sum()
+            ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\frame.py", line 3893, in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\indexes\base.py", line 3798, in get_loc
+    raise KeyError(key) from err
+KeyError: 'price'
+2025-10-25 17:33:34,947 - compliance_checker - ERROR - Error executing gics_compliance for fund KNG: 'ComplianceChecker' object has no attribute 'fund_results'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 320, in gics_compliance
+    fund_data = self.fund_results.get(etf, {})
+                ^^^^^^^^^^^^^^^^^
+AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
+2025-10-25 17:33:34,948 - compliance_checker - ERROR - Error executing diversification_40act_check for fund KNG: 'Fund' object has no attribute 'is_private_fund'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 221, in diversification_40act_check
+    if fund.is_private_fund:
+       ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Fund' object has no attribute 'is_private_fund'
+2025-10-25 17:33:34,959 - compliance_checker - INFO - Running compliance tests for FDND
+2025-10-25 17:33:34,959 - compliance_checker - ERROR - Error calculating summary metrics for FDND: 'price'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\indexes\base.py", line 3791, in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "index.pyx", line 152, in pandas._libs.index.IndexEngine.get_loc
+  File "index.pyx", line 181, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas\_libs\hashtable_class_helper.pxi", line 7080, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File "pandas\_libs\hashtable_class_helper.pxi", line 7088, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'price'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 73, in run_compliance_tests
+    summary_metrics = self.calculate_summary_metrics(fund)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 103, in calculate_summary_metrics
+    'equity_market_value': fund.total_equity_value,
+                           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\domain\fund.py", line 72, in total_equity_value
+    return (self.data.current.equity['price'] * self.data.current.equity['quantity']).sum()
+            ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\frame.py", line 3893, in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\indexes\base.py", line 3798, in get_loc
+    raise KeyError(key) from err
+KeyError: 'price'
+2025-10-25 17:33:34,962 - compliance_checker - ERROR - Error executing gics_compliance for fund FDND: 'ComplianceChecker' object has no attribute 'fund_results'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 320, in gics_compliance
+    fund_data = self.fund_results.get(etf, {})
+                ^^^^^^^^^^^^^^^^^
+AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
+2025-10-25 17:33:34,963 - compliance_checker - ERROR - Error executing diversification_40act_check for fund FDND: 'Fund' object has no attribute 'is_private_fund'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 221, in diversification_40act_check
+    if fund.is_private_fund:
+       ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Fund' object has no attribute 'is_private_fund'
+2025-10-25 17:33:34,973 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-25 17:33:34,974 - compliance_checker - ERROR - Error calculating summary metrics for DOGG: 'price'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\indexes\base.py", line 3791, in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "index.pyx", line 152, in pandas._libs.index.IndexEngine.get_loc
+  File "index.pyx", line 181, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas\_libs\hashtable_class_helper.pxi", line 7080, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File "pandas\_libs\hashtable_class_helper.pxi", line 7088, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'price'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 73, in run_compliance_tests
+    summary_metrics = self.calculate_summary_metrics(fund)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 103, in calculate_summary_metrics
+    'equity_market_value': fund.total_equity_value,
+                           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\domain\fund.py", line 72, in total_equity_value
+    return (self.data.current.equity['price'] * self.data.current.equity['quantity']).sum()
+            ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\frame.py", line 3893, in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\indexes\base.py", line 3798, in get_loc
+    raise KeyError(key) from err
+KeyError: 'price'
+2025-10-25 17:33:34,976 - compliance_checker - ERROR - Error executing gics_compliance for fund DOGG: 'ComplianceChecker' object has no attribute 'fund_results'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 320, in gics_compliance
+    fund_data = self.fund_results.get(etf, {})
+                ^^^^^^^^^^^^^^^^^
+AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
+2025-10-25 17:33:34,979 - compliance_checker - ERROR - Error executing diversification_40act_check for fund DOGG: 'Fund' object has no attribute 'is_private_fund'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 221, in diversification_40act_check
+    if fund.is_private_fund:
+       ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Fund' object has no attribute 'is_private_fund'
+2025-10-25 17:34:29,003 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-25 17:35:59,734 - compliance_checker - ERROR - Error calculating summary metrics for DOGG: 'price'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\indexes\base.py", line 3791, in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "index.pyx", line 152, in pandas._libs.index.IndexEngine.get_loc
+  File "index.pyx", line 181, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas\_libs\hashtable_class_helper.pxi", line 7080, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File "pandas\_libs\hashtable_class_helper.pxi", line 7088, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'price'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 73, in run_compliance_tests
+    summary_metrics = self.calculate_summary_metrics(fund)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 103, in calculate_summary_metrics
+    'equity_market_value': fund.total_equity_value,
+                           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\domain\fund.py", line 72, in total_equity_value
+    return (self.data.current.equity['price'] * self.data.current.equity['quantity']).sum()
+            ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\frame.py", line 3893, in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\indexes\base.py", line 3798, in get_loc
+    raise KeyError(key) from err
+KeyError: 'price'
+2025-10-25 17:35:59,752 - compliance_checker - ERROR - Error executing gics_compliance for fund DOGG: 'ComplianceChecker' object has no attribute 'fund_results'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 320, in gics_compliance
+    fund_data = self.fund_results.get(etf, {})
+                ^^^^^^^^^^^^^^^^^
+AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
+2025-10-25 17:35:59,799 - compliance_checker - ERROR - Error executing diversification_40act_check for fund DOGG: 'Fund' object has no attribute 'is_private_fund'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 221, in diversification_40act_check
+    if fund.is_private_fund:
+       ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Fund' object has no attribute 'is_private_fund'
+2025-10-25 17:35:59,912 - compliance_checker - INFO - Running compliance tests for KNG
+2025-10-25 17:37:37,761 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-25 17:37:44,698 - compliance_checker - ERROR - Error calculating summary metrics for DOGG: 'price'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\indexes\base.py", line 3791, in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "index.pyx", line 152, in pandas._libs.index.IndexEngine.get_loc
+  File "index.pyx", line 181, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas\_libs\hashtable_class_helper.pxi", line 7080, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File "pandas\_libs\hashtable_class_helper.pxi", line 7088, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'price'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 73, in run_compliance_tests
+    summary_metrics = self.calculate_summary_metrics(fund)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 103, in calculate_summary_metrics
+    'equity_market_value': fund.total_equity_value,
+                           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\domain\fund.py", line 72, in total_equity_value
+    return (self.data.current.equity['price'] * self.data.current.equity['quantity']).sum()
+            ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\frame.py", line 3893, in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\indexes\base.py", line 3798, in get_loc
+    raise KeyError(key) from err
+KeyError: 'price'
+2025-10-25 17:37:44,715 - compliance_checker - ERROR - Error executing gics_compliance for fund DOGG: 'ComplianceChecker' object has no attribute 'fund_results'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 320, in gics_compliance
+    fund_data = self.fund_results.get(etf, {})
+                ^^^^^^^^^^^^^^^^^
+AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
+2025-10-25 17:37:44,762 - compliance_checker - ERROR - Error executing diversification_40act_check for fund DOGG: 'Fund' object has no attribute 'is_private_fund'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 221, in diversification_40act_check
+    if fund.is_private_fund:
+       ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Fund' object has no attribute 'is_private_fund'
+2025-10-25 17:38:32,022 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-25 17:38:32,023 - compliance_checker - ERROR - Error calculating summary metrics for DOGG: 'price'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\indexes\base.py", line 3791, in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "index.pyx", line 152, in pandas._libs.index.IndexEngine.get_loc
+  File "index.pyx", line 181, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas\_libs\hashtable_class_helper.pxi", line 7080, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File "pandas\_libs\hashtable_class_helper.pxi", line 7088, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'price'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 73, in run_compliance_tests
+    summary_metrics = self.calculate_summary_metrics(fund)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 103, in calculate_summary_metrics
+    'equity_market_value': fund.total_equity_value,
+                           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\domain\fund.py", line 72, in total_equity_value
+    return (self.data.current.equity['price'] * self.data.current.equity['quantity']).sum()
+            ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\frame.py", line 3893, in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\anaconda3\Lib\site-packages\pandas\core\indexes\base.py", line 3798, in get_loc
+    raise KeyError(key) from err
+KeyError: 'price'
+2025-10-25 17:38:32,037 - compliance_checker - ERROR - Error executing gics_compliance for fund DOGG: 'ComplianceChecker' object has no attribute 'fund_results'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 320, in gics_compliance
+    fund_data = self.fund_results.get(etf, {})
+                ^^^^^^^^^^^^^^^^^
+AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
+2025-10-25 17:38:32,039 - compliance_checker - ERROR - Error executing diversification_40act_check for fund DOGG: 'Fund' object has no attribute 'is_private_fund'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 221, in diversification_40act_check
+    if fund.is_private_fund:
+       ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Fund' object has no attribute 'is_private_fund'
+2025-10-25 18:04:26,462 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-25 18:04:26,462 - compliance_checker - ERROR - Error calculating summary metrics for DOGG: 'Fund' object has no attribute 'data'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 73, in run_compliance_tests
+    summary_metrics = self.calculate_summary_metrics(fund)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 102, in calculate_summary_metrics
+    'cash_value': fund.cash_value,
+                  ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\domain\fund.py", line 87, in cash_value
+    return self.data.current.cash
+           ^^^^^^^^^
+AttributeError: 'Fund' object has no attribute 'data'
+2025-10-25 18:04:26,464 - compliance_checker - ERROR - Error executing gics_compliance for fund DOGG: 'ComplianceChecker' object has no attribute 'fund_results'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 320, in gics_compliance
+    fund_data = self.fund_results.get(etf, {})
+                ^^^^^^^^^^^^^^^^^
+AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
+2025-10-25 18:04:26,466 - compliance_checker - ERROR - Error executing diversification_40act_check for fund DOGG: 'Fund' object has no attribute 'is_private_fund'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 221, in diversification_40act_check
+    if fund.is_private_fund:
+       ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Fund' object has no attribute 'is_private_fund'
+2025-10-25 18:05:05,747 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-25 18:16:34,541 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-25 18:16:34,542 - compliance_checker - ERROR - Error calculating summary metrics for DOGG: 'Fund' object has no attribute 'data'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 73, in run_compliance_tests
+    summary_metrics = self.calculate_summary_metrics(fund)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 102, in calculate_summary_metrics
+    'cash_value': fund.cash_value,
+                  ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\domain\fund.py", line 87, in cash_value
+    return self.data.current.cash
+           ^^^^^^^^^
+AttributeError: 'Fund' object has no attribute 'data'
+2025-10-25 18:16:34,543 - compliance_checker - ERROR - Error executing gics_compliance for fund DOGG: 'ComplianceChecker' object has no attribute 'fund_results'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 320, in gics_compliance
+    fund_data = self.fund_results.get(etf, {})
+                ^^^^^^^^^^^^^^^^^
+AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
+2025-10-25 18:16:34,545 - compliance_checker - ERROR - Error executing diversification_40act_check for fund DOGG: 'Fund' object has no attribute 'is_private_fund'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 221, in diversification_40act_check
+    if fund.is_private_fund:
+       ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Fund' object has no attribute 'is_private_fund'
+2025-10-25 19:02:13,953 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-25 19:02:13,953 - compliance_checker - ERROR - Error calculating summary metrics for DOGG: 'Fund' object has no attribute 'data'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 73, in run_compliance_tests
+    summary_metrics = self.calculate_summary_metrics(fund)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 102, in calculate_summary_metrics
+    'cash_value': fund.cash_value,
+                  ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\domain\fund.py", line 87, in cash_value
+    return self.data.current.cash
+           ^^^^^^^^^
+AttributeError: 'Fund' object has no attribute 'data'
+2025-10-25 19:02:13,956 - compliance_checker - ERROR - Error executing gics_compliance for fund DOGG: 'ComplianceChecker' object has no attribute 'fund_results'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 320, in gics_compliance
+    fund_data = self.fund_results.get(etf, {})
+                ^^^^^^^^^^^^^^^^^
+AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
+2025-10-25 19:02:13,957 - compliance_checker - ERROR - Error executing diversification_40act_check for fund DOGG: 'Fund' object has no attribute 'is_private_fund'
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 85, in run_compliance_tests
+    result = test_func(fund)
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\OneDrive - Vest Financial\Documents\Coding\VestFundManager\services\compliance_checker.py", line 221, in diversification_40act_check
+    if fund.is_private_fund:
+       ^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Fund' object has no attribute 'is_private_fund'
