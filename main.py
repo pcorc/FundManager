@@ -41,9 +41,13 @@ def main():
     fund_manager = FundManager(registry, data_store)
     results = fund_manager.run_daily_operations(OPERATIONS)
 
-    # STEP 6: Generate reports
-    report_orchestrator = ReportOrchestrator(OUTPUT_DIR)
-    # report_orchestrator.generate_reports(results, TARGET_DATE)
+    # STEP 6: Generate compliance reports
+    build_compliance_reports(
+        results,
+        TARGET_DATE,
+        OUTPUT_DIR,
+        create_pdf=True,
+    )
 
     print(f"✅ Done! Processed {len(results.fund_results)} funds")
     print(f"📊 Summary: {results.summary}")
