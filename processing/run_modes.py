@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Dict, Mapping, MutableMapping, Optional, Sequence, Tuple
-import pandas as pd
 
 from config.fund_registry import FundRegistry
 from processing.bulk_data_loader import BulkDataLoader, BulkDataStore
 from processing.fund_manager import FundManager, ProcessingResults
 from reporting.compliance_reporter import build_compliance_reports
+from reporting.reconciliation_reporter import build_reconciliation_reports
 from reporting.nav_recon_reporter import build_nav_reconciliation_reports
 from reporting.trade_compliance_reporter import build_trading_compliance_reports
 
@@ -91,6 +91,7 @@ def run_eod_mode(
         data_store,
         operations=params.operations,
         analysis_type="eod",
+        compliance_tests=params.compliance_tests,
     )
 
     compliance_payload = _extract_payload(results, "compliance_results")
@@ -108,7 +109,7 @@ def run_eod_mode(
         )
 
     if any(name in params.operations for name in ("reconciliation", "nav_reconciliation")):
-        artefacts["reconciliation"] = build_reconciliation_reports(
+        artefacts["reconciliation"] = build_nav_reconciliation_reports(
             holdings_results=reconciliation_payload if "reconciliation" in params.operations else None,
             nav_results=nav_payload if "nav_reconciliation" in params.operations else None,
             report_date=params.trade_date,
@@ -135,12 +136,14 @@ def run_trading_mode(
         ex_ante_store,
         operations=["compliance"],
         analysis_type="ex_ante",
+        compliance_tests=params.compliance_tests,
     )
     results_ex_post = _run_operations(
         registry,
         ex_post_store,
         operations=["compliance"],
         analysis_type="ex_post",
+        compliance_tests=params.compliance_tests,
     )
 
     ante_payload = _extract_payload(results_ex_ante, "compliance_results")
@@ -149,15 +152,12 @@ def run_trading_mode(
     if not ante_payload and not post_payload:
         raise RuntimeError("Trading compliance run produced no compliance results to compare")
 
-    traded_funds_info = _summarize_trading_activity(ex_post_store)
-
     artefacts = build_trading_compliance_reports(
         results_ex_ante=ante_payload,
         results_ex_post=post_payload,
         report_date=params.ex_post_date,
         output_dir=str(output_dir),
         create_pdf=params.create_pdf,
-        traded_funds_info=traded_funds_info,
     )
 
     return results_ex_ante, results_ex_post, artefacts
@@ -223,9 +223,12 @@ def _run_operations(
     *,
     operations: Sequence[str],
     analysis_type: str,
+    compliance_tests: Sequence[str],
 ) -> ProcessingResults:
     manager = FundManager(registry, data_store, analysis_type=analysis_type)
-    return manager.run_daily_operations(list(operations))
+    return manager.run_daily_operations(
+        list(operations), compliance_tests=list(compliance_tests)
+    )
 
 
 def _extract_payload(results: ProcessingResults, attribute: str) -> Dict[str, Mapping[str, object]]:
@@ -236,64 +239,6 @@ def _extract_payload(results: ProcessingResults, attribute: str) -> Dict[str, Ma
             payload[fund_name] = value
     return payload
 
-def _summarize_trading_activity(data_store: BulkDataStore) -> Dict[str, Dict[str, Any]]:
-    """Aggregate final positions and trading activity by asset class."""
-
-    summaries: Dict[str, Dict[str, Any]] = {}
-    for fund_name, payload in data_store.fund_data.items():
-        summary = _summarize_fund_trading(payload)
-        if summary:
-            summaries[fund_name] = summary
-    return summaries
-
-
-def _summarize_fund_trading(payload: Mapping[str, Any]) -> Dict[str, Any]:
-    asset_keys = {
-        "equity": "vest_equity",
-        "option": "vest_option",
-        "treasury": "vest_treasury",
-    }
-
-    final_shares: Dict[str, float] = {}
-    net_trades: Dict[str, Dict[str, float]] = {}
-    total_traded = 0.0
-    has_data = False
-
-    for asset, key in asset_keys.items():
-        df = payload.get(key)
-        buys = sells = net_change = 0.0
-        final_position = 0.0
-
-        if isinstance(df, pd.DataFrame) and not df.empty:
-            has_data = True
-            working = df.copy()
-            if "iiv_shares" in working.columns:
-                working["iiv_shares"] = pd.to_numeric(
-                    working["iiv_shares"], errors="coerce"
-                ).fillna(0.0)
-                final_position = float(working["iiv_shares"].sum())
-
-            if "trade_rebal" in working.columns:
-                working["trade_rebal"] = pd.to_numeric(
-                    working["trade_rebal"], errors="coerce"
-                ).fillna(0.0)
-                trade_series = working["trade_rebal"]
-                buys = float(trade_series[trade_series > 0].sum())
-                sells = abs(float(trade_series[trade_series < 0].sum()))
-                net_change = float(trade_series.sum())
-                total_traded += buys + sells
-
-        final_shares[asset] = final_position
-        net_trades[asset] = {"buys": buys, "sells": sells, "net": net_change}
-
-    if not has_data:
-        return {}
-
-    return {
-        "final_shares": final_shares,
-        "net_trades": net_trades,
-        "total_traded": total_traded,
-    }
 
 __all__ = [
     "DataLoadRequest",

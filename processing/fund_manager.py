@@ -1,6 +1,6 @@
 # management/fund_manager.py
 from dataclasses import dataclass
-from typing import Dict, List, Any
+from typing import Any, Dict, List, Optional, Sequence
 import pandas as pd
 import logging
 
@@ -46,7 +46,9 @@ class FundManager:
         self.logger = logging.getLogger(__name__)
         self.available_funds = list(data_store.loaded_funds)
 
-    def run_daily_operations(self, operations: List[str]) -> ProcessingResults:
+    def run_daily_operations(
+        self, operations: List[str], *, compliance_tests: Optional[Sequence[str]] = None
+    ) -> ProcessingResults:
         """Run specified operations for ALL funds using cached data"""
         results: Dict[str, FundResult] = {}
         summary = {
@@ -55,6 +57,8 @@ class FundManager:
             "funds_with_errors": 0,
             "errors": [],
         }
+
+        tests = [test for test in compliance_tests or [] if test]
 
         for fund_name in self.available_funds:
             self.logger.info(f"Processing {fund_name}...")
@@ -72,7 +76,9 @@ class FundManager:
 
                 # Run requested operations
                 if 'compliance' in operations:
-                    fund_result.compliance_results = self._run_compliance(fund)
+                    fund_result.compliance_results = self._run_compliance(
+                        fund, tests
+                    )
 
                 if 'reconciliation' in operations:
                     fund_result.reconciliation_results = self._run_reconciliation(fund)
@@ -209,7 +215,7 @@ class FundManager:
         prior = current - timedelta(days=1)
         return prior.strftime('%Y-%m-%d')
 
-    def _run_compliance(self, fund: Fund) -> Dict[str, Any]:
+    def _run_compliance(self, fund: Fund, tests: Sequence[str]) -> Dict[str, Any]:
         """Run compliance checks"""
         try:
             compliance_checker = ComplianceChecker(
@@ -218,7 +224,8 @@ class FundManager:
                 date=self.data_store.date,
                 base_cls=None
             )
-            results = compliance_checker.run_compliance_tests()
+            requested = list(tests) if tests else None
+            results = compliance_checker.run_compliance_tests(requested)
             return results.get(fund.name, {})
         except Exception as e:
             self.logger.error(f"Compliance error for {fund.name}: {e}")
@@ -242,6 +249,7 @@ class FundManager:
         except Exception as e:
             self.logger.error(f"NAV reconciliation error for {fund.name}: {e}")
             return {'errors': [str(e)], 'differences': []}
+
 
     def _run_reconciliation(self, fund: Fund) -> Dict[str, Any]:
         """Run reconciliation"""
