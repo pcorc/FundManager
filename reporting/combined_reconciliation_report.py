@@ -8,7 +8,7 @@ from typing import Any, Dict, Iterable, Mapping
 from fpdf import FPDF
 
 from reporting.holdings_recon_renderer import HoldingsReconciliationRenderer
-from services.compliance_summary_extractor import extract_compliance_summary
+from reporting.compliance_summary_extractor import extract_compliance_summary
 
 logger = logging.getLogger(__name__)
 

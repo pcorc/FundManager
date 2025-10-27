@@ -1,47 +1,68 @@
-"""Utilities for summarising compliance checker results."""
+"""Helpers to create compact compliance summaries for reporting."""
 from __future__ import annotations
 
 from typing import Any, Dict, Mapping
 
-
-PASS_VALUES = {True, "PASS", "Pass", "pass"}
-FAIL_VALUES = {False, "FAIL", "Fail", "fail"}
-
-
-def _normalise_status(value: Any) -> str:
-    if value in PASS_VALUES:
-        return "PASS"
-    if value in FAIL_VALUES:
-        return "FAIL"
-    if isinstance(value, str):
-        upper = value.upper()
-        if upper in {"PASS", "FAIL"}:
-            return upper
-    return "N/A"
+from reporting.report_utils import normalize_compliance_results
 
 
 def extract_compliance_summary(results: Mapping[str, Any]) -> Dict[str, Dict[str, str]]:
-    """Return a light-weight PASS/FAIL summary for each compliance test."""
+    """Convert raw compliance results into PASS/FAIL/N/A summaries."""
 
+    normalized = normalize_compliance_results(results or {})
     summary: Dict[str, Dict[str, str]] = {}
-    for fund_name, fund_results in (results or {}).items():
-        if not isinstance(fund_results, Mapping):
-            continue
+
+    for fund_name, tests in normalized.items():
         fund_summary: Dict[str, str] = {}
-        for test_name, payload in fund_results.items():
-            if not isinstance(test_name, str):
-                continue
-            status = None
-            if isinstance(payload, Mapping):
-                for key in ("status", "result", "outcome", "is_compliant"):
-                    if key in payload:
-                        status = payload[key]
-                        break
-                if status is None and "details" in payload and isinstance(payload["details"], Mapping):
-                    status = payload["details"].get("status")
-            else:
-                status = payload
-            fund_summary[test_name] = _normalise_status(status)
-        if fund_summary:
-            summary[fund_name] = fund_summary
+        for test_name, payload in tests.items():
+            status = _coerce_status(payload)
+            formatted_name = _format_test_name(test_name)
+            fund_summary[formatted_name] = status
+        summary[str(fund_name)] = fund_summary
+
     return summary
+
+
+def _coerce_status(payload: Any) -> str:
+    if isinstance(payload, Mapping):
+        if "is_compliant" in payload:
+            value = payload.get("is_compliant")
+            if isinstance(value, bool):
+                return "PASS" if value else "FAIL"
+            if isinstance(value, str):
+                return _normalise_str_status(value)
+        if "status" in payload:
+            return _normalise_str_status(payload.get("status"))
+        if "value" in payload:
+            return _normalise_str_status(payload.get("value"))
+    elif isinstance(payload, bool):
+        return "PASS" if payload else "FAIL"
+    elif isinstance(payload, str):
+        return _normalise_str_status(payload)
+    return "N/A"
+
+
+def _normalise_str_status(value: Any) -> str:
+    if value is None:
+        return "N/A"
+    text = str(value).strip().upper()
+    if text in {"PASS", "PASSED", "COMPLIANT", "TRUE", "Y"}:
+        return "PASS"
+    if text in {"FAIL", "FAILED", "BREACH", "FALSE", "N", "NO"}:
+        return "FAIL"
+    return "N/A"
+
+
+def _format_test_name(name: Any) -> str:
+    if not isinstance(name, str):
+        return str(name)
+    canonical = name.strip()
+    replacements = {
+        "illiquid": "Illiquid",
+        "summary_metrics": "Summary",
+    }
+    if canonical.lower() in replacements:
+        return replacements[canonical.lower()]
+    if canonical.upper() in {"80%", "40 ACT", "12D1", "12D2", "12D3"}:
+        return canonical.upper()
+    return canonical.replace("_", " ").title()
