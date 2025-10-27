@@ -5,7 +5,7 @@ from datetime import date
 from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
-from sqlalchemy import func, literal
+from sqlalchemy import func, literal, and_, or_
 
 from utilities.ticker_utils import normalize_all_holdings
 
@@ -1166,6 +1166,17 @@ class BulkDataLoader:
             if column is not None:
                 return func.upper(func.trim(column)).label(alias)
         return literal(None).label(alias)
+
+    def _get_mapping_value(self, mapping: Dict, *keys: str) -> Optional[str]:
+        for key in keys:
+            value = mapping.get(key)
+            if isinstance(value, str):
+                trimmed = value.strip()
+                if trimmed and trimmed.upper() != 'NULL':
+                    return trimmed
+            elif value:
+                return value
+        return None
 
     def _collect_fund_aliases(self, funds: List) -> List[str]:
         aliases: Set[str] = set()

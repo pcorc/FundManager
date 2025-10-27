@@ -416,3 +416,9 @@ AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
 2025-10-26 19:57:11,916 - compliance_checker - INFO - Running compliance tests for DOGG
 2025-10-26 19:57:11,938 - compliance_checker - ERROR - Error in IRS diversification check for DOGG: Cannot set non-string value '0.0' into a StringArray.
 2025-10-26 19:57:11,973 - compliance_checker - ERROR - Error in IRC diversification check for DOGG: Cannot set non-string value '0.0' into a StringArray.
+2025-10-26 20:03:55,841 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-26 20:03:55,865 - compliance_checker - ERROR - Error in IRS diversification check for DOGG: Cannot set non-string value '0.0' into a StringArray.
+2025-10-26 20:03:55,901 - compliance_checker - ERROR - Error in IRC diversification check for DOGG: Cannot set non-string value '0.0' into a StringArray.
+2025-10-26 20:07:14,660 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-26 20:07:14,684 - compliance_checker - ERROR - Error in IRS diversification check for DOGG: Cannot set non-string value '0.0' into a StringArray.
+2025-10-26 20:07:14,718 - compliance_checker - ERROR - Error in IRC diversification check for DOGG: Cannot set non-string value '0.0' into a StringArray.
