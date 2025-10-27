@@ -8,6 +8,11 @@ import pandas as pd
 
 from domain.fund import Fund
 from utilities.logger import setup_logger
+from utilities.ticker_utils import (
+    ensure_equity_schema,
+    ensure_option_schema,
+    ensure_treasury_schema,
+)
 
 try:  # pragma: no cover - optional configuration module
     from config import constants as config_constants  # type: ignore
@@ -1261,154 +1266,10 @@ class ComplianceChecker:
     # Helpers
     # ------------------------------------------------------------------
     def _get_holdings(self, fund: Fund) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        equity = self._normalize_equity_dataframe(fund.equity_holdings)
-        options = self._normalize_option_dataframe(fund.options_holdings)
-        treasury = self._normalize_treasury_dataframe(fund.treasury_holdings)
+        equity = ensure_equity_schema(fund.equity_holdings)
+        options = ensure_option_schema(fund.options_holdings)
+        treasury = ensure_treasury_schema(fund.treasury_holdings)
         return equity, options, treasury
-
-    def _normalize_equity_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        if not isinstance(df, pd.DataFrame) or df.empty:
-            return pd.DataFrame(
-                columns=[
-                    "equity_ticker",
-                    "equity_market_value",
-                    "quantity",
-                    "GICS_SECTOR_NAME",
-                    "GICS_INDUSTRY_NAME",
-                    "GICS_INDUSTRY_GROUP_NAME",
-                    "REGULATORY_STRUCTURE",
-                    "is_illiquid",
-                    "EQY_SH_OUT_million",
-                    "SECURITY_TYP",
-                ]
-            )
-
-        df = df.copy()
-        ticker_column = self._resolve_column(
-            df,
-            ["equity_ticker", "ticker", "symbol", "underlying_symbol", "security_ticker"],
-        )
-        if ticker_column and ticker_column != "equity_ticker":
-            df["equity_ticker"] = df[ticker_column]
-
-        if "equity_market_value" in df.columns:
-            df["equity_market_value"] = pd.to_numeric(
-                df["equity_market_value"], errors="coerce"
-            ).fillna(0.0)
-        elif "market_value" in df.columns:
-            df["equity_market_value"] = pd.to_numeric(
-                df["market_value"], errors="coerce"
-            ).fillna(0.0)
-        elif {"price", "quantity"}.issubset(df.columns):
-            df["equity_market_value"] = (
-                pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
-                * pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
-            )
-        else:
-            df["equity_market_value"] = 0.0
-
-        if "quantity" in df.columns:
-            df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
-        else:
-            df["quantity"] = 0.0
-
-        for column in [
-            "GICS_SECTOR_NAME",
-            "GICS_INDUSTRY_NAME",
-            "GICS_INDUSTRY_GROUP_NAME",
-            "REGULATORY_STRUCTURE",
-            "SECURITY_TYP",
-        ]:
-            if column not in df.columns:
-                df[column] = None
-
-        if "is_illiquid" not in df.columns:
-            df["is_illiquid"] = False
-        if "EQY_SH_OUT_million" not in df.columns:
-            df["EQY_SH_OUT_million"] = 0.0
-
-        return df
-
-    def _normalize_option_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        if not isinstance(df, pd.DataFrame) or df.empty:
-            return pd.DataFrame(
-                columns=[
-                    "equity_ticker",
-                    "option_market_value",
-                    "option_delta_adjusted_notional",
-                    "option_notional_value",
-                    "option_delta_adjusted_market_value",
-                    "is_illiquid",
-                    "price",
-                    "quantity",
-                    "optticker",
-                ]
-            )
-
-        df = df.copy()
-        ticker_column = self._resolve_column(
-            df,
-            ["equity_ticker", "underlying", "underlying_symbol", "ticker"],
-        )
-        if ticker_column and ticker_column != "equity_ticker":
-            df["equity_ticker"] = df[ticker_column]
-
-        if "option_market_value" in df.columns:
-            df["option_market_value"] = pd.to_numeric(
-                df["option_market_value"], errors="coerce"
-            ).fillna(0.0)
-        elif {"price", "quantity"}.issubset(df.columns):
-            df["option_market_value"] = (
-                pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
-                * pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
-                * 100
-            )
-        else:
-            df["option_market_value"] = 0.0
-
-        for column in [
-            "option_delta_adjusted_notional",
-            "option_notional_value",
-            "option_delta_adjusted_market_value",
-            "price",
-            "quantity",
-        ]:
-            if column in df.columns:
-                df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
-            else:
-                df[column] = 0.0
-
-        if "is_illiquid" not in df.columns:
-            df["is_illiquid"] = False
-        if "optticker" not in df.columns:
-            df["optticker"] = ""
-
-        return df
-
-    def _normalize_treasury_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        if not isinstance(df, pd.DataFrame) or df.empty:
-            return pd.DataFrame(
-                columns=["treasury_market_value", "price", "quantity"]
-            )
-
-        df = df.copy()
-        if "treasury_market_value" in df.columns:
-            df["treasury_market_value"] = pd.to_numeric(
-                df["treasury_market_value"], errors="coerce"
-            ).fillna(0.0)
-        elif "market_value" in df.columns:
-            df["treasury_market_value"] = pd.to_numeric(
-                df["market_value"], errors="coerce"
-            ).fillna(0.0)
-        elif {"price", "quantity"}.issubset(df.columns):
-            df["treasury_market_value"] = (
-                pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
-                * pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
-            )
-        else:
-            df["treasury_market_value"] = 0.0
-
-        return df
 
     def _get_total_assets(self, fund: Fund) -> Tuple[float, float]:
         return float(fund.total_assets or 0.0), float(fund.total_net_assets or 0.0)

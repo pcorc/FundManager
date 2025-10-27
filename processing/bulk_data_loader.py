@@ -5,7 +5,7 @@ from datetime import date
 from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
-from sqlalchemy import literal
+from sqlalchemy import func, literal
 
 from utilities.ticker_utils import normalize_all_holdings
 
@@ -83,47 +83,40 @@ class BulkDataLoader:
         previous_date: Optional[date],
     ) -> None:
         """Load ALL custodian holdings for ALL funds in one query per table."""
-        # Group funds by custodian table (BNY, UMB, etc.)
-        table_to_funds = self._group_funds_by_table(all_funds, 'custodian_equity_holdings')
+        holdings_map = [
+            ('custodian_equity_holdings', 'custodian_equity', 'custodian_equity_t1', 'equity'),
+            ('custodian_option_holdings', 'custodian_option', 'custodian_option_t1', 'option'),
+            (
+                'custodian_treasury_holdings',
+                'custodian_treasury',
+                'custodian_treasury_t1',
+                'treasury',
+            ),
+        ]
 
-        for table_name, funds in table_to_funds.items():
-            if not table_name or table_name == 'NULL':
-                continue
+        for config_key, payload_key, payload_key_t1, holdings_kind in holdings_map:
+            table_to_funds = self._group_funds_by_table(all_funds, config_key)
 
-            # ONE QUERY: Get all data for this table/date
-            try:
-                table = getattr(self.base_cls.classes, table_name)
-                date_column = self._get_table_column(table, 'date', 'trade_date', 'business_date')
-                query = self.session.query(table)
-                if date_column is not None:
-                    query = self._apply_date_filter(
-                        query, date_column, target_date, previous_date
-                    )
-                all_data = pd.read_sql(query.statement, self.session.bind)
+            for table_name, funds in table_to_funds.items():
+                if not table_name or table_name == 'NULL':
+                    continue
 
-                # Distribute data to appropriate funds
-                for fund in funds:
-                    fund_name = fund.name
-                    fund_data = self._filter_by_fund(all_data, fund_name, fund.mapping_data)
-                    current, previous = self._split_current_previous(
-                        fund_data,
-                        self._find_date_column(
-                            fund_data,
-                            'date',
-                            'trade_date',
-                            'business_date',
-                        ),
+                try:
+                    all_data = self._query_custodian_holdings_table(
+                        table_name,
+                        holdings_kind,
+                        funds,
                         target_date,
                         previous_date,
                     )
-                    self._store_fund_data(data_store, fund_name, 'custodian_equity', current)
-                    if previous_date is not None:
-                        self._store_fund_data(
-                            data_store, fund_name, 'custodian_equity_t1', previous
-                        )
-
-            except Exception as e:
-                self.logger.warning(f"Failed to load {table_name}: {e}")
+                except Exception as exc:
+                    self.logger.warning(
+                        "Failed to load %s (%s holdings): %s",
+                        table_name,
+                        holdings_kind,
+                        exc,
+                    )
+                    continue
 
     def _normalise_loaded_holdings(self, data_store: BulkDataStore) -> None:
         """
@@ -623,6 +616,294 @@ class BulkDataLoader:
         if previous_date is None:
             return current
         return current, previous
+
+    def _query_custodian_holdings_table(
+        self,
+        table_name: str,
+        holdings_kind: str,
+        funds: List,
+        target_date: date,
+        previous_date: Optional[date],
+    ) -> pd.DataFrame:
+        """Build a custodian-aware query that labels shared columns consistently."""
+
+        table = getattr(self.base_cls.classes, table_name)
+        lower_name = table_name.lower()
+
+        if 'bny' in lower_name:
+            query = self._build_bny_holdings_query(
+                table, holdings_kind, target_date, previous_date
+            )
+        elif 'umb' in lower_name:
+            query = self._build_umb_holdings_query(
+                table, holdings_kind, target_date, previous_date
+            )
+        else:
+            query = self.session.query(table)
+
+        date_column = self._get_table_column(
+            table,
+            'date',
+            'trade_date',
+            'business_date',
+            'process_date',
+            'effective_date',
+        )
+        if date_column is not None:
+            query = self._apply_date_filter(query, date_column, target_date, previous_date)
+
+        fund_column = self._get_table_column(
+            table,
+            'fund',
+            'fund_ticker',
+            'fund_name',
+            'account',
+            'account_number',
+        )
+        fund_values = self._collect_fund_aliases(funds)
+        if fund_column is not None and fund_values:
+            query = query.filter(fund_column.in_(fund_values))
+
+        return pd.read_sql(query.statement, self.session.bind)
+
+    def _build_bny_holdings_query(
+        self,
+        table,
+        holdings_kind: str,
+        target_date: date,
+        previous_date: Optional[date],
+    ):
+        """Select the canonical columns for BNY custodian datasets."""
+
+        min_date = target_date if previous_date is None else min(target_date, previous_date)
+        asset_group = getattr(table, 'asset_group', None)
+
+        base_columns = [
+            self._column_or_literal(table, 'date', 'date', 'trade_date', 'business_date'),
+            self._column_or_literal(table, 'fund', 'fund'),
+        ]
+
+        if holdings_kind == 'equity':
+            columns = base_columns + [
+                self._label_upper(
+                    table,
+                    (
+                        'security_ticker',
+                        'ticker',
+                        'security_description_short',
+                        'security_description_long_1',
+                    ),
+                    'equity_ticker',
+                ),
+                self._column_or_literal(table, 'sedol', 'security_sedol', 'sedol'),
+                self._column_or_literal(table, 'quantity', 'sharespar', 'quantity'),
+                self._column_or_literal(table, 'price', 'price_base'),
+                self._column_or_literal(
+                    table,
+                    'market_value',
+                    'traded_market_value_base',
+                    'market_value',
+                ),
+                self._column_or_literal(table, 'category_description', 'category_description'),
+                self._column_or_literal(table, 'asset_group', 'asset_group'),
+            ]
+            query = self.session.query(*columns)
+            if asset_group is not None:
+                query = query.filter(
+                    asset_group.notin_(
+                        ['O', 'UN', 'ME', 'MM', 'CA', 'TI', 'B']
+                    )
+                )
+            return query
+
+        if holdings_kind == 'option':
+            maturity_column = getattr(table, 'maturity_date', None)
+            columns = base_columns + [
+                self._label_upper(
+                    table,
+                    (
+                        'security_description_long_1',
+                        'security_description',
+                        'ticker',
+                        'osi_symbol',
+                    ),
+                    'optticker',
+                ),
+                self._label_upper(
+                    table,
+                    (
+                        'security_ticker',
+                        'equity_ticker',
+                        'underlying_symbol',
+                        'ticker_underlying',
+                    ),
+                    'equity_ticker',
+                ),
+                self._column_or_literal(table, 'quantity', 'sharespar', 'quantity'),
+                self._column_or_literal(table, 'price', 'price_base'),
+                self._column_or_literal(
+                    table,
+                    'market_value',
+                    'traded_market_value_base',
+                    'market_value',
+                ),
+                self._column_or_literal(table, 'category_description', 'category_description'),
+                self._column_or_literal(table, 'asset_group', 'asset_group'),
+                self._column_or_literal(table, 'cusip', 'security_cins', 'cusip'),
+                self._column_or_literal(table, 'maturity_date', 'maturity_date'),
+            ]
+            query = self.session.query(*columns)
+            if asset_group is not None:
+                query = query.filter(
+                    asset_group.notin_(
+                        ['S', 'FS', 'UN', 'ME', 'MM', 'CA', 'B', 'TI']
+                    )
+                )
+            if maturity_column is not None and min_date is not None:
+                query = query.filter(maturity_column >= min_date)
+            return query
+
+        columns = base_columns + [
+            self._column_or_literal(table, 'cusip', 'security_cins', 'cusip'),
+            self._column_or_literal(table, 'sedol', 'security_sedol', 'sedol'),
+            self._label_upper(
+                table,
+                (
+                    'security_description_long_1',
+                    'ticker',
+                    'security_description',
+                ),
+                'ticker',
+            ),
+            self._column_or_literal(table, 'maturity', 'maturity_date', 'maturity'),
+            self._column_or_literal(table, 'quantity', 'sharespar', 'quantity'),
+            self._column_or_literal(table, 'price', 'price_base'),
+            self._column_or_literal(
+                table,
+                'market_value',
+                'traded_market_value_base',
+                'market_value',
+            ),
+            self._column_or_literal(table, 'asset_group', 'asset_group'),
+        ]
+        query = self.session.query(*columns)
+        if asset_group is not None:
+            query = query.filter(asset_group == 'TI')
+        return query
+
+    def _build_umb_holdings_query(
+        self,
+        table,
+        holdings_kind: str,
+        target_date: date,
+        previous_date: Optional[date],
+    ):
+        """Select the canonical columns for UMB custodian datasets."""
+
+        base_columns = [
+            self._column_or_literal(
+                table, 'date', 'process_date', 'date', 'business_date'
+            ),
+            self._column_or_literal(table, 'fund', 'fund'),
+        ]
+
+        category_column = getattr(table, 'security_catgry', None)
+
+        if holdings_kind == 'equity':
+            columns = base_columns + [
+                self._label_upper(table, ('security_tkr', 'ticker'), 'equity_ticker'),
+                self._column_or_literal(table, 'quantity', 'mkt_qty', 'quantity'),
+                self._column_or_literal(table, 'price', 'eod_close', 'price'),
+                self._column_or_literal(table, 'market_value', 'mkt_mktval', 'market_value'),
+                self._column_or_literal(
+                    table,
+                    'category_description',
+                    'security_catgry',
+                    'category_description',
+                ),
+            ]
+            query = self.session.query(*columns)
+            if category_column is not None:
+                query = query.filter(category_column.in_(['COMMON', 'REIT']))
+            return query
+
+        if holdings_kind == 'option':
+            desc_column = getattr(table, 'security_desc', None)
+            if desc_column is not None:
+                first_space = func.instr(desc_column, ' ')
+                optticker_expr = func.concat(
+                    func.substr(desc_column, 1, first_space),
+                    literal('US'),
+                    func.substr(desc_column, first_space),
+                )
+                optticker_expr = func.upper(func.trim(optticker_expr)).label('optticker')
+            else:
+                optticker_expr = literal(None).label('optticker')
+
+            columns = base_columns + [
+                optticker_expr,
+                self._label_upper(table, ('security_tkr', 'ticker'), 'equity_ticker'),
+                self._column_or_literal(table, 'quantity', 'mkt_qty', 'quantity'),
+                self._column_or_literal(table, 'price', 'eod_close', 'price'),
+                self._column_or_literal(table, 'market_value', 'mkt_mktval', 'market_value'),
+                self._column_or_literal(
+                    table,
+                    'category_description',
+                    'security_catgry',
+                    'category_description',
+                ),
+                self._column_or_literal(table, 'occ_symbol', 'occ_id', 'occ_symbol'),
+            ]
+            query = self.session.query(*columns)
+            if category_column is not None:
+                query = query.filter(category_column.like('OPT%'))
+            return query
+
+        return self.session.query(table)
+
+    def _column_or_literal(
+        self,
+        table,
+        alias: str,
+        *candidates: str,
+        default=None,
+    ):
+        for name in candidates:
+            column = getattr(table, name, None)
+            if column is not None:
+                return column.label(alias)
+        return literal(default).label(alias)
+
+    def _label_upper(
+        self,
+        table,
+        candidates: Tuple[str, ...],
+        alias: str,
+    ):
+        for name in candidates:
+            column = getattr(table, name, None)
+            if column is not None:
+                return func.upper(func.trim(column)).label(alias)
+        return literal(None).label(alias)
+
+    def _collect_fund_aliases(self, funds: List) -> List[str]:
+        aliases: Set[str] = set()
+        for fund in funds:
+            aliases.add(fund.name)
+            mapping = getattr(fund, 'mapping_data', {}) or {}
+            for key in (
+                'fund',
+                'fund_name',
+                'fund_ticker',
+                'portfolio',
+                'account',
+                'account_number',
+                'account_number_custodian',
+            ):
+                value = mapping.get(key)
+                if isinstance(value, str) and value and value != 'NULL':
+                    aliases.add(value)
+        return sorted(aliases)
 
     def _apply_date_filter(self, query, column, target_date: date, previous_date: Optional[date]):
         if previous_date is not None:
