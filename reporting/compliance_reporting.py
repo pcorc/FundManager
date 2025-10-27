@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -87,6 +88,26 @@ class ComplianceReport:
         return str(value)
 
     # ------------------------------------------------------------------
+    def _append_footnotes(self, df: pd.DataFrame, footnote_key: str) -> pd.DataFrame:
+        notes = FOOTNOTES.get(footnote_key, [])
+        if not notes:
+            return df
+
+        columns = list(df.columns) if not df.empty else ["Note"]
+        target_column = "Date" if "Date" in columns else columns[0]
+
+        footnote_rows = []
+        for note in notes:
+            row = {column: "" for column in columns}
+            row[target_column] = f"* {note}"
+            footnote_rows.append(row)
+
+        footnotes_df = pd.DataFrame(footnote_rows)
+        if df.empty:
+            return footnotes_df
+        return pd.concat([df, footnotes_df], ignore_index=True)
+
+    # ------------------------------------------------------------------
     def process_summary(self) -> None:
         rows = []
         for date_str, funds in self.results.items():
@@ -108,9 +129,33 @@ class ComplianceReport:
                     }
                 )
 
-        if rows:
-            df = pd.DataFrame(rows)
-            self.sheet_data["Summary"] = df
+        columns = [
+            "Date",
+            "Fund",
+            "Cash",
+            "Treasury",
+            "Equity",
+            "Option DAN",
+            "Option MV",
+            "Total Assets",
+            "Total Net Assets",
+        ]
+
+        if not rows:
+            self.sheet_data["Summary"] = pd.DataFrame(columns=columns)
+            return
+
+        df = pd.DataFrame(rows, columns=columns)
+        df["Date"] = pd.to_datetime(df["Date"]).dt.date
+
+        numeric_columns = [column for column in columns if column not in {"Date", "Fund"}]
+        for column in numeric_columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
+
+        df.sort_values(by=["Date", "Fund"], inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        self.sheet_data["Summary"] = df
+
 
     # ------------------------------------------------------------------
     def process_gics_compliance(self) -> None:
@@ -167,105 +212,280 @@ class ComplianceReport:
             self.sheet_data["GICS_Details"] = details_df
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     def process_prospectus_80pct_policy(self) -> None:
-        rows = []
+        formatted_rows: list[OrderedDict[str, object]] = []
+        excel_row = 2
+
         for date_str, funds in self.results.items():
             report_date = pd.to_datetime(date_str).date()
             for fund_name, fund_data in funds.items():
                 prospectus = fund_data.get("prospectus_80pct_policy")
                 if not prospectus:
+                    logger.warning("No prospectus 80%% policy data for %s", fund_name)
                     continue
-                calculations = prospectus.get("calculations", {})
-                threshold = calculations.get("threshold", 0.8)
-                names_test = calculations.get("names_test") or 0.0
-                names_test_mv = calculations.get("names_test_mv") or 0.0
 
-                rows.append(
-                    {
-                        "Date": report_date,
-                        "Fund": fund_name,
-                        "Compliance (DAN)": "PASS" if names_test >= threshold else "FAIL",
-                        "Names Test (DAN)": names_test,
-                        "Names Test (Market Value)": names_test_mv,
-                        "Threshold": threshold,
-                        "Options In Scope": "Yes" if prospectus.get("options_in_scope") else "No",
-                        "Total Equity MV": calculations.get("total_equity_market_value", 0.0),
-                        "Total Option DAN": abs(calculations.get("total_opt_delta_notional_value", 0.0)),
-                        "Total Option MV": calculations.get("total_opt_market_value", 0.0),
-                        "Total T-Bill Value": calculations.get("total_tbill_value", 0.0),
-                        "Total Cash Value": calculations.get("total_cash_value", 0.0),
-                    }
+                calculations = prospectus.get("calculations", {}) or {}
+
+                total_equity_market_value = calculations.get("total_equity_market_value", 0.0) or 0.0
+                total_option_dan = abs(calculations.get("total_opt_delta_notional_value", 0.0) or 0.0)
+                total_opt_market_value = calculations.get("total_opt_market_value", 0.0) or 0.0
+                total_tbill_value = calculations.get("total_tbill_value", 0.0) or 0.0
+                total_cash_value = calculations.get("total_cash_value", 0.0) or 0.0
+
+                options_in_scope = bool(prospectus.get("options_in_scope"))
+
+                numerator = (
+                    total_equity_market_value
+                    + (total_option_dan if options_in_scope else 0.0)
+                    + total_tbill_value
+                )
+                denominator = (
+                    total_equity_market_value
+                    + total_option_dan
+                    + total_cash_value
+                    + total_tbill_value
                 )
 
-        if rows:
-            df = pd.DataFrame(rows)
-            fn_df = pd.DataFrame({"Note": [f"* {note}" for note in FOOTNOTES.get("prospectus_80pct", [])]})
-            self.sheet_data["Prospectus_80pct"] = pd.concat([df, fn_df], ignore_index=True)
+                numerator_mv = (
+                    total_equity_market_value
+                    + (total_opt_market_value if options_in_scope else 0.0)
+                    + total_tbill_value
+                )
+                denominator_mv = (
+                    total_equity_market_value
+                    + total_opt_market_value
+                    + total_cash_value
+                    + total_tbill_value
+                )
+
+                max_ccet_dan = max((total_cash_value + total_tbill_value) - total_option_dan, 0.0)
+
+                row_data = OrderedDict(
+                    [
+                        ("Date", report_date),
+                        ("Fund", fund_name),
+                        (
+                            "Prospectus 80% Compliance",
+                            f'=IF(K{excel_row}/J{excel_row}>=0.8,"PASS","FAIL")',
+                        ),
+                        ("Total Equity Market Value", total_equity_market_value),
+                        ("Total Option Delta Notional Value (DAN)", total_option_dan),
+                        ("Total Option Market Value", total_opt_market_value),
+                        ("Total T-Bill Value", total_tbill_value),
+                        ("Total Cash Value", total_cash_value),
+                        ("Max(CCET - DAN, 0)", max_ccet_dan),
+                        ("Denominator", denominator),
+                        ("Numerator", numerator),
+                        ("Formula", f"=K{excel_row}/J{excel_row}"),
+                        ("Denominator (Market Value)", denominator_mv),
+                        ("Numerator (Market Value)", numerator_mv),
+                        ("Formula (MV)", f"=N{excel_row}/M{excel_row}"),
+                        ("Options in Scope for 80%?", "Yes" if options_in_scope else "No"),
+                    ]
+                )
+
+                formatted_rows.append(row_data)
+                excel_row += 1
+
+        if formatted_rows:
+            df = pd.DataFrame(formatted_rows)
+            df = self._append_footnotes(df, "prospectus_80pct")
+            self.sheet_data["Prospectus_80pct"] = df
 
     # ------------------------------------------------------------------
     def process_40_act_diversification(self) -> None:
-        rows = []
+        formatted_rows: list[OrderedDict[str, object]] = []
+        excel_row = 2
+
         for date_str, funds in self.results.items():
             report_date = pd.to_datetime(date_str).date()
             for fund_name, fund_data in funds.items():
                 forty_act = fund_data.get("diversification_40act_check")
                 if not forty_act:
                     continue
-                calc = forty_act.get("calculations", {})
-                rows.append(
-                    {
-                        "Date": report_date,
-                        "Fund": fund_name,
-                        "Condition 1": "PASS" if forty_act.get("condition_40act_1") else "FAIL",
-                        "Condition 2a": "PASS" if forty_act.get("condition_40act_2a") else "FAIL",
-                        "Condition 2b": "PASS" if forty_act.get("condition_40act_2b") else "FAIL",
-                        "Condition 2a OCC": "PASS" if forty_act.get("condition_40act_2a_occ") else "FAIL",
-                        "Fund Registration": calc.get("fund_registration"),
-                        "Total Assets": calc.get("total_assets", 0.0),
-                        "Net Assets": calc.get("net_assets", 0.0),
-                        "Issuer Limited Sum": calc.get("issuer_limited_sum", 0.0),
-                        "OCC Market Value": calc.get("occ_market_value", 0.0),
-                        "OCC Weight": calc.get("occ_weight", 0.0),
-                        "Cumulative Weight Excluded": calc.get("cumulative_weight_excluded", 0.0),
-                        "Cumulative Weight Remaining": calc.get("cumulative_weight_remaining", 0.0),
-                    }
+
+                calculations = forty_act.get("calculations", {}) or {}
+
+                issuer_limited = calculations.get("issuer_limited_securities", []) or []
+                if issuer_limited:
+                    issuer_limited_str = ", ".join(
+                        f"({sec.get('equity_ticker')}, {sec.get('quantity')}, {sec.get('net_market_value', 0):,.2f})"
+                        for sec in issuer_limited
+                    )
+                else:
+                    issuer_limited_str = "None"
+
+                excluded = calculations.get("excluded_securities", []) or []
+                excluded_str = ", ".join(excluded) if excluded else "None"
+
+                remaining_details = calculations.get("remaining_stocks_details", []) or []
+                if remaining_details:
+                    remaining_str = ", ".join(
+                        "({ticker}, {shares:,.0f}, {vest_weight:.2%}, {ownership:.2%})".format(
+                            ticker=entry.get('equity_ticker'),
+                            shares=entry.get('quantity', 0) or 0,
+                            vest_weight=float(entry.get('vest_weight', 0.0) or 0.0),
+                            ownership=float(entry.get('vest_ownership_of_float', 0.0) or 0.0),
+                        )
+                        for entry in remaining_details
+                    )
+                else:
+                    remaining_str = "None"
+
+                max_ownership_float = float(calculations.get("max_ownership_float", 0.0) or 0.0)
+                occ_market_value = float(calculations.get("occ_market_value", 0.0) or 0.0)
+
+                notes = ""
+                if fund_name in {"FDND", "TDVI"} and forty_act.get("condition_40act_2a"):
+                    if calculations.get("issuer_limited_sum", 0):
+                        notes = (
+                            "NOTE: Jeremy indicated this fund should FAIL condition 2a "
+                            "(has securities >5% in 75% bucket)."
+                        )
+
+                row_data = OrderedDict(
+                    [
+                        ("Date", report_date),
+                        ("Fund", fund_name),
+                        ("Fund Registration", calculations.get("fund_registration")),
+                        (
+                            "Condition 40 Act 1",
+                            f'=IF(J{excel_row}/H{excel_row}>=0.75,"PASS","FAIL")',
+                        ),
+                        (
+                            "Condition 40 Act 2a",
+                            f'=IF(L{excel_row}=0,"PASS","FAIL")',
+                        ),
+                        (
+                            "Condition 40 Act 2b",
+                            f'=IF(R{excel_row}="","",IF(R{excel_row}<=0.1,"PASS","FAIL"))',
+                        ),
+                        (
+                            "Condition 2a OCC",
+                            f'=IF(S{excel_row}=0,"PASS",IF(S{excel_row}<=0.05*J{excel_row},"PASS","FAIL"))',
+                        ),
+                        ("Total Assets", float(calculations.get("total_assets", 0.0) or 0.0)),
+                        (
+                            "Non-Qualifying Assets Weight",
+                            float(calculations.get("non_qualifying_assets_weight", 0.0) or 0.0),
+                        ),
+                        ("Net Assets", float(calculations.get("net_assets", 0.0) or 0.0)),
+                        ("Expenses", abs(float(calculations.get("expenses", 0.0) or 0.0))),
+                        (
+                            "Issuer Limited Assets (Condition 2a) Sum",
+                            float(calculations.get("issuer_limited_sum", 0.0) or 0.0),
+                        ),
+                        (
+                            "Issuer Limited Assets (Condition 2a) (Ticker, Shares, Mkt Value)",
+                            issuer_limited_str,
+                        ),
+                        ("Excluded Securities (25% Bucket)", excluded_str),
+                        (
+                            "Cumulative Weight of Excluded Securities",
+                            float(calculations.get("cumulative_weight_excluded", 0.0) or 0.0),
+                        ),
+                        (
+                            "Cumulative Weight of Remaining Securities",
+                            float(calculations.get("cumulative_weight_remaining", 0.0) or 0.0),
+                        ),
+                        (
+                            "Remaining Securities (Ticker, Shares Held, Vest Weight, Vest Ownership of Float)",
+                            remaining_str,
+                        ),
+                        ("Max Ownership % of Float in 75% bucket", max_ownership_float),
+                        ("OCC Market Value", occ_market_value),
+                        ("OCC Weight", float(calculations.get("occ_weight", 0.0) or 0.0)),
+                        ("Notes", notes),
+                    ]
                 )
 
-        if rows:
-            df = pd.DataFrame(rows)
-            fn_df = pd.DataFrame({"Note": [f"* {note}" for note in FOOTNOTES.get("40act", [])]})
-            self.sheet_data["40Act_Diversification"] = pd.concat([df, fn_df], ignore_index=True)
+                formatted_rows.append(row_data)
+                excel_row += 1
+
+        if formatted_rows:
+            df = pd.DataFrame(formatted_rows)
+            df = self._append_footnotes(df, "40act")
+            self.sheet_data["40Act_Diversification"] = df
 
     # ------------------------------------------------------------------
     def process_irs_diversification(self) -> None:
-        rows = []
+        formatted_rows: list[OrderedDict[str, object]] = []
+        excel_row = 2
+
         for date_str, funds in self.results.items():
             report_date = pd.to_datetime(date_str).date()
             for fund_name, fund_data in funds.items():
                 irs = fund_data.get("diversification_IRS_check")
                 if not irs:
                     continue
-                calc = irs.get("calculations", {})
-                rows.append(
-                    {
-                        "Date": report_date,
-                        "Fund": fund_name,
-                        "Condition 1": "PASS" if irs.get("condition_IRS_1") else "FAIL",
-                        "Condition 2a 50%": "PASS" if irs.get("condition_IRS_2_a_50") else "FAIL",
-                        "Condition 2a 5%": "PASS" if irs.get("condition_IRS_2_a_5") else "FAIL",
-                        "Condition 2a 10%": "PASS" if irs.get("condition_IRS_2_a_10") else "FAIL",
-                        "Total Assets": calc.get("total_assets", 0.0),
-                        "Qualifying Assets Value": calc.get("qualifying_assets_value", 0.0),
-                        "Five % Gross Assets": calc.get("five_pct_gross_assets", 0.0),
-                        "Sum Large Securities Wt": calc.get("sum_large_securities_weights", 0.0),
-                        "Large Securities Count": calc.get("large_securities_count", 0),
-                    }
+
+                calculations = irs.get("calculations", {}) or {}
+
+                large_securities = calculations.get("large_securities", []) or []
+                if large_securities:
+                    large_securities_str = ", ".join(
+                        f"({sec.get('equity_ticker', '')}, {float(sec.get('tna_wgt', 0) or 0):.2%})"
+                        for sec in large_securities
+                    )
+                else:
+                    large_securities_str = "None"
+
+                largest = calculations.get("bottom_50_largest", {}) or {}
+                second = calculations.get("bottom_50_second_largest", {}) or {}
+
+                row_data = OrderedDict(
+                    [
+                        ("Date", report_date),
+                        ("Fund", fund_name),
+                        ("condition_IRS_1", "PASS" if irs.get("condition_IRS_1") else "FAIL"),
+                        (
+                            "condition_IRS_2_a_50",
+                            f'=IF(I{excel_row}/H{excel_row}>=0.5,"PASS","FAIL")',
+                        ),
+                        (
+                            "condition_IRS_2_a_5",
+                            f'=IF(L{excel_row}<=0.5,"PASS","FAIL")',
+                        ),
+                        ("condition_IRS_2_a_10", "PASS" if irs.get("condition_IRS_2_a_10") else "FAIL"),
+                        ("condition_IRS_2_b", "PASS" if irs.get("condition_IRS_2_b", True) else "FAIL"),
+                        ("total_assets", float(calculations.get("total_assets", 0.0) or 0.0)),
+                        (
+                            "qualifying_assets_value",
+                            float(calculations.get("qualifying_assets_value", 0.0) or 0.0),
+                        ),
+                        ("expenses", abs(float(calculations.get("expenses", 0.0) or 0.0))),
+                        (
+                            "five_pct_gross_assets",
+                            float(calculations.get("five_pct_gross_assets", 0.0) or 0.0),
+                        ),
+                        (
+                            "sum_large_securities_weights",
+                            float(calculations.get("sum_large_securities_weights", 0.0) or 0.0),
+                        ),
+                        (
+                            "large_securities_count",
+                            int(calculations.get("large_securities_count", 0) or 0),
+                        ),
+                        ("large_securities", large_securities_str),
+                        (
+                            "bottom_50_largest_holding",
+                            f"{largest.get('equity_ticker', 'N/A')} ({float(largest.get('tna_wgt', 0) or 0):.2%})",
+                        ),
+                        (
+                            "bottom_50_second_largest_holding",
+                            f"{second.get('equity_ticker', 'N/A')} ({float(second.get('tna_wgt', 0) or 0):.2%})",
+                        ),
+                    ]
                 )
 
-        if rows:
-            df = pd.DataFrame(rows)
-            fn_df = pd.DataFrame({"Note": [f"* {note}" for note in FOOTNOTES.get("irs", [])]})
-            self.sheet_data["IRS_Diversification"] = pd.concat([df, fn_df], ignore_index=True)
+                formatted_rows.append(row_data)
+                excel_row += 1
+
+        if formatted_rows:
+            df = pd.DataFrame(formatted_rows)
+            df = self._append_footnotes(df, "irs")
+            self.sheet_data["IRS_Diversification"] = df
 
     # ------------------------------------------------------------------
     def process_irc_diversification(self) -> None:
@@ -295,8 +515,8 @@ class ComplianceReport:
 
         if rows:
             df = pd.DataFrame(rows)
-            fn_df = pd.DataFrame({"Note": [f"* {note}" for note in FOOTNOTES.get("irc", [])]})
-            self.sheet_data["IRC_Diversification"] = pd.concat([df, fn_df], ignore_index=True)
+            df = self._append_footnotes(df, "irc")
+            self.sheet_data["IRC_Diversification"] = df
 
     # ------------------------------------------------------------------
     def process_real_estate_check(self) -> None:
@@ -319,8 +539,8 @@ class ComplianceReport:
 
         if rows:
             df = pd.DataFrame(rows)
-            fn_df = pd.DataFrame({"Note": [f"* {note}" for note in FOOTNOTES.get("real_estate", [])]})
-            self.sheet_data["Real_Estate"] = pd.concat([df, fn_df], ignore_index=True)
+            df = self._append_footnotes(df, "real_estate")
+            self.sheet_data["Real_Estate"] = df
 
     # ------------------------------------------------------------------
     def process_commodities_check(self) -> None:
@@ -345,42 +565,71 @@ class ComplianceReport:
 
         if rows:
             df = pd.DataFrame(rows)
-            fn_df = pd.DataFrame({"Note": [f"* {note}" for note in FOOTNOTES.get("commodities", [])]})
-            self.sheet_data["Commodities"] = pd.concat([df, fn_df], ignore_index=True)
+            df = self._append_footnotes(df, "commodities")
+            self.sheet_data["Commodities"] = df
 
     # ------------------------------------------------------------------
     def process_12d1_other_inv_cos(self) -> None:
-        rows = []
+        formatted_rows: list[OrderedDict[str, object]] = []
+        excel_row = 2
+
         for date_str, funds in self.results.items():
             report_date = pd.to_datetime(date_str).date()
             for fund_name, fund_data in funds.items():
                 rule = fund_data.get("twelve_d1a_other_inv_cos")
                 if not rule:
                     continue
-                calc = rule.get("calculations", {})
-                holdings = calc.get("investment_companies", [])
-                holdings_str = ", ".join(
-                    f"{h.get('equity_ticker') or h.get('ticker')} ({(h.get('ownership_pct') or 0)*100:.2f}%)" for h in holdings
-                ) or "None"
-                rows.append(
-                    {
-                        "Date": report_date,
-                        "Fund": fund_name,
-                        "Test 1 (<=3%)": "PASS" if rule.get("test_1_pass") else "FAIL",
-                        "Test 2 (<=5% assets)": "PASS" if rule.get("test_2_pass") else "FAIL",
-                        "Test 3 (<=10% assets)": "PASS" if rule.get("test_3_pass") else "FAIL",
-                        "Compliant": "PASS" if rule.get("twelve_d1a_other_inv_cos_compliant") else "FAIL",
-                        "Total Assets": calc.get("total_assets", 0.0),
-                        "Equity MV Sum": calc.get("equity_market_value_sum", 0.0),
-                        "Ownership % Max": calc.get("ownership_pct_max", 0.0),
-                        "Investment Companies": holdings_str,
-                    }
+
+                calculations = rule.get("calculations", {}) or {}
+                holdings = calculations.get("investment_companies", []) or []
+                if holdings:
+                    holdings_str = ", ".join(
+                        f"{holding.get('equity_ticker') or holding.get('ticker')} ({(holding.get('ownership_pct') or 0)*100:.2f}%)"
+                        for holding in holdings
+                    )
+                else:
+                    holdings_str = "None"
+
+                row_data = OrderedDict(
+                    [
+                        ("Date", report_date),
+                        ("Fund", fund_name),
+                        ("Total Assets", float(calculations.get("total_assets", 0.0) or 0.0)),
+                        ("Investment Companies", holdings_str),
+                        (
+                            "Ownership % Max",
+                            float(calculations.get("ownership_pct_max", 0.0) or 0.0),
+                        ),
+                        (
+                            "Equity Market Value Sum",
+                            float(calculations.get("equity_market_value_sum", 0.0) or 0.0),
+                        ),
+                        (
+                            "Test 1 (<=3% Ownership)",
+                            f'=IF(E{excel_row}<=0.03,"PASS","FAIL")',
+                        ),
+                        (
+                            "Test 2 (<=5% Total Assets)",
+                            f'=IF(F{excel_row}/C{excel_row}<=0.05,"PASS","FAIL")',
+                        ),
+                        (
+                            "Test 3 (<=10% Total Assets)",
+                            f'=IF(F{excel_row}/C{excel_row}<=0.10,"PASS","FAIL")',
+                        ),
+                        (
+                            "12d1(a) Compliant",
+                            f'=IF(AND(G{excel_row}="PASS",H{excel_row}="PASS",I{excel_row}="PASS"),"PASS","FAIL")',
+                        ),
+                    ]
                 )
 
-        if rows:
-            df = pd.DataFrame(rows)
-            fn_df = pd.DataFrame({"Note": [f"* {note}" for note in FOOTNOTES.get("12d1", [])]})
-            self.sheet_data["12d1_Other_Investment_Companies"] = pd.concat([df, fn_df], ignore_index=True)
+                formatted_rows.append(row_data)
+                excel_row += 1
+
+        if formatted_rows:
+            df = pd.DataFrame(formatted_rows)
+            df = self._append_footnotes(df, "12d1")
+            self.sheet_data["12d1_Other_Investment_Companies"] = df
 
     # ------------------------------------------------------------------
     def process_12d2_insurance_cos(self) -> None:
@@ -408,71 +657,128 @@ class ComplianceReport:
 
         if rows:
             df = pd.DataFrame(rows)
-            fn_df = pd.DataFrame({"Note": [f"* {note}" for note in FOOTNOTES.get("12d2", [])]})
-            self.sheet_data["12d2_Insurance_Companies"] = pd.concat([df, fn_df], ignore_index=True)
+            df = self._append_footnotes(df, "12d2")
+            self.sheet_data["12d2_Insurance_Companies"] = df
 
     # ------------------------------------------------------------------
     def process_12d3_sec_biz(self) -> None:
-        rows = []
+        formatted_rows: list[OrderedDict[str, object]] = []
+        excel_row = 2
+
         for date_str, funds in self.results.items():
             report_date = pd.to_datetime(date_str).date()
             for fund_name, fund_data in funds.items():
                 rule = fund_data.get("twelve_d3_sec_biz")
                 if not rule:
                     continue
-                calc = rule.get("calculations", {})
-                combined = calc.get("combined_holdings", [])
-                combined_str = ", ".join(
-                    f"{h.get('equity_ticker') or h.get('ticker')} ({(h.get('vest_weight') or 0)*100:.2f}%)"
-                    for h in combined
-                ) or "None"
-                rows.append(
-                    {
-                        "Date": report_date,
-                        "Fund": fund_name,
-                        "Rule 1 (<=5% equities)": "PASS" if rule.get("rule_1_pass") else "FAIL",
-                        "Rule 2 (<=10% debt)": "PASS" if rule.get("rule_2_pass") else "FAIL",
-                        "Rule 3 (<=5% assets)": "PASS" if rule.get("rule_3_pass") else "FAIL",
-                        "Compliant": "PASS" if rule.get("twelve_d3_sec_biz_compliant") else "FAIL",
-                        "Total Assets": calc.get("total_assets", 0.0),
-                        "OCC Market Value": calc.get("occ_weight_mkt_val", 0.0),
-                        "OCC Weight": calc.get("occ_weight", 0.0),
-                        "Combined Holdings": combined_str,
-                    }
+
+                calculations = rule.get("calculations", {}) or {}
+                sec_related = calculations.get("sec_related_businesses", []) or []
+                if sec_related:
+                    sec_related_str = ", ".join(
+                        f"{biz.get('equity_ticker') or biz.get('ticker')} ({(biz.get('ownership_pct') or 0)*100:.5f}%)"
+                        for biz in sec_related
+                    )
+                else:
+                    sec_related_str = "None"
+
+                combined = calculations.get("combined_holdings", []) or []
+                if combined:
+                    combined_str = ", ".join(
+                        f"{holding.get('equity_ticker') or holding.get('ticker')} ({(holding.get('vest_weight') or 0)*100:.2f}%)"
+                        for holding in combined
+                    )
+                else:
+                    combined_str = "None"
+
+                row_data = OrderedDict(
+                    [
+                        ("Date", report_date),
+                        ("Fund", fund_name),
+                        (
+                            "Rule 1 (<=5% equities)",
+                            f'=IF(K{excel_row}<=0.05,"PASS","FAIL")',
+                        ),
+                        (
+                            "Rule 2 (<=10% debt)",
+                            "PASS" if rule.get("rule_2_pass") else "FAIL",
+                        ),
+                        (
+                            "Rule 3 (<=5% total assets)",
+                            f'=IF(L{excel_row}<=0.05,"PASS","FAIL")',
+                        ),
+                        (
+                            "Rule 3 OCC (<=5% TNA)",
+                            f'=IF(N{excel_row}<=0.05,"PASS","FAIL")',
+                        ),
+                        (
+                            "12d3 Sec Biz Compliant",
+                            f'=IF(AND(C{excel_row}="PASS",D{excel_row}="PASS",E{excel_row}="PASS",F{excel_row}="PASS"),"PASS","FAIL")',
+                        ),
+                        ("SEC-Related Businesses (Shs Out %)", sec_related_str),
+                        ("Combined Holdings (Portfolio %)", combined_str),
+                        ("Total Assets", float(calculations.get("total_assets", 0.0) or 0.0)),
+                        ("Max Ownership %", float(calculations.get("max_ownership_pct", 0.0) or 0.0)),
+                        ("Max Weight", float(calculations.get("max_weight", 0.0) or 0.0)),
+                        (
+                            "OCC Market Value",
+                            float(calculations.get("occ_weight_mkt_val", 0.0) or 0.0),
+                        ),
+                        ("OCC Weight", float(calculations.get("occ_weight", 0.0) or 0.0)),
+                    ]
                 )
 
-        if rows:
-            df = pd.DataFrame(rows)
-            fn_df = pd.DataFrame({"Note": [f"* {note}" for note in FOOTNOTES.get("12d3", [])]})
-            self.sheet_data["12d3_Securities_Business"] = pd.concat([df, fn_df], ignore_index=True)
+                formatted_rows.append(row_data)
+                excel_row += 1
+
+        if formatted_rows:
+            df = pd.DataFrame(formatted_rows)
+            df = self._append_footnotes(df, "12d3")
+            self.sheet_data["12d3_Securities_Business"] = df
 
     # ------------------------------------------------------------------
     def process_max_15pct_illiquid(self) -> None:
-        rows = []
+        formatted_rows: list[OrderedDict[str, object]] = []
+        excel_row = 2
+
         for date_str, funds in self.results.items():
             report_date = pd.to_datetime(date_str).date()
             for fund_name, fund_data in funds.items():
                 illiquid = fund_data.get("max_15pct_illiquid_sai")
                 if not illiquid:
                     continue
-                calc = illiquid.get("calculations", {})
-                rows.append(
-                    {
-                        "Date": report_date,
-                        "Fund": fund_name,
-                        "Illiquid Compliance": "PASS" if illiquid.get("max_15pct_illiquid_sai") else "FAIL",
-                        "Equity 85% Compliance": "PASS" if illiquid.get("equity_holdings_85pct_compliant") else "FAIL",
-                        "Total Assets": calc.get("total_assets", 0.0),
-                        "Total Illiquid Value": calc.get("total_illiquid_value", 0.0),
-                        "Illiquid Percentage": calc.get("illiquid_percentage", 0.0),
-                        "Equity Holdings Percentage": calc.get("equity_holdings_percentage", 0.0),
-                    }
+
+                calculations = illiquid.get("calculations", {}) or {}
+
+                row_data = OrderedDict(
+                    [
+                        ("Date", report_date),
+                        ("Fund", fund_name),
+                        ("Total Assets", float(calculations.get("total_assets", 0.0) or 0.0)),
+                        ("Total Illiquid Value", float(calculations.get("total_illiquid_value", 0.0) or 0.0)),
+                        ("Illiquid Percentage", float(calculations.get("illiquid_percentage", 0.0) or 0.0)),
+                        (
+                            "Equity Holdings Percentage",
+                            float(calculations.get("equity_holdings_percentage", 0.0) or 0.0),
+                        ),
+                        (
+                            "Max 15% Illiquid Compliance",
+                            f'=IF(E{excel_row}<=0.15,"PASS","FAIL")',
+                        ),
+                        (
+                            "Equity Holdings 85% Compliance",
+                            f'=IF(F{excel_row}>=0.85,"PASS","FAIL")',
+                        ),
+                    ]
                 )
 
-        if rows:
-            df = pd.DataFrame(rows)
-            fn_df = pd.DataFrame({"Note": [f"* {note}" for note in FOOTNOTES.get("illiquid", [])]})
-            self.sheet_data["Illiquid"] = pd.concat([df, fn_df], ignore_index=True)
+                formatted_rows.append(row_data)
+                excel_row += 1
+
+        if formatted_rows:
+            df = pd.DataFrame(formatted_rows)
+            df = self._append_footnotes(df, "illiquid")
+            self.sheet_data["Illiquid"] = df
 
     # ------------------------------------------------------------------
     def export_to_excel(self) -> None:
@@ -483,9 +789,7 @@ class ComplianceReport:
             for sheet_name, df in self.sheet_data.items():
                 output_df = df.copy()
                 if not output_df.empty:
-                    for column in output_df.columns:
-                        if output_df[column].dtype.kind in {"f", "i"}:
-                            output_df[column] = output_df[column].apply(lambda x: format_number(x, 2))
+                    output_df = output_df.where(pd.notnull(output_df), None)
                 safe_sheet = sheet_name[:31]
                 output_df.to_excel(writer, sheet_name=safe_sheet, index=False)
 
@@ -497,11 +801,13 @@ class ComplianceReport:
                     column_letter = column_cells[0].column_letter
                     for cell in column_cells:
                         try:
-                            if cell.value is not None:
-                                max_length = max(max_length, len(str(cell.value)))
+                            value = cell.value
+                            if value is not None:
+                                max_length = max(max_length, len(str(value)))
                         except Exception:  # pragma: no cover - defensive
                             continue
                     ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
+
 
 
 class ComplianceReportPDF(BaseReportPDF):
