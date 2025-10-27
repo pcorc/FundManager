@@ -171,44 +171,66 @@ class BulkDataLoader:
         previous_date: Optional[date],
     ) -> None:
         """Load ALL Vest holdings for ALL funds in one query."""
-        table_to_funds = self._group_funds_by_table(all_funds, 'vest_equity_holdings')
+        holdings_map = [
+            ('vest_equity_holdings', 'vest_equity', 'vest_equity_t1'),
+            ('vest_options_holdings', 'vest_option', 'vest_option_t1'),
+            ('vest_treasury_holdings', 'vest_treasury', 'vest_treasury_t1'),
+        ]
 
-        for table_name, funds in table_to_funds.items():
-            if not table_name or table_name == 'NULL':
-                continue
+        for config_key, payload_key, payload_key_t1 in holdings_map:
+            table_to_funds = self._group_funds_by_table(all_funds, config_key)
 
-            try:
-                table = getattr(self.base_cls.classes, table_name)
-                date_column = self._get_table_column(table, 'date', 'trade_date', 'business_date')
-                query = self.session.query(table)
-                if date_column is not None:
-                    query = self._apply_date_filter(
-                        query, date_column, target_date, previous_date
+            for table_name, funds in table_to_funds.items():
+                if not table_name or table_name == 'NULL':
+                    continue
+
+                try:
+                    table = getattr(self.base_cls.classes, table_name)
+                except AttributeError:
+                    self.logger.warning("Table %s not found for Vest holdings", table_name)
+                    continue
+
+                try:
+                    date_column = self._get_table_column(
+                        table,
+                        'date',
                     )
-                all_data = pd.read_sql(query.statement, self.session.bind)
-
-                for fund in funds:
-                    fund_name = fund.name
-                    fund_data = self._filter_by_fund(all_data, fund_name, fund.mapping_data)
-                    current, previous = self._split_current_previous(
-                        fund_data,
-                        self._find_date_column(
-                            fund_data,
-                            'date',
-                            'trade_date',
-                            'business_date',
-                        ),
-                        target_date,
-                        previous_date,
-                    )
-                    self._store_fund_data(data_store, fund_name, 'vest_equity', current)
-                    if previous_date is not None:
-                        self._store_fund_data(
-                            data_store, fund_name, 'vest_equity_t1', previous
+                    query = self.session.query(table)
+                    if date_column is not None:
+                        query = self._apply_date_filter(
+                            query, date_column, target_date, previous_date
                         )
+                    all_data = pd.read_sql(query.statement, self.session.bind)
 
-            except Exception as e:
-                self.logger.warning(f"Failed to load {table_name}: {e}")
+                    for fund in funds:
+                        fund_name = fund.name
+                        fund_data = self._filter_by_fund(
+                            all_data, fund_name, fund.mapping_data
+                        )
+                        current, previous = self._split_current_previous(
+                            fund_data,
+                            self._find_date_column(
+                                fund_data,
+                                'date',
+                            ),
+                            target_date,
+                            previous_date,
+                        )
+                        self._store_fund_data(
+                            data_store, fund_name, payload_key, current
+                        )
+                        if previous_date is not None:
+                            self._store_fund_data(
+                                data_store, fund_name, payload_key_t1, previous
+                            )
+
+                except Exception as exc:
+                    self.logger.warning(
+                        "Failed to load %s for Vest holdings (%s): %s",
+                        table_name,
+                        payload_key,
+                        exc,
+                    )
 
     def _bulk_load_nav_data(
         self,
@@ -1069,6 +1091,7 @@ class BulkDataLoader:
         if holdings_kind == 'equity':
             columns = base_columns + [
                 self._label_upper(table, ('security_tkr', 'ticker'), 'equity_ticker'),
+                self._column_or_literal(table, 'shares_cust', 'mkt_qty', 'quantity'),
                 self._column_or_literal(table, 'quantity', 'mkt_qty', 'quantity'),
                 self._column_or_literal(table, 'price', 'eod_close', 'price'),
                 self._column_or_literal(table, 'market_value', 'mkt_mktval', 'market_value'),
@@ -1100,6 +1123,7 @@ class BulkDataLoader:
             columns = base_columns + [
                 optticker_expr,
                 self._label_upper(table, ('security_tkr', 'ticker'), 'equity_ticker'),
+                self._column_or_literal(table, 'shares_cust', 'mkt_qty', 'quantity'),
                 self._column_or_literal(table, 'quantity', 'mkt_qty', 'quantity'),
                 self._column_or_literal(table, 'price', 'eod_close', 'price'),
                 self._column_or_literal(table, 'market_value', 'mkt_mktval', 'market_value'),
@@ -1116,8 +1140,39 @@ class BulkDataLoader:
                 query = query.filter(category_column.like('OPT%'))
             return query
 
-        return self.session.query(table)
+        if holdings_kind == 'treasury':
+            columns = base_columns + [
+                self._label_upper(
+                    table,
+                    (
+                        'security_tkr',
+                        'ticker',
+                        'legal1',
+                    ),
+                    'ticker',
+                ),
+                self._column_or_literal(table, 'shares_cust', 'qty', 'quantity'),
+                self._column_or_literal(table, 'quantity', 'qty', 'quantity'),
+                self._column_or_literal(table, 'price', 'price', default=None),
+                self._column_or_literal(
+                    table,
+                    'market_value',
+                    'mkt_mktval',
+                    'market_value',
+                    default=None,
+                ),
+                self._column_or_literal(
+                    table,
+                    'category_description',
+                    'security_catgry',
+                    'category_description',
+                    default=None,
+                ),
+                self._column_or_literal(table, 'occ_symbol', 'occ_id', 'occ_symbol', default=None),
+            ]
+            return self.session.query(*columns)
 
+        return self.session.query(table)
 
     def _column_or_literal(
         self,
