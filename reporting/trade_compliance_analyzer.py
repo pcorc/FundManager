@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
+
+import pandas as pd
 
 
 @dataclass
@@ -48,7 +50,7 @@ class TradingComplianceAnalyzer:
 
         summary = {
             "total_funds_analyzed": len(fund_names),
-            "total_funds_traded": len(self.traded_funds_info),
+            "total_funds_traded": 0,
             "funds_with_compliance_changes": 0,
             "funds_into_compliance": 0,
             "funds_out_of_compliance": 0,
@@ -78,7 +80,9 @@ class TradingComplianceAnalyzer:
             summary["total_violations_before"] += comparison["violations_before"]
             summary["total_violations_after"] += comparison["violations_after"]
 
-            trade_total = comparison["trade_info"].get("total_traded", 0.0)
+            trade_total = float(comparison["trade_info"].get("total_traded", 0.0) or 0.0)
+            if trade_total:
+                summary["total_funds_traded"] += 1
             summary["total_traded_notional"] += trade_total
 
         return {
@@ -91,7 +95,7 @@ class TradingComplianceAnalyzer:
     def _compare_fund(self, fund_name: str) -> Dict[str, Any]:
         ante_results = self._as_mapping(self.results_ex_ante.get(fund_name))
         post_results = self._as_mapping(self.results_ex_post.get(fund_name))
-        trade_info = dict(self.traded_funds_info.get(fund_name, {}))
+        trade_info = self._build_trade_info(fund_name, ante_results, post_results)
 
         checks = {}
         violations_before = 0
@@ -117,6 +121,8 @@ class TradingComplianceAnalyzer:
             checks[check] = {
                 "status_before": ante_status,
                 "status_after": post_status,
+                "violations_before": 1 if ante_status == "FAIL" else 0,
+                "violations_after": 1 if post_status == "FAIL" else 0,
                 "changed": changed,
             }
 
@@ -141,6 +147,142 @@ class TradingComplianceAnalyzer:
             "num_changes": num_changes,
             "checks": checks,
         }
+
+    # ------------------------------------------------------------------
+    def _build_trade_info(
+        self,
+        fund_name: str,
+        ante_results: Mapping[str, Any],
+        post_results: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        base_info = dict(self.traded_funds_info.get(fund_name, {}))
+
+        computed_info = self._compute_trade_summary(ante_results, post_results)
+
+        for key, value in computed_info.items():
+            if key not in base_info or base_info[key] in (None, ""):
+                base_info[key] = value
+
+        return base_info
+
+    def _compute_trade_summary(
+        self,
+        ante_results: Mapping[str, Any],
+        post_results: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        post_fund = self._extract_fund_object(post_results)
+        ante_fund = self._extract_fund_object(ante_results)
+
+        if post_fund is None and ante_fund is None:
+            return {}
+
+        asset_mappings: Tuple[Tuple[str, str], ...] = (
+            ("equity", "equity"),
+            ("options", "options"),
+            ("treasury", "treasury"),
+        )
+
+        final_shares: Dict[str, float] = {}
+        net_trades: Dict[str, Dict[str, float]] = {}
+        notional_changes: Dict[str, float] = {}
+        total_traded = 0.0
+
+        for key, attr in asset_mappings:
+            post_df = self._extract_holdings(post_fund, attr)
+            ante_df = self._extract_holdings(ante_fund, attr)
+
+            final_quantity = self._sum_quantity(post_df)
+            initial_quantity = self._sum_quantity(ante_df)
+            quantity_delta = final_quantity - initial_quantity
+
+            final_shares[key] = final_quantity
+            net_trades[key] = {
+                "buys": max(quantity_delta, 0.0),
+                "sells": abs(min(quantity_delta, 0.0)),
+                "net": quantity_delta,
+            }
+
+            post_notional = self._sum_notional(post_df)
+            ante_notional = self._sum_notional(ante_df)
+            notional_delta = post_notional - ante_notional
+            notional_changes[key] = notional_delta
+            total_traded += abs(notional_delta)
+
+        # Provide convenience aliases for downstream reporting
+        trade_summary: Dict[str, Any] = {
+            "final_shares": final_shares,
+            "net_trades": net_trades,
+            "total_traded": total_traded,
+        }
+
+        trade_summary.update(notional_changes)
+
+        return trade_summary
+
+    def _extract_fund_object(self, result: Mapping[str, Any]) -> Optional[Any]:
+        fund_object = result.get("fund_object") if isinstance(result, Mapping) else None
+        return fund_object if fund_object is not None else None
+
+    def _extract_holdings(self, fund_object: Any, attribute: str) -> pd.DataFrame:
+        if fund_object is None:
+            return pd.DataFrame()
+
+        data = getattr(fund_object, "data", None)
+        current = getattr(data, "current", None)
+        holdings = getattr(current, attribute, None)
+        if isinstance(holdings, pd.DataFrame):
+            return holdings
+        return pd.DataFrame()
+
+    @staticmethod
+    def _sum_quantity(df: pd.DataFrame, candidates: Iterable[str] = ("quantity", "shares", "units")) -> float:
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            return 0.0
+        for column in candidates:
+            if column in df.columns:
+                series = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
+                return float(series.sum())
+        numeric_cols = df.select_dtypes(include=["number"]).columns
+        if len(numeric_cols) > 0:
+            series = pd.to_numeric(df[numeric_cols[0]], errors="coerce").fillna(0.0)
+            return float(series.sum())
+        return 0.0
+
+    @staticmethod
+    def _sum_notional(
+        df: pd.DataFrame,
+        *,
+        quantity_cols: Iterable[str] = ("quantity", "shares", "units"),
+        price_cols: Iterable[str] = ("price", "px_last", "close_price"),
+    ) -> float:
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            return 0.0
+
+        if "market_value" in df.columns:
+            series = pd.to_numeric(df["market_value"], errors="coerce").fillna(0.0)
+            return float(series.sum())
+
+        quantity_series: Optional[pd.Series] = None
+        price_series: Optional[pd.Series] = None
+
+        for column in quantity_cols:
+            if column in df.columns:
+                quantity_series = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
+                break
+
+        for column in price_cols:
+            if column in df.columns:
+                price_series = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
+                break
+
+        if quantity_series is not None and price_series is not None:
+            return float((quantity_series * price_series).sum())
+
+        numeric_cols = df.select_dtypes(include=["number"]).columns
+        if len(numeric_cols) > 0:
+            series = pd.to_numeric(df[numeric_cols[0]], errors="coerce").fillna(0.0)
+            return float(series.sum())
+        return 0.0
 
     # ------------------------------------------------------------------
     def _overall_status(self, payload: Mapping[str, Any]) -> str:

@@ -7,6 +7,8 @@ from typing import Any, Dict, Mapping, Optional
 import pandas as pd
 
 from reporting.base_report_pdf import BaseReportPDF
+from reporting.combined_reconciliation_report import build_combined_reconciliation_pdf
+
 from reporting.report_utils import (
     ensure_dataframe,
     format_number,
@@ -620,96 +622,6 @@ class NAVReconciliationPDF(BaseReportPDF):
 
 
 
-class CombinedReconciliationPDF(BaseReportPDF):
-    """Combined holdings + NAV reconciliation summary."""
-
-    def __init__(
-        self,
-        output_path: str,
-        report_date: str,
-        reconciliation_results: Mapping[str, Any],
-        nav_results: Mapping[str, Any],
-    ) -> None:
-        super().__init__(output_path)
-        self.report_date = report_date
-        self.reconciliation_results = normalize_reconciliation_payload(reconciliation_results)
-        self.nav_results = normalize_nav_payload(nav_results)
-
-    def render(self) -> None:
-        self.add_title("Reconciliation Summary", f"As of {self.report_date}")
-
-        if self.reconciliation_results:
-            totals = summarise_reconciliation_breaks(self.reconciliation_results)
-            self.add_section_heading("Holdings Reconciliation")
-            rows = [
-                (
-                    recon_type.replace("_", " ").title(),
-                    totals.get(recon_type, 0),
-                )
-                for recon_type in sorted(totals)
-            ]
-            if rows:
-                self.add_table([
-                    "Reconciliation",
-                    "Total Breaks",
-                ], rows, column_widths=[100, 40], alignments=["L", "R"])
-
-            for fund_name, payload in sorted(self.reconciliation_results.items()):
-                summary = payload.get("summary", {})
-                if not summary:
-                    continue
-                self.add_section_heading(f"{fund_name} - Breaks")
-                fund_rows = []
-                for recon_type, metrics in sorted(summary.items()):
-                    total_breaks = sum(
-                        int(value)
-                        for value in (metrics or {}).values()
-                        if isinstance(value, (int, float))
-                    )
-                    fund_rows.append((recon_type.replace("_", " ").title(), total_breaks))
-                if fund_rows:
-                    self.add_key_value_table(fund_rows, header=("Reconciliation", "Breaks"))
-
-        if self.nav_results:
-            self.add_section_heading("NAV Reconciliation")
-            totals = summarise_nav_differences(self.nav_results)
-            avg_diff = (
-                totals["absolute_difference"] / totals["funds"]
-                if totals["funds"]
-                else 0.0
-            )
-            self.add_key_value_table(
-                [
-                    ("Funds Analysed", totals["funds"]),
-                    ("Total Absolute Variance", format_number(totals["absolute_difference"], 4)),
-                    ("Average Absolute Variance", format_number(avg_diff, 4)),
-                ],
-                header=("Metric", "Value"),
-            )
-
-            detail_rows = []
-            for fund_name, payload in sorted(self.nav_results.items()):
-                summary = payload.get("summary", {})
-                if not summary:
-                    continue
-                detail_rows.append(
-                    (
-                        fund_name,
-                        format_number(summary.get("expected_nav"), 4),
-                        format_number(summary.get("current_nav"), 4),
-                        format_number(summary.get("difference"), 4),
-                    )
-                )
-            if detail_rows:
-                self.add_table(
-                    ["Fund", "Expected NAV", "Custodian NAV", "Variance"],
-                    detail_rows,
-                    column_widths=[70, 35, 35, 35],
-                    alignments=["L", "R", "R", "R"],
-                )
-
-        self.output()
-
 
 class DailyOperationsSummaryPDF(BaseReportPDF):
     """Combined summary across compliance, reconciliation, and NAV."""
@@ -863,8 +775,36 @@ def generate_reconciliation_summary_pdf(
     output_path.mkdir(parents=True, exist_ok=True)
     pdf_path = output_path / file_name
 
-    pdf = CombinedReconciliationPDF(str(pdf_path), normalize_report_date(report_date), recon_payload, nav_payload)
-    pdf.render()
+    date_str = normalize_report_date(report_date)
+
+    holdings_details: Dict[str, Dict[str, Any]] = {date_str: {}}
+    holdings_summary: Dict[str, list[Dict[str, Any]]] = {date_str: []}
+    for fund, payload in recon_payload.items():
+        holdings_details[date_str][fund] = payload.get("details", {})
+        holdings_summary[date_str].append({
+            "fund": fund,
+            "summary": payload.get("summary", {}),
+        })
+
+    nav_details: Dict[str, Dict[str, Any]] = {date_str: {}}
+    nav_summary: Dict[str, list[Dict[str, Any]]] = {date_str: []}
+    for fund, payload in nav_payload.items():
+        nav_details[date_str][fund] = payload.get("summary", {})
+        nav_summary[date_str].append({
+            "fund": fund,
+            "summary": payload.get("summary", {}),
+        })
+
+    build_combined_reconciliation_pdf(
+        nav_details,
+        holdings_details,
+        nav_summary,
+        holdings_summary,
+        date_str,
+        pdf_path,
+    )
+
+
     return str(pdf_path)
 
 
