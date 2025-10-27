@@ -164,6 +164,7 @@ if __name__ == "__main__":
         "as_of_date": "2025-10-24",
         "funds": ["DOGG"],
         "previous_date": "2025-10-23",
+        "eod_reports": ["compliance"],
         "compliance_tests":
             [
                 "gics_compliance",

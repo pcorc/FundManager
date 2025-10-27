@@ -306,6 +306,13 @@ class BulkDataLoader:
                 continue
 
             try:
+                if table_name == 'bny_us_cash':
+                    self._load_bny_us_cash(data_store, funds, target_date, previous_date)
+                    continue
+                if table_name == 'bny_vit_cash':
+                    self._load_bny_vit_cash(data_store, funds, target_date, previous_date)
+                    continue
+
                 table = getattr(self.base_cls.classes, table_name)
                 date_column = self._get_table_column(table, 'date', 'business_date', 'nav_date')
                 query = self.session.query(table)
@@ -335,6 +342,316 @@ class BulkDataLoader:
 
             except Exception as e:
                 self.logger.warning(f"Failed to load cash {table_name}: {e}")
+
+    def _load_bny_us_nav(
+        self,
+        data_store: BulkDataStore,
+        funds: List,
+        target_date: date,
+        previous_date: Optional[date],
+    ) -> None:
+        for fund in funds:
+            account_number = self._get_mapping_value(
+                getattr(fund, 'mapping_data', {}) or {},
+                'account_number_custodian',
+                'account_number',
+            )
+            if not account_number:
+                self.logger.warning(
+                    "Skipping BNY US NAV for %s due to missing account number",
+                    fund.name,
+                )
+                self._store_fund_data(data_store, fund.name, 'nav', pd.DataFrame())
+                if previous_date is not None:
+                    self._store_fund_data(data_store, fund.name, 'nav_t1', pd.DataFrame())
+                continue
+
+            frames = []
+            current_df = self._get_bny_us_nav(target_date, account_number)
+            if not current_df.empty:
+                current_df = current_df.assign(fund=fund.name)
+                frames.append(current_df)
+
+            if previous_date is not None:
+                previous_df = self._get_bny_us_nav(previous_date, account_number)
+                if not previous_df.empty:
+                    previous_df = previous_df.assign(fund=fund.name)
+                    frames.append(previous_df)
+
+            combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            date_column = self._find_date_column(combined, 'date')
+            current, previous = self._split_current_previous(
+                combined,
+                date_column,
+                target_date,
+                previous_date,
+            )
+            self._store_fund_data(data_store, fund.name, 'nav', current)
+            if previous_date is not None:
+                self._store_fund_data(data_store, fund.name, 'nav_t1', previous)
+
+    def _load_bny_vit_nav(
+        self,
+        data_store: BulkDataStore,
+        funds: List,
+        target_date: date,
+        previous_date: Optional[date],
+    ) -> None:
+        for fund in funds:
+            frames = []
+            fund_identifier = self._get_mapping_value(
+                getattr(fund, 'mapping_data', {}) or {},
+                'fund',
+                'fund_name',
+                'fund_ticker',
+                'account_number_custodian',
+            )
+            current_df = self._get_bny_vit_nav(
+                target_date,
+                fund_identifier,
+            )
+            if not current_df.empty:
+                current_df = current_df.assign(fund=fund.name)
+                frames.append(current_df)
+
+            if previous_date is not None:
+                previous_df = self._get_bny_vit_nav(
+                    previous_date,
+                    fund_identifier,
+                )
+                if not previous_df.empty:
+                    previous_df = previous_df.assign(fund=fund.name)
+                    frames.append(previous_df)
+
+            combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            date_column = self._find_date_column(combined, 'date', 'valuation_date')
+            current, previous = self._split_current_previous(
+                combined,
+                date_column,
+                target_date,
+                previous_date,
+            )
+            self._store_fund_data(data_store, fund.name, 'nav', current)
+            if previous_date is not None:
+                self._store_fund_data(data_store, fund.name, 'nav_t1', previous)
+
+    def _load_bny_us_cash(
+        self,
+        data_store: BulkDataStore,
+        funds: List,
+        target_date: date,
+        previous_date: Optional[date],
+    ) -> None:
+        for fund in funds:
+            account_number = self._get_mapping_value(
+                getattr(fund, 'mapping_data', {}) or {},
+                'account_number_custodian',
+                'account_number',
+            )
+            if not account_number:
+                self.logger.warning(
+                    "Skipping BNY US cash for %s due to missing account number",
+                    fund.name,
+                )
+                self._store_fund_data(data_store, fund.name, 'cash', pd.DataFrame())
+                if previous_date is not None:
+                    self._store_fund_data(data_store, fund.name, 'cash_t1', pd.DataFrame())
+                continue
+
+            frames = []
+            current_df = self._get_bny_us_cash(target_date, account_number)
+            if not current_df.empty:
+                current_df = current_df.assign(fund=fund.name)
+                frames.append(current_df)
+
+            if previous_date is not None:
+                previous_df = self._get_bny_us_cash(previous_date, account_number)
+                if not previous_df.empty:
+                    previous_df = previous_df.assign(fund=fund.name)
+                    frames.append(previous_df)
+
+            combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            date_column = self._find_date_column(combined, 'date')
+            current, previous = self._split_current_previous(
+                combined,
+                date_column,
+                target_date,
+                previous_date,
+            )
+            self._store_fund_data(data_store, fund.name, 'cash', current)
+            if previous_date is not None:
+                self._store_fund_data(data_store, fund.name, 'cash_t1', previous)
+
+    def _load_bny_vit_cash(
+        self,
+        data_store: BulkDataStore,
+        funds: List,
+        target_date: date,
+        previous_date: Optional[date],
+    ) -> None:
+        for fund in funds:
+            frames = []
+            fund_identifier = self._get_mapping_value(
+                getattr(fund, 'mapping_data', {}) or {},
+                'fund',
+                'fund_name',
+                'fund_ticker',
+            )
+            if not fund_identifier:
+                fund_identifier = fund.name
+            current_df = self._get_bny_vit_cash(
+                target_date,
+                fund_identifier,
+            )
+            if not current_df.empty:
+                current_df = current_df.assign(fund=fund.name)
+                frames.append(current_df)
+
+            if previous_date is not None:
+                previous_df = self._get_bny_vit_cash(
+                    previous_date,
+                    fund_identifier,
+                )
+                if not previous_df.empty:
+                    previous_df = previous_df.assign(fund=fund.name)
+                    frames.append(previous_df)
+
+            combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            date_column = self._find_date_column(combined, 'date')
+            current, previous = self._split_current_previous(
+                combined,
+                date_column,
+                target_date,
+                previous_date,
+            )
+            self._store_fund_data(data_store, fund.name, 'cash', current)
+            if previous_date is not None:
+                self._store_fund_data(data_store, fund.name, 'cash_t1', previous)
+
+    def _get_bny_us_nav(self, nav_date: Optional[date], account_number: Optional[str]) -> pd.DataFrame:
+        if nav_date is None or not account_number:
+            return pd.DataFrame()
+
+        table = getattr(self.base_cls.classes, 'bny_us_nav_v2', None)
+        if table is None:
+            raise AttributeError('bny_us_nav_v2 table is not reflected')
+
+        query = (
+            self.session.query(
+                table.date.label('date'),
+                table.account_number.label('account_number'),
+                table.nav.label('nav'),
+                table.total_net_assets.label('total_net_assets'),
+                table.total_assets.label('total_assets'),
+                table.income_earned.label('income_earned'),
+                table.expenses.label('expenses'),
+                table.net_invest_income.label('net_invest_income'),
+                table.securities_at_value.label('securities_at_value'),
+                table.cash.label('cash'),
+                table.accrued_income.label('accrued_income'),
+                table.accrued_expenses.label('accrued_expenses'),
+                table.shares_outstanding.label('shares_outstanding'),
+            )
+            .filter(table.account_number == account_number)
+            .filter(table.date == nav_date)
+        )
+        return pd.read_sql(query.statement, self.session.bind)
+
+    def _get_bny_vit_nav(
+        self,
+        nav_date: Optional[date],
+        fund_identifier: Optional[str],
+    ) -> pd.DataFrame:
+        if nav_date is None:
+            return pd.DataFrame()
+
+        table = getattr(self.base_cls.classes, 'bny_vit_nav', None)
+        if table is None:
+            raise AttributeError('bny_vit_nav table is not reflected')
+
+        query = (
+            self.session.query(
+                table.valuation_date.label('date'),
+                table.fund.label('fund'),
+                table.nav_per_share_unrounded.label('nav'),
+                table.total_net_assets.label('total_net_assets'),
+                table.total_net_assets.label('total_assets'),
+                table.market_value_base_cash.label('cash'),
+                table.shares_outstanding.label('shares_outstanding'),
+                literal(471.29).label('expenses'),
+            )
+            .filter(table.valuation_date == nav_date)
+        )
+        if fund_identifier and hasattr(table, 'fund'):
+            query = query.filter(table.fund == fund_identifier)
+        return pd.read_sql(query.statement, self.session.bind)
+
+    def _get_bny_us_cash(
+        self,
+        cash_date: Optional[date],
+        account_number: Optional[str],
+    ) -> pd.DataFrame:
+        if cash_date is None or not account_number:
+            return pd.DataFrame()
+
+        table = getattr(self.base_cls.classes, 'bny_us_cash', None)
+        if table is None:
+            raise AttributeError('bny_us_cash table is not reflected')
+
+        latest_update = (
+            self.session.query(
+                table.account_number.label('account_number'),
+                table.date.label('date'),
+                func.max(table.update_time).label('max_update_time'),
+            )
+            .filter(table.account_number == account_number)
+            .filter(table.date == cash_date)
+            .group_by(table.account_number, table.date)
+            .subquery()
+        )
+
+        query = (
+            self.session.query(
+                table.account_number.label('account_number'),
+                table.date.label('date'),
+                func.sum(table.end_balance).label('cash_value'),
+            )
+            .join(
+                latest_update,
+                and_(
+                    table.account_number == latest_update.c.account_number,
+                    table.date == latest_update.c.date,
+                    table.update_time == latest_update.c.max_update_time,
+                ),
+            )
+            .group_by(table.account_number, table.date)
+        )
+        return pd.read_sql(query.statement, self.session.bind)
+
+    def _get_bny_vit_cash(
+        self,
+        cash_date: Optional[date],
+        fund_identifier: Optional[str],
+    ) -> pd.DataFrame:
+        if cash_date is None:
+            return pd.DataFrame()
+
+        table = getattr(self.base_cls.classes, 'bny_vit_cash', None)
+        if table is None:
+            raise AttributeError('bny_vit_cash table is not reflected')
+
+        query = (
+            self.session.query(
+                table.fund.label('fund'),
+                table.date.label('date'),
+                func.sum(table.cash_balance).label('cash_value'),
+            )
+            .filter(table.date == cash_date)
+        )
+        if fund_identifier and hasattr(table, 'fund'):
+            query = query.filter(table.fund == fund_identifier)
+        query = query.group_by(table.fund, table.date)
+        return pd.read_sql(query.statement, self.session.bind)
 
     def _bulk_load_index_data(
         self,
@@ -413,6 +730,8 @@ class BulkDataLoader:
         if previous_date is None:
             return current
         return current, previous
+
+
 
     def _resolve_index_identifier(self, fund) -> str:
         """Determine which identifier to use when filtering provider data."""
@@ -678,115 +997,76 @@ class BulkDataLoader:
         min_date = target_date if previous_date is None else min(target_date, previous_date)
         asset_group = getattr(table, 'asset_group', None)
 
-        base_columns = [
-            self._column_or_literal(table, 'date', 'date', 'trade_date', 'business_date'),
-            self._column_or_literal(table, 'fund', 'fund'),
-        ]
+        ticker_column = getattr(table, 'security_ticker', None)
+        if ticker_column is None:
+            ticker_column = getattr(table, 'security_description_short', None)
+        if ticker_column is None:
+            ticker_column = getattr(table, 'security_description_long_1', None)
+        if ticker_column is None:
+            raise AttributeError('BNY holdings table missing security ticker column')
+
+        long_description = getattr(table, 'security_description_long_1', None)
+        if long_description is None:
+            long_description = getattr(table, 'security_description', None)
+        if long_description is None:
+            long_description = ticker_column
 
         if holdings_kind == 'equity':
-            columns = base_columns + [
-                self._label_upper(
-                    table,
-                    (
-                        'security_ticker',
-                        'ticker',
-                        'security_description_short',
-                        'security_description_long_1',
-                    ),
-                    'equity_ticker',
-                ),
-                self._column_or_literal(table, 'sedol', 'security_sedol', 'sedol'),
-                self._column_or_literal(table, 'quantity', 'sharespar', 'quantity'),
-                self._column_or_literal(table, 'price', 'price_base'),
-                self._column_or_literal(
-                    table,
-                    'market_value',
-                    'traded_market_value_base',
-                    'market_value',
-                ),
-                self._column_or_literal(table, 'category_description', 'category_description'),
-                self._column_or_literal(table, 'asset_group', 'asset_group'),
-            ]
-            query = self.session.query(*columns)
+            query = self.session.query(
+                table.date.label('date'),
+                table.fund.label('fund'),
+                func.upper(func.trim(ticker_column)).label('equity_ticker'),
+                table.security_sedol.label('sedol'),
+                table.sharespar.label('shares_cust'),
+                table.sharespar.label('quantity'),
+                table.category_description.label('category_description'),
+                table.asset_group.label('asset_group'),
+                table.price_base.label('price'),
+                table.traded_market_value_base.label('market_value'),
+            )
             if asset_group is not None:
                 query = query.filter(
-                    asset_group.notin_(
-                        ['O', 'UN', 'ME', 'MM', 'CA', 'TI', 'B']
-                    )
+                    asset_group.notin_(['O', 'UN', 'ME', 'MM', 'CA', 'TI', 'B'])
                 )
             return query
 
         if holdings_kind == 'option':
             maturity_column = getattr(table, 'maturity_date', None)
-            columns = base_columns + [
-                self._label_upper(
-                    table,
-                    (
-                        'security_description_long_1',
-                        'security_description',
-                        'ticker',
-                        'osi_symbol',
-                    ),
-                    'optticker',
-                ),
-                self._label_upper(
-                    table,
-                    (
-                        'security_ticker',
-                        'equity_ticker',
-                        'underlying_symbol',
-                        'ticker_underlying',
-                    ),
-                    'equity_ticker',
-                ),
-                self._column_or_literal(table, 'quantity', 'sharespar', 'quantity'),
-                self._column_or_literal(table, 'price', 'price_base'),
-                self._column_or_literal(
-                    table,
-                    'market_value',
-                    'traded_market_value_base',
-                    'market_value',
-                ),
-                self._column_or_literal(table, 'category_description', 'category_description'),
-                self._column_or_literal(table, 'asset_group', 'asset_group'),
-                self._column_or_literal(table, 'cusip', 'security_cins', 'cusip'),
-                self._column_or_literal(table, 'maturity_date', 'maturity_date'),
-            ]
-            query = self.session.query(*columns)
+            query = self.session.query(
+                table.date.label('date'),
+                table.fund.label('fund'),
+                func.upper(func.trim(long_description)).label('optticker'),
+                func.upper(func.trim(ticker_column)).label('equity_ticker'),
+                table.sharespar.label('shares_cust'),
+                table.sharespar.label('quantity'),
+                table.category_description.label('category_description'),
+                table.asset_group.label('asset_group'),
+                table.price_base.label('price'),
+                table.traded_market_value_base.label('market_value'),
+                table.security_cins.label('cusip'),
+                table.maturity_date.label('maturity_date'),
+            )
             if asset_group is not None:
                 query = query.filter(
-                    asset_group.notin_(
-                        ['S', 'FS', 'UN', 'ME', 'MM', 'CA', 'B', 'TI']
-                    )
+                    asset_group.notin_(['S', 'FS', 'UN', 'ME', 'MM', 'CA', 'B', 'TI'])
                 )
             if maturity_column is not None and min_date is not None:
                 query = query.filter(maturity_column >= min_date)
             return query
 
-        columns = base_columns + [
-            self._column_or_literal(table, 'cusip', 'security_cins', 'cusip'),
-            self._column_or_literal(table, 'sedol', 'security_sedol', 'sedol'),
-            self._label_upper(
-                table,
-                (
-                    'security_description_long_1',
-                    'ticker',
-                    'security_description',
-                ),
-                'ticker',
-            ),
-            self._column_or_literal(table, 'maturity', 'maturity_date', 'maturity'),
-            self._column_or_literal(table, 'quantity', 'sharespar', 'quantity'),
-            self._column_or_literal(table, 'price', 'price_base'),
-            self._column_or_literal(
-                table,
-                'market_value',
-                'traded_market_value_base',
-                'market_value',
-            ),
-            self._column_or_literal(table, 'asset_group', 'asset_group'),
-        ]
-        query = self.session.query(*columns)
+        query = self.session.query(
+            table.date.label('date'),
+            table.fund.label('fund'),
+            table.security_cins.label('cusip'),
+            table.security_sedol.label('sedol'),
+            func.upper(func.trim(long_description)).label('ticker'),
+            table.maturity_date.label('maturity'),
+            table.sharespar.label('shares_cust'),
+            table.sharespar.label('quantity'),
+            table.price_base.label('price'),
+            table.traded_market_value_base.label('market_value'),
+            table.asset_group.label('asset_group'),
+        )
         if asset_group is not None:
             query = query.filter(asset_group == 'TI')
         return query
@@ -860,6 +1140,7 @@ class BulkDataLoader:
             return query
 
         return self.session.query(table)
+
 
     def _column_or_literal(
         self,

@@ -514,7 +514,7 @@ class ComplianceReportPDF(BaseReportPDF):
 
     # ------------------------------------------------------------------
     def generate_pdf(self) -> None:
-        self._add_header("Compliance Report")
+        self.add_title("Compliance Report")
         for (fund_name, date_str), fund_data in sorted(self.results.items(), key=lambda item: (item[0][1], item[0][0])):
             report_date = self._parse_date(date_str)
             self._add_fund_section(fund_name, report_date, fund_data)
