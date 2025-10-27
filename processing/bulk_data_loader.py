@@ -995,27 +995,11 @@ class BulkDataLoader:
         """Select the canonical columns for BNY custodian datasets."""
 
         min_date = target_date if previous_date is None else min(target_date, previous_date)
-        asset_group = getattr(table, 'asset_group', None)
-
-        ticker_column = getattr(table, 'security_ticker', None)
-        if ticker_column is None:
-            ticker_column = getattr(table, 'security_description_short', None)
-        if ticker_column is None:
-            ticker_column = getattr(table, 'security_description_long_1', None)
-        if ticker_column is None:
-            raise AttributeError('BNY holdings table missing security ticker column')
-
-        long_description = getattr(table, 'security_description_long_1', None)
-        if long_description is None:
-            long_description = getattr(table, 'security_description', None)
-        if long_description is None:
-            long_description = ticker_column
 
         if holdings_kind == 'equity':
             query = self.session.query(
                 table.date.label('date'),
                 table.fund.label('fund'),
-                func.upper(func.trim(ticker_column)).label('equity_ticker'),
                 table.security_sedol.label('sedol'),
                 table.sharespar.label('shares_cust'),
                 table.sharespar.label('quantity'),
@@ -1023,11 +1007,9 @@ class BulkDataLoader:
                 table.asset_group.label('asset_group'),
                 table.price_base.label('price'),
                 table.traded_market_value_base.label('market_value'),
+            ).filter(
+                    table.asset_group.notin_(['O', 'UN', 'ME', 'MM', 'CA', 'TI', 'B'])
             )
-            if asset_group is not None:
-                query = query.filter(
-                    asset_group.notin_(['O', 'UN', 'ME', 'MM', 'CA', 'TI', 'B'])
-                )
             return query
 
         if holdings_kind == 'option':
@@ -1035,8 +1017,7 @@ class BulkDataLoader:
             query = self.session.query(
                 table.date.label('date'),
                 table.fund.label('fund'),
-                func.upper(func.trim(long_description)).label('optticker'),
-                func.upper(func.trim(ticker_column)).label('equity_ticker'),
+                table.fund.security_description_long_1.label('optticker'),
                 table.sharespar.label('shares_cust'),
                 table.sharespar.label('quantity'),
                 table.category_description.label('category_description'),
@@ -1045,31 +1026,27 @@ class BulkDataLoader:
                 table.traded_market_value_base.label('market_value'),
                 table.security_cins.label('cusip'),
                 table.maturity_date.label('maturity_date'),
-            )
-            if asset_group is not None:
-                query = query.filter(
-                    asset_group.notin_(['S', 'FS', 'UN', 'ME', 'MM', 'CA', 'B', 'TI'])
-                )
-            if maturity_column is not None and min_date is not None:
-                query = query.filter(maturity_column >= min_date)
+            ).filter(
+                    table.asset_group.notin_(['S', 'FS', 'UN', 'ME', 'MM', 'CA', 'B', 'TI'])
+                ).filter(maturity_column >= min_date)
+
             return query
 
-        query = self.session.query(
-            table.date.label('date'),
-            table.fund.label('fund'),
-            table.security_cins.label('cusip'),
-            table.security_sedol.label('sedol'),
-            func.upper(func.trim(long_description)).label('ticker'),
-            table.maturity_date.label('maturity'),
-            table.sharespar.label('shares_cust'),
-            table.sharespar.label('quantity'),
-            table.price_base.label('price'),
-            table.traded_market_value_base.label('market_value'),
-            table.asset_group.label('asset_group'),
-        )
-        if asset_group is not None:
-            query = query.filter(asset_group == 'TI')
-        return query
+        if holdings_kind == 'treasury':
+            query = self.session.query(
+                table.date.label('date'),
+                table.fund.label('fund'),
+                table.security_cins.label('cusip'),
+                table.security_sedol.label('sedol'),
+                table.fund.security_description_long_1.label('ticker'),
+                table.maturity_date.label('maturity'),
+                table.sharespar.label('shares_cust'),
+                table.sharespar.label('quantity'),
+                table.price_base.label('price'),
+                table.traded_market_value_base.label('market_value'),
+                table.asset_group.label('asset_group'),
+            ).filter(table.asset_group == "TI")
+            return query
 
     def _build_umb_holdings_query(
         self,
