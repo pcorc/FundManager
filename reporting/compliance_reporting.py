@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Optional
+from typing import Dict, Iterable, Mapping, Optional, Tuple
 
 import pandas as pd
 
@@ -576,6 +576,13 @@ class ComplianceReportPDF(BaseReportPDF):
             ("Option MV", format_number(summary.get("option_market_value", 0.0))),
         ]
         self._draw_two_column_table(rows)
+
+    def _draw_two_column_table(self, rows: Iterable[Tuple[object, object]]) -> None:
+        if not rows:
+            return
+
+        formatted_rows = [(str(label), str(value)) for label, value in rows]
+        self.add_table(["Metric", "Value"], formatted_rows, align=["L", "R"], header_fill=False)
 
     def _print_prospectus_section(self, data: Mapping[str, object]) -> None:
         calc = data.get("calculations", {})
