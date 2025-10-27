@@ -31,6 +31,7 @@ def build_compliance_reports(
     }
 
     if not compliance_payload:
+        print("*************    NO COMPLIANCE RESULTS   *************")
         return None
 
     return generate_compliance_reports(

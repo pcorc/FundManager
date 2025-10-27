@@ -240,17 +240,14 @@ class ComplianceChecker:
             else:
                 vest_eqy_holdings["tna_wgt"] = 0.0
 
-            holdings_df = (
-                pd.merge(
-                    vest_eqy_holdings,
-                    vest_opt_holdings,
-                    on="equity_ticker",
-                    how="outer",
-                    suffixes=("", "_option"),
-                )
-                .fillna(0.0)
-                .copy()
+            holdings_df = pd.merge(
+                vest_eqy_holdings,
+                vest_opt_holdings,
+                on="equity_ticker",
+                how="outer",
+                suffixes=("", "_option"),
             )
+            holdings_df = self._fill_numeric_defaults(holdings_df)
 
             for col in ["equity_market_value", "option_market_value"]:
                 if col not in holdings_df.columns:
@@ -705,7 +702,8 @@ class ComplianceChecker:
                 left_on="equity_ticker",
                 right_on="equity_ticker",
                 suffixes=("", "_option"),
-            ).fillna(0.0)
+            )
+            holdings_df = self._fill_numeric_defaults(holdings_df)
 
             holdings_df["net_market_value"] = (
                 pd.to_numeric(holdings_df["equity_market_value"], errors="coerce").fillna(0.0)
@@ -767,6 +765,7 @@ class ComplianceChecker:
                 calculations={},
                 error=str(exc),
             )
+
 
     def real_estate_check(self, fund: Fund) -> ComplianceResult:
         try:
@@ -1270,6 +1269,19 @@ class ComplianceChecker:
         options = ensure_option_schema(fund.options_holdings)
         treasury = ensure_treasury_schema(fund.treasury_holdings)
         return equity, options, treasury
+
+    @staticmethod
+    def _fill_numeric_defaults(df: pd.DataFrame) -> pd.DataFrame:
+        """Replace missing values in numeric columns with zero."""
+
+        if df.empty:
+            return df.copy()
+
+        result = df.copy()
+        numeric_cols = result.select_dtypes(include=["number"]).columns
+        if len(numeric_cols):
+            result.loc[:, numeric_cols] = result.loc[:, numeric_cols].fillna(0)
+        return result
 
     def _get_total_assets(self, fund: Fund) -> Tuple[float, float]:
         return float(fund.total_assets or 0.0), float(fund.total_net_assets or 0.0)
