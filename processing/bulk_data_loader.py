@@ -1039,7 +1039,7 @@ class BulkDataLoader:
             query = self.session.query(
                 table.date.label('date'),
                 table.fund.label('fund'),
-                table.fund.security_description_long_1.label('optticker'),
+                table.security_description_long_1.label('optticker'),
                 table.sharespar.label('shares_cust'),
                 table.sharespar.label('quantity'),
                 table.category_description.label('category_description'),
@@ -1060,7 +1060,7 @@ class BulkDataLoader:
                 table.fund.label('fund'),
                 table.security_cins.label('cusip'),
                 table.security_sedol.label('sedol'),
-                table.fund.security_description_long_1.label('ticker'),
+                table.security_description_long_1.label('ticker'),
                 table.maturity_date.label('maturity'),
                 table.sharespar.label('shares_cust'),
                 table.sharespar.label('quantity'),
