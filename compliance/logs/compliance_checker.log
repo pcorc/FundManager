@@ -440,3 +440,28 @@ AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
 2025-10-28 22:31:34,667 - compliance_checker - INFO - Running compliance tests for DOGG
 2025-10-28 22:34:02,172 - compliance_checker - INFO - Running compliance tests for DOGG
 2025-10-28 22:37:06,015 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-28 23:08:30,615 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-28 23:08:30,694 - compliance_checker - ERROR - Error in IRC diversification check for DOGG: Equity holdings missing
+2025-10-28 23:08:30,704 - compliance_checker - ERROR - Error in SAI illiquidity check for DOGG: Equity holdings or total assets missing
+2025-10-28 23:08:30,715 - compliance_checker - ERROR - Error in real estate check for DOGG: Equity holdings missing
+2025-10-28 23:08:30,728 - compliance_checker - ERROR - Error in commodities check for DOGG: Equity holdings missing
+2025-10-28 23:08:30,744 - compliance_checker - ERROR - Error in 12d1-1 check for DOGG: Equity holdings or total assets missing
+2025-10-28 23:10:04,895 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-28 23:10:04,965 - compliance_checker - ERROR - Error in IRC diversification check for DOGG: Equity holdings missing
+2025-10-28 23:10:04,976 - compliance_checker - ERROR - Error in SAI illiquidity check for DOGG: Equity holdings or total assets missing
+2025-10-28 23:10:04,985 - compliance_checker - ERROR - Error in real estate check for DOGG: Equity holdings missing
+2025-10-28 23:10:04,995 - compliance_checker - ERROR - Error in commodities check for DOGG: Equity holdings missing
+2025-10-28 23:10:05,006 - compliance_checker - ERROR - Error in 12d1-1 check for DOGG: Equity holdings or total assets missing
+2025-10-28 23:11:28,330 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-28 23:11:28,407 - compliance_checker - ERROR - Error in IRC diversification check for DOGG: Equity holdings missing
+2025-10-28 23:11:28,416 - compliance_checker - ERROR - Error in SAI illiquidity check for DOGG: Equity holdings or total assets missing
+2025-10-28 23:11:28,426 - compliance_checker - ERROR - Error in real estate check for DOGG: Equity holdings missing
+2025-10-28 23:11:28,435 - compliance_checker - ERROR - Error in commodities check for DOGG: Equity holdings missing
+2025-10-28 23:11:28,445 - compliance_checker - ERROR - Error in 12d1-1 check for DOGG: Equity holdings or total assets missing
+2025-10-28 23:12:52,859 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-28 23:31:13,756 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-28 23:47:00,599 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-28 23:50:14,810 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 00:04:06,156 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 00:14:22,452 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 07:13:36,122 - compliance_checker - INFO - Running compliance tests for DOGG
