@@ -1135,6 +1135,7 @@ class ComplianceChecker:
 
     def max_15pct_illiquid_sai(self, fund: Fund) -> ComplianceResult:
         try:
+
             vest_eqy_holdings, vest_opt_holdings, _ = self._get_holdings(fund)
             total_assets, _ = self._get_total_assets(fund)
 

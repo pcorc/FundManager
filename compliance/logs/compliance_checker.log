@@ -479,3 +479,9 @@ AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
 2025-10-29 08:04:07,577 - compliance_checker - INFO - Running compliance tests for DOGG
 2025-10-29 08:07:17,767 - compliance_checker - INFO - Running compliance tests for DOGG
 2025-10-29 08:28:43,515 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 11:49:43,919 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 11:49:44,125 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 11:49:44,220 - compliance_checker - ERROR - Error in SAI illiquidity check for DOGG: Equity holdings or total assets missing
+2025-10-29 11:49:44,234 - compliance_checker - ERROR - Error in real estate check for DOGG: Equity holdings missing
+2025-10-29 11:49:44,245 - compliance_checker - ERROR - Error in commodities check for DOGG: Equity holdings missing
+2025-10-29 11:49:44,258 - compliance_checker - ERROR - Error in 12d1-1 check for DOGG: Equity holdings or total assets missing

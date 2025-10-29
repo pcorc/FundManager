@@ -1,6 +1,7 @@
 """Generate Excel and PDF summaries for compliance results."""
 
 from __future__ import annotations
+from numbers import Real
 
 import os
 from collections import OrderedDict
