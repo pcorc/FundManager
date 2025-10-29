@@ -198,65 +198,420 @@ class BulkDataLoader:
                     self.logger.warning("Table %s not found for Vest holdings", table_name)
                     continue
 
-                try:
-                    date_column = self._get_table_column(
-                        table,
-                        'date',
-                    )
-                    query = self.session.query(table)
-                    if date_column is not None:
-                        query = self._apply_date_filter(
-                            query, date_column, target_date, previous_date
-                        )
-                    all_data = pd.read_sql(query.statement, self.session.bind)
-
-                    if analysis_type:
-                        analysis_column = next(
-                            (
-                                column
-                                for column in all_data.columns
-                                if column.lower() == 'analysis_type'
-                            ),
-                            None,
-                        )
-                        if analysis_column:
-                            mask = (
-                                all_data[analysis_column]
-                                .astype(str)
-                                .str.lower()
-                                == analysis_type.lower()
+                    try:
+                        if config_key == 'vest_equity_holdings':
+                            all_data = self._query_vest_equity_holdings(
+                                table,
+                                funds,
+                                target_date,
+                                previous_date,
+                                analysis_type,
                             )
-                            all_data = all_data.loc[mask].copy()
-
-                    for fund in funds:
-                        fund_name = fund.name
-                        fund_data = self._filter_by_fund(
-                            all_data, fund_name, fund.mapping_data
-                        )
-                        current, previous = self._split_current_previous(
-                            fund_data,
-                            self._find_date_column(
-                                fund_data,
+                        elif config_key == 'vest_options_holdings':
+                            all_data = self._query_vest_option_holdings(
+                                table,
+                                funds,
+                                target_date,
+                                previous_date,
+                                analysis_type,
+                            )
+                        else:
+                            date_column = self._get_table_column(
+                                table,
                                 'date',
-                            ),
-                            target_date,
-                            previous_date,
-                        )
-                        self._store_fund_data(
-                            data_store, fund_name, payload_key, current
-                        )
-                        if previous_date is not None:
-                            self._store_fund_data(
-                                data_store, fund_name, payload_key_t1, previous
                             )
+                            query = self.session.query(table)
+                            if date_column is not None:
+                                query = self._apply_date_filter(
+                                    query, date_column, target_date, previous_date
+                                )
+                            all_data = pd.read_sql(query.statement, self.session.bind)
 
-                except Exception as exc:
-                    self.logger.warning(
-                        "Failed to load %s for Vest holdings (%s): %s",
-                        table_name,
-                        payload_key,
-                        exc,
+                            if analysis_type:
+                                analysis_column = next(
+                                    (
+                                        column
+                                        for column in all_data.columns
+                                        if column.lower() == 'analysis_type'
+                                    ),
+                                    None,
+                                )
+                                if analysis_column:
+                                    mask = (
+                                            all_data[analysis_column]
+                                            .astype(str)
+                                            .str.lower()
+                                            == analysis_type.lower()
+                                    )
+                                    all_data = all_data.loc[mask].copy()
+
+                        for fund in funds:
+                            fund_name = fund.name
+                            fund_data = self._filter_by_fund(
+                                all_data, fund_name, fund.mapping_data
+                            )
+                            current, previous = self._split_current_previous(
+                                fund_data,
+                                self._find_date_column(
+                                    fund_data,
+                                    'date',
+                                ),
+                                target_date,
+                                previous_date,
+                            )
+                            self._store_fund_data(
+                                data_store, fund_name, payload_key, current
+                            )
+                            if previous_date is not None:
+                                self._store_fund_data(
+                                    data_store, fund_name, payload_key_t1, previous
+                                )
+
+                    except Exception as exc:
+                        self.logger.warning(
+                            "Failed to load %s for Vest holdings (%s): %s",
+                            table_name,
+                            payload_key,
+                            exc,
+                        )
+
+            def _query_vest_equity_holdings(
+                    self,
+                    table,
+                    funds: List,
+                    target_date: date,
+                    previous_date: Optional[date],
+                    analysis_type: Optional[str],
+            ) -> pd.DataFrame:
+                bbg_equity_table = getattr(
+                    self.base_cls.classes, 'bbg_equity_flds_blotter', None
+                )
+                bbg_closes_table = getattr(
+                    self.base_cls.classes, 'bbg_feed_equity_closes', None
+                )
+
+                columns = [table]
+                ticker_column = self._get_table_column(
+                    table,
+                    'ticker',
+                    'equity_ticker',
+                    'underlying_symbol',
+                )
+
+                if bbg_equity_table is not None and ticker_column is not None:
+                    columns.extend(
+                        [
+                            bbg_equity_table.GICS_SECTOR_NAME,
+                            bbg_equity_table.GICS_INDUSTRY_NAME,
+                            bbg_equity_table.GICS_INDUSTRY_GROUP_NAME,
+                            bbg_equity_table.REGULATORY_STRUCTURE,
+                            bbg_equity_table.SECURITY_TYP,
+                        ]
                     )
+
+                closes_subquery = None
+                if (
+                        bbg_closes_table is not None
+                        and ticker_column is not None
+                        and hasattr(bbg_closes_table, 'BBG_SEC_ID')
+                ):
+                    closes_subquery = (
+                        self.session.query(
+                            bbg_closes_table.BBG_SEC_ID.label('BBG_SEC_ID'),
+                            bbg_closes_table.EQY_SH_OUT.label('EQY_SH_OUT'),
+                            func.row_number()
+                            .over(
+                                partition_by=bbg_closes_table.BBG_SEC_ID,
+                                order_by=bbg_closes_table.Date.desc(),
+                            )
+                            .label('row_num'),
+                        )
+                        .filter(bbg_closes_table.PX_MID.is_(None))
+                        .subquery('bbg_closes_subquery')
+                    )
+                    columns.extend(
+                        [
+                            closes_subquery.c.EQY_SH_OUT.label('EQY_SH_OUT'),
+                            (closes_subquery.c.EQY_SH_OUT * 1_000_000).label(
+                                'EQY_SH_OUT_million'
+                            ),
+                        ]
+                    )
+
+                query = self.session.query(*columns)
+
+                if bbg_equity_table is not None and ticker_column is not None:
+                    query = query.outerjoin(
+                        bbg_equity_table, ticker_column == bbg_equity_table.TICKER
+                    )
+
+                if closes_subquery is not None and ticker_column is not None:
+                    query = query.outerjoin(
+                        closes_subquery,
+                        and_(
+                            func.concat(ticker_column, literal(' US Equity'))
+                            == closes_subquery.c.BBG_SEC_ID,
+                            closes_subquery.c.row_num == 1,
+                        ),
+                    )
+
+                date_column = self._get_table_column(table, 'date')
+                if date_column is not None:
+                    query = self._apply_date_filter(
+                        query, date_column, target_date, previous_date
+                    )
+
+                fund_column = self._get_table_column(
+                    table,
+                    'fund',
+                    'fund_name',
+                    'fund_ticker',
+                    'portfolio',
+                )
+                fund_aliases = self._collect_fund_aliases(funds)
+                if fund_column is not None and fund_aliases:
+                    query = query.filter(fund_column.in_(fund_aliases))
+
+                if analysis_type:
+                    analysis_column = self._get_table_column(table, 'analysis_type')
+                    if analysis_column is not None:
+                        query = query.filter(
+                            func.lower(func.trim(analysis_column))
+                            == analysis_type.lower()
+                        )
+
+                df = pd.read_sql(query.statement, self.session.bind)
+                df = self._augment_equity_holdings(df)
+
+                if analysis_type and 'analysis_type' in df.columns:
+                    mask = df['analysis_type'].astype(str).str.lower() == analysis_type.lower()
+                    df = df.loc[mask].copy()
+
+                return df
+
+            def _query_vest_option_holdings(
+                    self,
+                    table,
+                    funds: List,
+                    target_date: date,
+                    previous_date: Optional[date],
+                    analysis_type: Optional[str],
+            ) -> pd.DataFrame:
+                bbg_equity_table = getattr(
+                    self.base_cls.classes, 'bbg_equity_flds_blotter', None
+                )
+
+                columns = [table]
+                underlying_column = self._get_table_column(
+                    table,
+                    'equity_ticker',
+                    'underlying_symbol',
+                    'underlying',
+                    'ticker',
+                )
+
+                if bbg_equity_table is not None and underlying_column is not None:
+                    columns.extend(
+                        [
+                            bbg_equity_table.GICS_SECTOR_NAME,
+                            bbg_equity_table.GICS_INDUSTRY_NAME,
+                            bbg_equity_table.GICS_INDUSTRY_GROUP_NAME,
+                            bbg_equity_table.REGULATORY_STRUCTURE,
+                            bbg_equity_table.SECURITY_TYP,
+                        ]
+                    )
+
+                query = self.session.query(*columns)
+
+                if bbg_equity_table is not None and underlying_column is not None:
+                    query = query.outerjoin(
+                        bbg_equity_table, underlying_column == bbg_equity_table.TICKER
+                    )
+
+                date_column = self._get_table_column(table, 'date')
+                if date_column is not None:
+                    query = self._apply_date_filter(
+                        query, date_column, target_date, previous_date
+                    )
+
+                fund_column = self._get_table_column(
+                    table,
+                    'fund',
+                    'fund_name',
+                    'fund_ticker',
+                    'portfolio',
+                )
+                fund_aliases = self._collect_fund_aliases(funds)
+                if fund_column is not None and fund_aliases:
+                    query = query.filter(fund_column.in_(fund_aliases))
+
+                if analysis_type:
+                    analysis_column = self._get_table_column(table, 'analysis_type')
+                    if analysis_column is not None:
+                        query = query.filter(
+                            func.lower(func.trim(analysis_column))
+                            == analysis_type.lower()
+                        )
+
+                df = pd.read_sql(query.statement, self.session.bind)
+                df = self._augment_option_holdings(df)
+
+                if analysis_type and 'analysis_type' in df.columns:
+                    mask = df['analysis_type'].astype(str).str.lower() == analysis_type.lower()
+                    df = df.loc[mask].copy()
+
+                return df
+
+            def _augment_equity_holdings(self, df: pd.DataFrame) -> pd.DataFrame:
+                if df.empty:
+                    return df
+
+                result = df.copy()
+
+                quantity_column = self._find_dataframe_column(
+                    result, 'quantity', 'nav_shares', 'shares', 'share_qty'
+                )
+                price_column = self._find_dataframe_column(result, 'price', 'equity_price')
+
+                if quantity_column and quantity_column != 'quantity':
+                    result['quantity'] = result[quantity_column]
+                if 'quantity' in result.columns:
+                    result['quantity'] = pd.to_numeric(
+                        result['quantity'], errors='coerce'
+                    ).fillna(0.0)
+
+                if 'equity_market_value' in result.columns:
+                    result['equity_market_value'] = pd.to_numeric(
+                        result['equity_market_value'], errors='coerce'
+                    ).fillna(0.0)
+                elif quantity_column and price_column:
+                    qty = pd.to_numeric(result[quantity_column], errors='coerce').fillna(0.0)
+                    price = pd.to_numeric(result[price_column], errors='coerce').fillna(0.0)
+                    result['equity_market_value'] = qty * price
+                else:
+                    result['equity_market_value'] = 0.0
+
+                if 'EQY_SH_OUT' in result.columns:
+                    result['EQY_SH_OUT'] = pd.to_numeric(
+                        result['EQY_SH_OUT'], errors='coerce'
+                    )
+                else:
+                    result['EQY_SH_OUT'] = None
+                if 'EQY_SH_OUT_million' in result.columns:
+                    result['EQY_SH_OUT_million'] = pd.to_numeric(
+                        result['EQY_SH_OUT_million'], errors='coerce'
+                    ).fillna(0.0)
+                else:
+                    result['EQY_SH_OUT_million'] = 0.0
+
+                for column in (
+                        'GICS_SECTOR_NAME',
+                        'GICS_INDUSTRY_NAME',
+                        'GICS_INDUSTRY_GROUP_NAME',
+                        'REGULATORY_STRUCTURE',
+                        'SECURITY_TYP',
+                ):
+                    if column not in result.columns:
+                        result[column] = None
+
+                for redundant in ('row_num', 'BBG_SEC_ID'):
+                    if redundant in result.columns:
+                        result = result.drop(columns=[redundant])
+
+                return result
+
+            def _augment_option_holdings(self, df: pd.DataFrame) -> pd.DataFrame:
+                if df.empty:
+                    return df
+
+                result = df.copy()
+
+                quantity_column = self._find_dataframe_column(
+                    result, 'quantity', 'shares', 'position_qty'
+                )
+                price_column = self._find_dataframe_column(result, 'price')
+                equity_price_column = self._find_dataframe_column(
+                    result, 'equity_price', 'underlying_price'
+                )
+                delta_column = self._find_dataframe_column(result, 'delta', 'option_delta')
+
+                if quantity_column and quantity_column != 'quantity':
+                    result['quantity'] = result[quantity_column]
+                if 'quantity' in result.columns:
+                    result['quantity'] = pd.to_numeric(
+                        result['quantity'], errors='coerce'
+                    ).fillna(0.0)
+
+                if 'option_market_value' in result.columns:
+                    result['option_market_value'] = pd.to_numeric(
+                        result['option_market_value'], errors='coerce'
+                    ).fillna(0.0)
+                elif quantity_column and price_column:
+                    qty = pd.to_numeric(result[quantity_column], errors='coerce').fillna(0.0)
+                    price = pd.to_numeric(result[price_column], errors='coerce').fillna(0.0)
+                    result['option_market_value'] = qty * price * 100
+                else:
+                    result['option_market_value'] = 0.0
+
+                if 'option_notional_value' in result.columns:
+                    result['option_notional_value'] = pd.to_numeric(
+                        result['option_notional_value'], errors='coerce'
+                    ).fillna(0.0)
+                elif quantity_column and equity_price_column:
+                    qty = pd.to_numeric(result[quantity_column], errors='coerce').fillna(0.0)
+                    equity_price = pd.to_numeric(
+                        result[equity_price_column], errors='coerce'
+                    ).fillna(0.0)
+                    result['option_notional_value'] = qty * equity_price * 100
+                else:
+                    result['option_notional_value'] = 0.0
+
+                if 'option_delta_adjusted_notional' in result.columns:
+                    result['option_delta_adjusted_notional'] = pd.to_numeric(
+                        result['option_delta_adjusted_notional'], errors='coerce'
+                    ).fillna(0.0)
+                elif quantity_column and equity_price_column and delta_column:
+                    qty = pd.to_numeric(result[quantity_column], errors='coerce').fillna(0.0)
+                    equity_price = pd.to_numeric(
+                        result[equity_price_column], errors='coerce'
+                    ).fillna(0.0)
+                    delta = pd.to_numeric(result[delta_column], errors='coerce').fillna(0.0)
+                    result['option_delta_adjusted_notional'] = qty * equity_price * delta * 100
+                else:
+                    result['option_delta_adjusted_notional'] = 0.0
+
+                if 'option_delta_adjusted_market_value' in result.columns:
+                    result['option_delta_adjusted_market_value'] = pd.to_numeric(
+                        result['option_delta_adjusted_market_value'], errors='coerce'
+                    ).fillna(0.0)
+                elif quantity_column and price_column and delta_column:
+                    qty = pd.to_numeric(result[quantity_column], errors='coerce').fillna(0.0)
+                    price = pd.to_numeric(result[price_column], errors='coerce').fillna(0.0)
+                    delta = pd.to_numeric(result[delta_column], errors='coerce').fillna(0.0)
+                    result['option_delta_adjusted_market_value'] = qty * price * delta * 100
+                else:
+                    result['option_delta_adjusted_market_value'] = 0.0
+
+                for column in (
+                        'GICS_SECTOR_NAME',
+                        'GICS_INDUSTRY_NAME',
+                        'GICS_INDUSTRY_GROUP_NAME',
+                        'REGULATORY_STRUCTURE',
+                        'SECURITY_TYP',
+                ):
+                    if column not in result.columns:
+                        result[column] = None
+
+                return result
+
+            @staticmethod
+            def _find_dataframe_column(df: pd.DataFrame, *candidates: str) -> Optional[str]:
+                lower_map = {col.lower(): col for col in df.columns}
+                for candidate in candidates:
+                    column = lower_map.get(candidate.lower())
+                    if column:
+                        return column
+                return None
 
     def _bulk_load_nav_data(
         self,
