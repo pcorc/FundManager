@@ -465,3 +465,17 @@ AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
 2025-10-29 00:04:06,156 - compliance_checker - INFO - Running compliance tests for DOGG
 2025-10-29 00:14:22,452 - compliance_checker - INFO - Running compliance tests for DOGG
 2025-10-29 07:13:36,122 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 07:22:03,367 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 07:24:38,523 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 08:02:59,441 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 08:02:59,453 - compliance_checker - ERROR - Error in prospectus policy check for DOGG: 'Fund' object has no attribute '_extract_nav_metric'
+2025-10-29 08:02:59,462 - compliance_checker - ERROR - Error in IRS diversification check for DOGG: 'Fund' object has no attribute '_extract_nav_metric'
+2025-10-29 08:02:59,474 - compliance_checker - ERROR - Error in 40 Act diversification check for DOGG: 'Fund' object has no attribute '_extract_nav_metric'
+2025-10-29 08:02:59,486 - compliance_checker - ERROR - Error in IRC diversification check for DOGG: 'Fund' object has no attribute '_extract_nav_metric'
+2025-10-29 08:02:59,497 - compliance_checker - ERROR - Error in SAI illiquidity check for DOGG: 'Fund' object has no attribute '_extract_nav_metric'
+2025-10-29 08:02:59,527 - compliance_checker - ERROR - Error in 12d1-1 check for DOGG: 'Fund' object has no attribute '_extract_nav_metric'
+2025-10-29 08:02:59,536 - compliance_checker - ERROR - Error in 12d-2 check for DOGG: 'Fund' object has no attribute '_extract_nav_metric'
+2025-10-29 08:02:59,546 - compliance_checker - ERROR - Error in 12d-3 check for DOGG: 'Fund' object has no attribute '_extract_nav_metric'
+2025-10-29 08:04:07,577 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 08:07:17,767 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 08:28:43,515 - compliance_checker - INFO - Running compliance tests for DOGG

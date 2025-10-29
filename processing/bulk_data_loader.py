@@ -215,6 +215,14 @@ class BulkDataLoader:
                             previous_date,
                             analysis_type,
                         )
+                    elif config_key == 'vest_treasury_holdings':
+                        all_data = self._vest_treasury_holdings(
+                            table,
+                            funds,
+                            target_date,
+                            previous_date,
+                            analysis_type,
+                        )
                     else:
                         date_column = self._get_table_column(
                             table,
@@ -226,9 +234,6 @@ class BulkDataLoader:
                                 query, date_column, target_date, previous_date
                             )
                         all_data = pd.read_sql(query.statement, self.session.bind)
-
-                        if config_key == 'vest_treasury_holdings':
-                            all_data = self._augment_treasury_holdings(all_data)
 
                         if analysis_type:
                             analysis_column = next(
@@ -455,6 +460,55 @@ class BulkDataLoader:
             df = df.loc[mask].copy()
 
         return df
+
+    def _vest_treasury_holdings(
+            self,
+            table,
+            funds: List,
+            target_date: date,
+            previous_date: Optional[date],
+            analysis_type: Optional[str],
+    ) -> pd.DataFrame:
+        query = self.session.query(table)
+
+        date_column = self._get_table_column(table, 'date')
+        if date_column is not None:
+            query = self._apply_date_filter(
+                query,
+                date_column,
+                target_date,
+                previous_date,
+            )
+
+        fund_column = self._get_table_column(
+            table,
+            'fund',
+            'fund_ticker',
+            'ticker',
+            'portfolio',
+            'account',
+        )
+        fund_aliases = self._collect_fund_aliases(funds)
+        if fund_column is not None and fund_aliases:
+            query = query.filter(fund_column.in_(fund_aliases))
+
+        if analysis_type:
+            analysis_column = self._get_table_column(table, 'analysis_type')
+            if analysis_column is not None:
+                query = query.filter(
+                    func.lower(func.trim(analysis_column))
+                    == analysis_type.lower(),
+                )
+
+        df = pd.read_sql(query.statement, self.session.bind)
+        df = self._augment_treasury_holdings(df)
+
+        if analysis_type and 'analysis_type' in df.columns:
+            mask = df['analysis_type'].astype(str).str.lower() == analysis_type.lower()
+            df = df.loc[mask].copy()
+
+        return df
+
 
     def _augment_equity_holdings(self, df: pd.DataFrame) -> pd.DataFrame:
         if df.empty:

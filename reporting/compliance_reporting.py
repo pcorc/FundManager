@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, Iterable, Mapping, Optional, Tuple
-
+import numbers
+import re
 import pandas as pd
 
 from reporting.base_report_pdf import BaseReportPDF
@@ -21,6 +22,7 @@ from reporting.report_utils import (
 from utilities.logger import setup_logger
 
 logger = setup_logger("compliance_report", "logs/compliance.log")
+_PERCENT_RE = re.compile(r"^\s*-?\d+(?:\.\d+)?%$")
 
 
 @dataclass
@@ -584,7 +586,7 @@ class ComplianceReport:
                 holdings = calculations.get("investment_companies", []) or []
                 if holdings:
                     holdings_str = ", ".join(
-                        f"{holding.get('equity_ticker') or holding.get('ticker')} ({(holding.get('ownership_pct') or 0)*100:.2f}%)"
+                        f"{holding.get('equity_ticker') or holding.get('ticker')} ({(holding.get('ownership_pct') or 0):.2%})"
                         for holding in holdings
                     )
                 else:
@@ -854,12 +856,12 @@ class ComplianceReportPDF(BaseReportPDF):
             summary_data.append(
                 [
                     fund_name,
-                    cash,
-                    treasury,
-                    equity,
-                    std_option_dan,
-                    std_option_mv,
-                    flex_option_dan,
+                    f"{cash:,.0f}",
+                    f"{treasury:,.0f}",
+                    f"{equity:,.0f}",
+                    f"{std_option_dan:,.0f}",
+                    f"{std_option_mv:,.0f}",
+                    f"{flex_option_dan:,.0f}",
                 ]
             )
 
@@ -904,6 +906,39 @@ class ComplianceReportPDF(BaseReportPDF):
         if isinstance(value, (int, float)):
             return float(value)
         return 0.0
+
+    @staticmethod
+    def _format_numeric(value: object, *, is_percent: bool = False, prefix: str = "") -> str:
+        try:
+            number = float(value or 0)
+        except (TypeError, ValueError):
+            return str(value)
+
+        if is_percent:
+            return f"{number:.2%}"
+
+        formatted = f"{number:,.0f}"
+        return f"{prefix}{formatted}" if prefix else formatted
+
+    def _format_table_value(self, value: object) -> str:
+        if value is None:
+            return ""
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            if _PERCENT_RE.match(stripped):
+                try:
+                    return f"{float(stripped.rstrip('%')):.2f}%"
+                except ValueError:
+                    return value
+            return value
+
+        if isinstance(value, numbers.Number) and not isinstance(value, bool):
+            if pd.isna(value):
+                return ""
+            return f"{float(value):,.0f}"
+
+        return str(value)
 
     # ------------------------------------------------------------------
     def _add_header(self, title: str) -> None:
@@ -1013,8 +1048,72 @@ class ComplianceReportPDF(BaseReportPDF):
         if not rows:
             return
 
-        formatted_rows = [(str(label), str(value)) for label, value in rows]
-        self.add_table(["Metric", "Value"], formatted_rows, align=["L", "R"], header_fill=False)
+        usable_width = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
+        label_width = min(usable_width * 0.4, 80)
+        value_width = usable_width - label_width
+        line_height = 5
+
+        header_x = self.pdf.get_x()
+        header_y = self.pdf.get_y()
+        self.pdf.set_font("Arial", "B", 8)
+        self.pdf.set_fill_color(230, 230, 230)
+        self.pdf.multi_cell(
+            label_width,
+            line_height,
+            self._sanitize_text("Metric"),
+            border=1,
+            fill=True,
+        )
+        header_label_end = self.pdf.get_y()
+
+        self.pdf.set_xy(header_x + label_width, header_y)
+        self.pdf.multi_cell(
+            value_width,
+            line_height,
+            self._sanitize_text("Value"),
+            border=1,
+            fill=True,
+            align="R",
+        )
+        header_value_end = self.pdf.get_y()
+        header_end_y = max(header_label_end, header_value_end)
+        self.pdf.set_xy(header_x, header_end_y)
+
+        self.pdf.set_fill_color(255, 255, 255)
+        self.pdf.set_font("Arial", "", 8)
+        for label, value in rows:
+            sanitized_label = self._sanitize_text(label)
+            display_value = value
+            if isinstance(display_value, Real) and not isinstance(display_value, bool):
+                numeric_value = float(display_value)
+                if pd.isna(numeric_value):
+                    numeric_value = 0.0
+                display_value = f"{numeric_value:,.0f}"
+            sanitized_value = self._sanitize_text(display_value)
+
+            x_start = self.pdf.get_x()
+            y_start = self.pdf.get_y()
+
+            self.pdf.multi_cell(label_width, line_height, sanitized_label, border=1)
+            label_end_y = self.pdf.get_y()
+
+            self.pdf.set_xy(x_start + label_width, y_start)
+            value_align = "R"
+            if "\n" in sanitized_value or any(ch.isalpha() for ch in sanitized_value):
+                value_align = "L"
+            self.pdf.multi_cell(
+                value_width,
+                line_height,
+                sanitized_value,
+                border=1,
+                align=value_align,
+            )
+            value_end_y = self.pdf.get_y()
+
+            row_end_y = max(label_end_y, value_end_y)
+            self.pdf.set_xy(x_start, row_end_y)
+
+        self.pdf.ln(2)
 
     # ------------------------------------------------------------------
     def print_summary_table(self, fund_data: Mapping[str, object]) -> None:
@@ -1126,7 +1225,7 @@ class ComplianceReportPDF(BaseReportPDF):
             ("Condition 40 Act 2a", "PASS" if data.get("condition_40act_2a") else "FAIL"),
             ("Condition 40 Act 2b", "PASS" if data.get("condition_40act_2b") else "FAIL"),
             ("Total Assets", f"{total_assets:,.0f}"),
-            ("Non-Qualifying Assets Weight", f"{non_qual_weight:.2f}"),
+            ("Non-Qualifying Assets Weight", f"{non_qual_weight:.2%}"),
             ("Issuer Limited Assets (Sum)", f"{issuer_limited_sum:,.0f}"),
             ("Issuer Limited Assets (Detail)", issuer_limited_assets_str),
             ("", ""),
@@ -1143,6 +1242,38 @@ class ComplianceReportPDF(BaseReportPDF):
         calculations = data.get("calculations", {})
         largest_holding = calculations.get("largest_holding", {})
 
+        large_securities = calculations.get("large_securities", []) or []
+        if large_securities:
+            large_lines: list[str] = []
+            for sec in large_securities:
+                ticker = str(sec.get("equity_ticker", ""))
+                market_value = float(sec.get("net_market_value", 0) or 0)
+                if pd.isna(market_value):
+                    market_value = 0.0
+                weight = float(sec.get("tna_wgt", 0) or 0)
+                if pd.isna(weight):
+                    weight = 0.0
+                large_lines.append(
+                    " | ".join(
+                        [
+                            ticker,
+                            f"${market_value:,.0f}",
+                            f"{weight:.2%}",
+                        ]
+                    )
+                )
+            large_securities_str = "\n".join(large_lines)
+        else:
+            large_securities_str = "None"
+
+        large_securities_count = calculations.get("large_securities_count", 0)
+        if isinstance(large_securities_count, (int, float)) and not pd.isna(
+            large_securities_count
+        ):
+            large_count_display = f"{int(float(large_securities_count))}"
+        else:
+            large_count_display = str(large_securities_count or 0)
+
         rows = [
             ("Condition IRS 1", "PASS" if data.get("condition_IRS_1") else "FAIL"),
             ("Condition IRS 2a_50%", "PASS" if data.get("condition_IRS_2_a_50") else "FAIL"),
@@ -1157,13 +1288,10 @@ class ComplianceReportPDF(BaseReportPDF):
             ("Condition IRS 2b", "PASS" if data.get("condition_IRS_2_b") else "FAIL"),
             ("5% Gross Assets", f"{calculations.get('five_pct_gross_assets', 0):,.0f}"),
             ("Sum Large Securities %", f"{calculations.get('sum_large_securities_weights', 0):.2%}"),
-            ("Large Securities Count", f"{calculations.get('large_securities_count', 0)}"),
+            ("Large Securities Count", large_count_display),
             (
                 "Large Securities",
-                ", ".join(
-                    f"({sec.get('equity_ticker', '')}, {sec.get('tna_wgt', 0):.2%})"
-                    for sec in calculations.get("large_securities", [])
-                ),
+                large_securities_str,
             ),
         ]
 
@@ -1211,7 +1339,7 @@ class ComplianceReportPDF(BaseReportPDF):
         inv_companies = calculations.get("investment_companies", [])
 
         holdings_str = ", ".join(
-            f"{c.get('equity_ticker', '')} ({c.get('ownership_pct', 0) * 100:.2f}%)"
+            f"{c.get('equity_ticker', '')} ({float(c.get('ownership_pct', 0) or 0):.2%})"
             for c in inv_companies
         ) or "None"
 
@@ -1229,12 +1357,13 @@ class ComplianceReportPDF(BaseReportPDF):
         self._draw_two_column_table(rows)
         self._draw_footnotes_section("12d1")
 
+
     def print_12d2_insurance_cos(self, data: Mapping[str, object]) -> None:
         calculations = data.get("calculations", {})
         holdings = calculations.get("insurance_holdings", [])
 
         holdings_str = ", ".join(
-            f"{h.get('equity_ticker', '')} ({h.get('ownership_pct', 0) * 100:.5f}%)"
+            f"{h.get('equity_ticker', '')} ({float(h.get('ownership_pct', 0) or 0):.2%})"
             for h in holdings
         ) or "None"
 
@@ -1275,20 +1404,22 @@ class ComplianceReportPDF(BaseReportPDF):
         self.pdf.set_font("Arial", "", 9)
         for holding in combined:
             ticker = holding.get("ticker") or holding.get("equity_ticker") or "N/A"
-            vest_weight = holding.get("vest_weight", 0)
-            ownership_pct = holding.get("ownership_pct", 0)
+            for holding in combined:
+                ticker = holding.get("ticker") or holding.get("equity_ticker") or "N/A"
+                vest_weight = float(holding.get("vest_weight", 0) or 0)
+                ownership_pct = float(holding.get("ownership_pct", 0) or 0)
 
-            self.pdf.set_fill_color(255, 255, 255)
-            self.pdf.cell(col_widths[0], 6, self._sanitize_text(str(ticker)), border=1)
-            self.pdf.cell(col_widths[1], 6, f"{vest_weight * 100:.5f}%", border=1)
-            self.pdf.cell(col_widths[2], 6, f"{ownership_pct * 100:.5f}%", border=1)
+                self.pdf.set_fill_color(255, 255, 255)
+                self.pdf.cell(col_widths[0], 6, self._sanitize_text(str(ticker)), border=1)
+                self.pdf.cell(col_widths[1], 6, f"{vest_weight:.2%}", border=1)
+                self.pdf.cell(col_widths[2], 6, f"{ownership_pct:.2%}", border=1)
             self.pdf.ln()
         self.pdf.ln(2)
 
         rows_bottom = [
             ("Total Assets", f"{calculations.get('total_assets', 0):,.0f}"),
             ("OCC Market Value", f"{calculations.get('occ_weight_mkt_val', 0):,.0f}"),
-            ("OCC Weight", f"{calculations.get('occ_weight', 0):.5%}"),
+            ("OCC Weight", f"{calculations.get('occ_weight', 0):.2%}"),
         ]
         self._draw_two_column_table(rows_bottom)
         self._draw_footnotes_section("12d3")

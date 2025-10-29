@@ -140,6 +140,12 @@ class FundManager:
         fund_data.index = fund_data_dict.get('index', pd.DataFrame())
         fund_data.equity_trades = fund_data_dict.get('equity_trades', pd.DataFrame())
         fund_data.cr_rd_data = fund_data_dict.get('cr_rd', pd.DataFrame())
+        fund_data.nav = fund_data_dict.get('nav', pd.DataFrame())
+        fund_data.nav_t1 = fund_data_dict.get('nav_t1', pd.DataFrame())
+
+        # Create Fund instance
+        fund = Fund(fund_name, fund_config.mapping_data)
+        fund.data = fund_data
 
         # Create Fund instance
         fund = Fund(fund_name, fund_config.mapping_data)

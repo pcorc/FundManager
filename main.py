@@ -160,6 +160,31 @@ def _log_generated_paths(logger: logging.Logger, paths: Mapping[str, str]) -> No
 
 if __name__ == "__main__":
     RUNTIME_OVERRIDES = {
+        "analysis_type": "trading_compliance",
+        "as_of_date": "2025-10-24",
+        "funds": ["DOGG"],
+        "compliance_tests": [
+            "gics_compliance",
+            "prospectus_80pct_policy",
+            "diversification_40act_check",
+            "diversification_IRS_check",
+            "diversification_IRC_check",
+            "max_15pct_illiquid_sai",
+            "real_estate_check",
+            "commodities_check",
+            "twelve_d1a_other_inv_cos",
+            "twelve_d2_insurance_cos",
+            "twelve_d3_sec_biz",
+        ],
+        "ex_ante_date": "2025-10-24",
+        "ex_post_date": "2025-10-24",
+        "custodian_date": "2025-10-23",
+        "custodian_previous_date": "2025-10-22",
+        "create_pdf": True,
+        "output_dir": "./outputs",
+    }
+
+    RUNTIME_OVERRIDES = {
         "analysis_type": "eod",
         "as_of_date": "2025-10-24",
         "funds": ["DOGG"],

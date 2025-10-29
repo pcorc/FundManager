@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence
 import pandas as pd
 
 
@@ -34,6 +34,8 @@ class FundSnapshot:
         custodian_treasury: Optional[pd.DataFrame] = None,
         cash: float = 0.0,
         nav: float = 0.0,
+        total_assets: float = 0.0,
+        total_net_assets: float = 0.0,
     ) -> None:
         self.equity = equity if isinstance(equity, pd.DataFrame) else pd.DataFrame()
         self.options = options if isinstance(options, pd.DataFrame) else pd.DataFrame()
@@ -145,9 +147,12 @@ class Fund:
     @property
     def total_assets(self) -> float:
         current = self.data.current
+        custodian_total = getattr(current, "total_assets", 0.0) or 0.0
+        if custodian_total:
+            return float(custodian_total)
         nav = getattr(current, "nav", 0.0) or 0.0
         if nav:
-            return nav
+            return float(nav)
         return (
             self.total_equity_value
             + self.total_option_value
@@ -157,8 +162,12 @@ class Fund:
 
     @property
     def total_net_assets(self) -> float:
-        nav = getattr(self.data.current, "nav", 0.0) or 0.0
-        return nav if nav else self.total_assets
+        current = self.data.current
+        custodian_tna = getattr(current, "total_net_assets", 0.0) or 0.0
+        if custodian_tna:
+            return float(custodian_tna)
+        nav = getattr(current, "nav", 0.0) or 0.0
+        return float(nav) if nav else self.total_assets
 
     @property
     def total_equity_value(self) -> float:
@@ -197,6 +206,30 @@ class Fund:
         nav = getattr(self.data.current, "nav", 0.0) or 0.0
         expense_ratio = getattr(self.data, "expense_ratio", 0.0) or 0.0
         return expense_ratio * nav
+
+    def _extract_nav_metric(self, columns: Sequence[str]) -> Optional[float]:
+        nav_df = getattr(self.data, "nav", pd.DataFrame())
+        if not isinstance(nav_df, pd.DataFrame) or nav_df.empty:
+            return None
+
+        nav_df = nav_df.copy()
+        date_column = next(
+            (
+                column
+                for column in nav_df.columns
+                if column.lower() in {"date", "nav_date", "business_date", "effective_date", "valuation_date"}
+            ),
+            None,
+        )
+        if date_column and date_column in nav_df.columns:
+            nav_df = nav_df.sort_values(by=date_column, ascending=False)
+
+        for column in columns:
+            if column in nav_df.columns:
+                series = pd.to_numeric(nav_df[column], errors="coerce").dropna()
+                if not series.empty:
+                    return float(series.iloc[0])
+        return None
 
     @property
     def is_private_fund(self) -> bool:

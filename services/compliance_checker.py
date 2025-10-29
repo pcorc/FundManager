@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, Iterable, Mapping, Optional, Tuple
+
 
 import numpy as np
 import pandas as pd
@@ -103,6 +104,15 @@ class ComplianceChecker:
             "gics_compliance": self.gics_compliance,
         }
 
+        # Example configurations for including/excluding tests on a per-ticker basis.
+        skip_tests_by_ticker: Dict[str, set[str]] = {
+            "gics_compliance": {"DOGG"},  # Add tickers here to bypass the GICS test.
+        }
+        whitelist_tests_by_ticker: Dict[str, set[str]] = {
+            # Only FTCSH should run the IRC diversification test.
+            "diversification_IRC_check": {"FTCSH"},
+        }
+
         if test_functions:
             requested = set(test_functions)
             available_tests = {
@@ -116,6 +126,14 @@ class ComplianceChecker:
             fund_results: Dict[str, ComplianceResult] = {}
 
             for test_name, test_func in available_tests.items():
+                excluded_funds = skip_tests_by_ticker.get(test_name, set())
+                if fund_name in excluded_funds:
+                    continue
+
+                whitelist = whitelist_tests_by_ticker.get(test_name)
+                if whitelist is not None and fund_name not in whitelist:
+                    continue
+
                 try:
                     fund_results[test_name] = test_func(fund)
                 except Exception as exc:  # pragma: no cover - defensive logging path
