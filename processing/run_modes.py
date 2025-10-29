@@ -23,6 +23,8 @@ class DataLoadRequest:
     label: str
     target_date: date
     previous_date: Optional[date] = None
+    analysis_type: Optional[str] = None
+
 
 
 def plan_eod_requests(params) -> Sequence[DataLoadRequest]:
@@ -33,6 +35,7 @@ def plan_eod_requests(params) -> Sequence[DataLoadRequest]:
             label="eod",
             target_date=params.trade_date,
             previous_date=params.previous_trade_date,
+            analysis_type="eod",
         )
     ]
 
@@ -45,11 +48,13 @@ def plan_trading_requests(params) -> Sequence[DataLoadRequest]:
             label="ex_ante",
             target_date=params.ex_ante_date,
             previous_date=params.vest_previous_date,
+            analysis_type="ex_ante",
         ),
         DataLoadRequest(
             label="ex_post",
             target_date=params.ex_post_date,
             previous_date=params.custodian_previous_date,
+            analysis_type="ex_post",
         ),
     ]
 
@@ -63,15 +68,17 @@ def fetch_data_stores(
     """Load all required data stores using minimal database calls."""
 
     loader = BulkDataLoader(session, base_cls, registry)
-    cache: Dict[Tuple[date, Optional[date]], BulkDataStore] = {}
+    cache: Dict[Tuple[date, Optional[date], Optional[str]], BulkDataStore] = {}
     stores: Dict[str, BulkDataStore] = {}
 
     for request in requests:
-        key = (request.target_date, request.previous_date)
+        key = (request.target_date, request.previous_date, request.analysis_type)
         if key not in cache:
             cache[key] = loader.load_all_data_for_date(
                 request.target_date,
                 previous_date=request.previous_date,
+                analysis_type=request.analysis_type,
+
             )
         stores[request.label] = cache[key]
 

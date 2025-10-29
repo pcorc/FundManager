@@ -306,20 +306,20 @@ def normalize_all_holdings(fund_data: Dict[str, Any], logger=None) -> Dict[str, 
         treasury_df_t1, df_cust_treasury_t1, logger
     )
 
-    equity_df = ensure_equity_schema(equity_df)
-    df_cust_equity = ensure_equity_schema(df_cust_equity)
-    equity_df_t1 = ensure_equity_schema(equity_df_t1)
-    df_cust_equity_t1 = ensure_equity_schema(df_cust_equity_t1)
-
-    options_df = ensure_option_schema(options_df)
-    df_cust_option = ensure_option_schema(df_cust_option)
-    options_df_t1 = ensure_option_schema(options_df_t1)
-    df_cust_option_t1 = ensure_option_schema(df_cust_option_t1)
-
-    treasury_df = ensure_treasury_schema(treasury_df)
-    df_cust_treasury = ensure_treasury_schema(df_cust_treasury)
-    treasury_df_t1 = ensure_treasury_schema(treasury_df_t1)
-    df_cust_treasury_t1 = ensure_treasury_schema(df_cust_treasury_t1)
+    # equity_df = ensure_equity_schema(equity_df)
+    # df_cust_equity = ensure_equity_schema(df_cust_equity)
+    # equity_df_t1 = ensure_equity_schema(equity_df_t1)
+    # df_cust_equity_t1 = ensure_equity_schema(df_cust_equity_t1)
+    #
+    # options_df = ensure_option_schema(options_df)
+    # df_cust_option = ensure_option_schema(df_cust_option)
+    # options_df_t1 = ensure_option_schema(options_df_t1)
+    # df_cust_option_t1 = ensure_option_schema(df_cust_option_t1)
+    #
+    # treasury_df = ensure_treasury_schema(treasury_df)
+    # df_cust_treasury = ensure_treasury_schema(df_cust_treasury)
+    # treasury_df_t1 = ensure_treasury_schema(treasury_df_t1)
+    # df_cust_treasury_t1 = ensure_treasury_schema(df_cust_treasury_t1)
 
     fund_data["equity_holdings"] = equity_df
     fund_data["options_holdings"] = options_df

@@ -41,6 +41,8 @@ class BulkDataLoader:
         target_date: date,
         *,
         previous_date: Optional[date] = None,
+        analysis_type: Optional[str] = None,
+
     ) -> BulkDataStore:
         """Bulk load data for ``target_date`` (and optionally ``previous_date``)."""
 
@@ -54,7 +56,11 @@ class BulkDataLoader:
             data_store, all_funds, target_date, previous_date
         )
         self._bulk_load_vest_holdings(
-            data_store, all_funds, target_date, previous_date
+            data_store,
+            all_funds,
+            target_date,
+            previous_date,
+            analysis_type=analysis_type,
         )
         self._bulk_load_nav_data(
             data_store, all_funds, target_date, previous_date
@@ -169,6 +175,8 @@ class BulkDataLoader:
         all_funds: Dict,
         target_date: date,
         previous_date: Optional[date],
+        *,
+        analysis_type: Optional[str] = None,
     ) -> None:
         """Load ALL Vest holdings for ALL funds in one query."""
         holdings_map = [
@@ -201,6 +209,24 @@ class BulkDataLoader:
                             query, date_column, target_date, previous_date
                         )
                     all_data = pd.read_sql(query.statement, self.session.bind)
+
+                    if analysis_type:
+                        analysis_column = next(
+                            (
+                                column
+                                for column in all_data.columns
+                                if column.lower() == 'analysis_type'
+                            ),
+                            None,
+                        )
+                        if analysis_column:
+                            mask = (
+                                all_data[analysis_column]
+                                .astype(str)
+                                .str.lower()
+                                == analysis_type.lower()
+                            )
+                            all_data = all_data.loc[mask].copy()
 
                     for fund in funds:
                         fund_name = fund.name
@@ -247,18 +273,33 @@ class BulkDataLoader:
                 continue
 
             try:
+                if table_name == 'bny_us_nav_v2':
+                    self._load_bny_us_nav(
+                        data_store, funds, target_date, previous_date
+                    )
+                    continue
+
+                if table_name == 'bny_vit_nav':
+                    self._load_bny_vit_nav(
+                        data_store, funds, target_date, previous_date
+                    )
+                    continue
+
                 table = getattr(self.base_cls.classes, table_name)
 
-                # Handle different NAV table structures
-                if table_name in ['bny_us_nav_v2', 'bny_vit_nav']:
-                    # These tables don't have fund column - get all and distribute
+                if table_name == 'umb_cef_nav':
+                    # UMB has fund column - query for all relevant funds at once
                     date_column = self._get_table_column(table, 'date', 'nav_date', 'business_date')
+                    fund_column = self._get_table_column(table, 'fund', 'fund_ticker')
                     query = self.session.query(table)
                     if date_column is not None:
                         query = self._apply_date_filter(
                             query, date_column, target_date, previous_date
                         )
+                    if fund_column is not None:
+                        query = query.filter(fund_column.in_([fund.name for fund in funds]))
                     all_nav_data = pd.read_sql(query.statement, self.session.bind)
+
                     for fund in funds:
                         fund_name = fund.name
                         fund_nav = self._filter_by_fund(all_nav_data, fund_name, fund.mapping_data)
@@ -278,22 +319,23 @@ class BulkDataLoader:
                         if previous_date is not None:
                             self._store_fund_data(data_store, fund_name, 'nav_t1', previous)
 
-                elif table_name == 'umb_cef_nav':
-                    # UMB has fund column - query for all relevant funds at once
-                    date_column = self._get_table_column(table, 'date', 'nav_date', 'business_date')
-                    fund_column = self._get_table_column(table, 'fund', 'fund_ticker')
+                else:
+                    # Default handling for NAV tables with standard fund identifiers
+                    date_column = self._get_table_column(
+                        table, 'date', 'nav_date', 'business_date'
+                    )
                     query = self.session.query(table)
                     if date_column is not None:
                         query = self._apply_date_filter(
                             query, date_column, target_date, previous_date
                         )
-                    if fund_column is not None:
-                        query = query.filter(fund_column.in_([fund.name for fund in funds]))
                     all_nav_data = pd.read_sql(query.statement, self.session.bind)
 
                     for fund in funds:
                         fund_name = fund.name
-                        fund_nav = self._filter_by_fund(all_nav_data, fund_name, fund.mapping_data)
+                        fund_nav = self._filter_by_fund(
+                            all_nav_data, fund_name, fund.mapping_data
+                        )
                         current, previous = self._split_current_previous(
                             fund_nav,
                             self._find_date_column(
@@ -1208,6 +1250,19 @@ class BulkDataLoader:
                     return trimmed
             elif value:
                 return value
+
+        numbers = mapping.get('account_numbers')
+        if isinstance(numbers, dict):
+            for key in keys:
+                candidate = numbers.get(key)
+                normalised = self._normalise_mapping_value(candidate)
+                if normalised:
+                    return normalised
+            for candidate in numbers.values():
+                normalised = self._normalise_mapping_value(candidate)
+                if normalised:
+                    return normalised
+
         return None
 
     def _collect_fund_aliases(self, funds: List) -> List[str]:
@@ -1233,6 +1288,26 @@ class BulkDataLoader:
         if previous_date is not None:
             return query.filter(column.in_([target_date, previous_date]))
         return query.filter(column == target_date)
+
+    @staticmethod
+    def _normalise_mapping_value(value) -> Optional[str]:
+        if isinstance(value, str):
+            trimmed = value.strip()
+            if trimmed and trimmed.upper() != 'NULL':
+                return trimmed
+            return None
+        if isinstance(value, (list, tuple, set)):
+            for item in value:
+                normalised = BulkDataLoader._normalise_mapping_value(item)
+                if normalised:
+                    return normalised
+            return None
+        if pd.isna(value):
+            return None
+        if value is not None:
+            trimmed = str(value).strip()
+            return trimmed or None
+        return None
 
     def _find_date_column(self, df: pd.DataFrame, *candidates: str) -> Optional[str]:
         if df.empty:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from typing import Iterable, List, Sequence, Tuple
+import unicodedata
 
 try:  # pragma: no cover - optional dependency
     from fpdf import FPDF
@@ -113,7 +114,13 @@ class BaseReportPDF:
     # ------------------------------------------------------------------
     def _sanitize_text(self, value: object) -> str:
         text = "" if value is None else str(value)
-        return text.replace("\u2013", "-")
+        text = text.translate(_SANITIZE_MAP)
+        try:
+            text.encode("latin-1")
+        except UnicodeEncodeError:
+            text = unicodedata.normalize("NFKD", text)
+            text = text.encode("latin-1", "replace").decode("latin-1")
+        return text
 
     def _resolve_column_widths(
         self,
@@ -140,3 +147,20 @@ class BaseReportPDF:
     def output(self) -> None:
         os.makedirs(os.path.dirname(self.output_path) or ".", exist_ok=True)
         self.pdf.output(self.output_path)
+
+_SANITIZE_MAP = {
+    ord("\u00a0"): " ",  # non-breaking space
+    ord("\u2013"): "-",  # en dash
+    ord("\u2014"): "-",  # em dash
+    ord("\u2015"): "-",  # horizontal bar
+    ord("\u2212"): "-",  # minus sign
+    ord("\u2018"): "'",  # left single quotation mark
+    ord("\u2019"): "'",  # right single quotation mark
+    ord("\u201a"): "'",  # single low-9 quotation mark
+    ord("\u2032"): "'",  # prime
+    ord("\u201c"): '"',  # left double quotation mark
+    ord("\u201d"): '"',  # right double quotation mark
+    ord("\u201e"): '"',  # double low-9 quotation mark
+    ord("\u2033"): '"',  # double prime
+    ord("\u2026"): "...",  # ellipsis
+}
