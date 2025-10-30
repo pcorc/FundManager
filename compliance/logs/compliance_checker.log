@@ -566,3 +566,10 @@ AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
 2025-10-30 06:49:25,915 - compliance_checker - INFO - Running compliance tests for TR2B2
 2025-10-30 06:49:25,941 - compliance_checker - INFO - Running compliance tests for FDND
 2025-10-30 06:49:25,960 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-30 06:59:10,148 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 06:59:10,229 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 07:06:19,934 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-30 07:06:23,886 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-30 07:06:28,025 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-30 07:06:32,005 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-30 07:06:36,166 - compliance_checker - INFO - Running compliance tests for HE3B1

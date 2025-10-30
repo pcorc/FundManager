@@ -41,7 +41,6 @@ def generate_trading_excel_report(comparison_data: Mapping[str, Any], output_pat
     _create_summary_metrics_sheet(workbook, comparison_data)
     _create_trade_activity_sheet(workbook, comparison_data)
     _create_compliance_details_sheet(workbook, comparison_data)
-    _create_detailed_comparison_sheet(workbook, comparison_data)
     _create_individual_fund_sheets(workbook, comparison_data)
 
     workbook.save(path)
@@ -62,7 +61,6 @@ def generate_trading_excel_report(comparison_data: Mapping[str, Any], output_pat
     _create_compliance_changes_sheet(workbook, comparison_data)
     _create_trade_activity_sheet(workbook, comparison_data)
     _create_compliance_details_sheet(workbook, comparison_data)
-    _create_detailed_comparison_sheet(workbook, comparison_data)
     _create_individual_fund_sheets(workbook, comparison_data)
 
     workbook.save(path)
@@ -351,12 +349,6 @@ def _create_compliance_details_sheet(workbook: Workbook, data: Mapping[str, Any]
     sheet = workbook.create_sheet("Compliance Details")
     _populate_compliance_detail_sheet(sheet, data)
 
-
-def _create_detailed_comparison_sheet(workbook: Workbook, data: Mapping[str, Any]) -> None:
-    """Create the detailed comparison sheet (identical to compliance details)."""
-
-    sheet = workbook.create_sheet("Detailed Comparison")
-    _populate_compliance_detail_sheet(sheet, data)
 
 
 def _create_summary_metrics_sheet(workbook: Workbook, data: Mapping[str, Any]) -> None:

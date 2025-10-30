@@ -543,22 +543,39 @@ class TradingComplianceAnalyzer:
         return "PASS" if payload else "UNKNOWN"
 
     def _extract_status(self, result: Any) -> str:
-        if not isinstance(result, Mapping):
+        mapping: Optional[Mapping[str, Any]] = None
+        if isinstance(result, Mapping):
+            mapping = result
+        else:
+            attr_status = getattr(result, "is_compliant", None)
+            if isinstance(attr_status, bool):
+                return "PASS" if attr_status else "FAIL"
+            # Some result objects expose a ``status`` attribute or nested dict
+            attr_status_str = getattr(result, "status", None)
+            if isinstance(attr_status_str, str):
+                upper = attr_status_str.upper()
+                if upper in {"PASS", "FAIL"}:
+                    return upper
+            details = getattr(result, "details", None)
+            if isinstance(details, Mapping):
+                mapping = details
+        if mapping is None:
             if isinstance(result, str):
                 value = result.upper()
                 if value in {"PASS", "FAIL"}:
                     return value
             return "UNKNOWN"
 
-        status = result.get("is_compliant")
+        status = mapping.get("is_compliant")
         if isinstance(status, bool):
             return "PASS" if status else "FAIL"
         if isinstance(status, str):
             upper = status.upper()
             if upper in {"PASS", "FAIL"}:
                 return upper
-        if "status" in result and isinstance(result["status"], str):
-            upper = result["status"].upper()
+        status_value = mapping.get("status")
+        if isinstance(status_value, str):
+            upper = status_value.upper()
             if upper in {"PASS", "FAIL"}:
                 return upper
         return "UNKNOWN"
