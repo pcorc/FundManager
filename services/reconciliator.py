@@ -7,7 +7,7 @@ from config.fund_classifications import (
     DIVERSIFIED_FUNDS, NON_DIVERSIFIED_FUNDS, PRIVATE_FUNDS,
     CLOSED_END_FUNDS, FUNDS_WITH_SG_EQUITY
 )
-from domain.fund import Fund
+from domain.fund import Fund, FundSnapshot, FundHoldings
 
 
 @dataclass
@@ -37,6 +37,43 @@ class Reconciliator:
         self._detailed_calculations: Dict[str, Dict] = {}
         self.logger = logging.getLogger(f"Reconciliator_{fund.name}")
         self.is_etf = fund.name not in PRIVATE_FUNDS and fund.name not in CLOSED_END_FUNDS
+
+    # ------------------------------------------------------------------
+    # Snapshot helpers
+    # ------------------------------------------------------------------
+    def _current_snapshot(self) -> FundSnapshot:
+        snapshot = getattr(self.fund, "data", None)
+        if snapshot is None or getattr(snapshot, "current", None) is None:
+            return FundSnapshot()
+        return snapshot.current
+
+    def _previous_snapshot(self) -> FundSnapshot:
+        snapshot = getattr(self.fund, "data", None)
+        if snapshot is None or getattr(snapshot, "previous", None) is None:
+            return FundSnapshot()
+        return snapshot.previous
+
+    def _current_frame(self, attribute: str, *, source: Optional[str] = None) -> pd.DataFrame:
+        snapshot = self._current_snapshot()
+        target = snapshot
+        if source is not None:
+            component = getattr(snapshot, source, None)
+            if not isinstance(component, FundHoldings):
+                return pd.DataFrame()
+            target = component
+        frame = getattr(target, attribute, pd.DataFrame())
+        return frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame()
+
+    def _previous_frame(self, attribute: str, *, source: Optional[str] = None) -> pd.DataFrame:
+        snapshot = self._previous_snapshot()
+        target = snapshot
+        if source is not None:
+            component = getattr(snapshot, source, None)
+            if not isinstance(component, FundHoldings):
+                return pd.DataFrame()
+            target = component
+        frame = getattr(target, attribute, pd.DataFrame())
+        return frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame()
 
     def run_all_reconciliations(self):
         """Run all reconciliations using Fund object data"""
@@ -117,10 +154,10 @@ class Reconciliator:
     def reconcile_custodian_equity(self):
         """Reconcile custodian equity using Fund object data"""
         # Get data from Fund object
-        df_oms = self.fund.equity_holdings.copy()
-        df_cust = self.fund.custodian_equity_holdings.copy()
-        df_oms1 = self.fund.previous_equity_holdings.copy()
-        df_cust1 = self.fund.previous_custodian_equity_holdings.copy()
+        df_oms = self._current_frame('equity', source='vest')
+        df_cust = self._current_frame('equity', source='custodian')
+        df_oms1 = self._previous_frame('equity', source='vest')
+        df_cust1 = self._previous_frame('equity', source='custodian')
 
         # Get trades and corporate actions from Fund
         df_trades = self.fund.equity_trades
@@ -215,7 +252,7 @@ class Reconciliator:
         """Compare fund equity holdings against benchmark weights."""
 
         df_fund = getattr(self.fund, "equity_holdings", pd.DataFrame()).copy()
-        df_index = getattr(self.fund, "index_holdings", pd.DataFrame()).copy()
+        df_index = self._current_frame('index')
 
         if df_fund.empty or df_index.empty:
             self.results["index_equity"] = ReconciliationResult(
@@ -372,10 +409,10 @@ class Reconciliator:
     def reconcile_custodian_option(self):
         """Reconcile custodian options using Fund object data"""
         # Get data from Fund object
-        df_oms = self.fund.options_holdings.copy()
-        df_cust = self.fund.custodian_option_holdings.copy()
-        df_oms1 = self.fund.previous_options_holdings.copy()
-        df_cust1 = self.fund.previous_custodian_option_holdings.copy()
+        df_oms = self._current_frame('options', source='vest')
+        df_cust = self._current_frame('options', source='custodian')
+        df_oms1 = self._previous_frame('options', source='vest')
+        df_cust1 = self._previous_frame('options', source='custodian')
 
         # Take absolute value of option prices
         for d in [df_oms, df_oms1]:
@@ -549,8 +586,8 @@ class Reconciliator:
     def reconcile_custodian_equity_t1(self):
         """Reconcile custodian equity for T-1 date (simpler version)"""
         # Get T-1 data from Fund object
-        df_oms1 = self.fund.previous_equity_holdings.copy()
-        df_cust1 = self.fund.previous_custodian_equity_holdings.copy()
+        df_oms1 = self._previous_frame('equity', source='vest')
+        df_cust1 = self._previous_frame('equity', source='custodian')
 
         if df_oms1.empty or df_cust1.empty:
             self.results['custodian_equity_t1'] = ReconciliationResult(
@@ -856,8 +893,8 @@ class Reconciliator:
     def reconcile_custodian_treasury_t1(self):
         """Reconcile custodian treasury holdings for T-1 date"""
         # Similar to reconcile_custodian_treasury but using previous data
-        df_oms1 = self.fund.previous_treasury_holdings.copy()
-        df_cust1 = self.fund.previous_custodian_treasury_holdings.copy()
+        df_oms1 = self._previous_frame('treasury', source='vest')
+        df_cust1 = self._previous_frame('treasury', source='custodian')
         if df_oms1.empty and df_cust1.empty:
             self.results['custodian_treasury_t1'] = ReconciliationResult(
                 raw_recon=pd.DataFrame(),
@@ -991,10 +1028,10 @@ class Reconciliator:
             return value.copy() if isinstance(value, pd.DataFrame) else pd.DataFrame()
 
         equity_details = {
-            'vest_current': self.fund.equity_holdings.copy(),
-            'custodian_current': self.fund.custodian_equity_holdings.copy(),
-            'vest_previous': self.fund.previous_equity_holdings.copy(),
-            'custodian_previous': self.fund.previous_custodian_equity_holdings.copy(),
+            'vest_current': self._current_frame('equity', source='vest'),
+            'custodian_current': self._current_frame('equity', source='custodian'),
+            'vest_previous': self._previous_frame('equity', source='vest'),
+            'custodian_previous': self._previous_frame('equity', source='custodian'),
             'trades': self.fund.equity_trades.copy(),
             'corporate_actions': self.fund.cr_rd_data.copy(),
         }
