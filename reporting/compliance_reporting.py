@@ -8,7 +8,8 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
+
 import numbers
 import re
 import pandas as pd
@@ -54,7 +55,7 @@ class ComplianceReport:
         self.test_functions = set(test_functions) if test_functions else None
         self.sheet_data: Dict[str, pd.DataFrame] = {}
 
-        self.results = {self.report_date: normalize_compliance_results(results)}
+        self.results = self._prepare_results(results)
 
         self.process_all_checks()
         self.export_to_excel()
@@ -89,6 +90,47 @@ class ComplianceReport:
         if isinstance(value, date):
             return value.isoformat()
         return str(value)
+
+    # ------------------------------------------------------------------
+    def _prepare_results(
+        self, raw_results: Mapping[str, Mapping[str, object]]
+    ) -> Dict[str, Dict[str, Any]]:
+        if not raw_results:
+            return {}
+
+        if self._looks_like_date_mapping(raw_results):
+            prepared: Dict[str, Dict[str, Any]] = {}
+            for date_key, payload in raw_results.items():
+                date_iso = self._normalise_date(date_key)
+                prepared[date_iso] = normalize_compliance_results(payload or {})
+            return prepared
+
+        return {self.report_date: normalize_compliance_results(raw_results)}
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _looks_like_date_mapping(payload: Mapping[object, Any]) -> bool:
+        if not payload:
+            return False
+
+        if not any(ComplianceReport._is_date_key(key) for key in payload.keys()):
+            return False
+
+        first_value = next(iter(payload.values()))
+        return isinstance(first_value, Mapping)
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _is_date_key(value: object) -> bool:
+        if isinstance(value, (date, datetime)):
+            return True
+        if isinstance(value, str):
+            try:
+                datetime.fromisoformat(value)
+            except ValueError:
+                return False
+            return True
+        return False
 
     # ------------------------------------------------------------------
     def _append_footnotes(self, df: pd.DataFrame, footnote_key: str) -> pd.DataFrame:

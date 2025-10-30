@@ -148,26 +148,13 @@ class Fund:
     def total_assets(self) -> float:
         current = self.data.current
         custodian_total = getattr(current, "total_assets", 0.0) or 0.0
-        if custodian_total:
-            return float(custodian_total)
-        nav = getattr(current, "nav", 0.0) or 0.0
-        if nav:
-            return float(nav)
-        return (
-            self.total_equity_value
-            + self.total_option_value
-            + self.total_treasury_value
-            + self.cash_value
-        )
+        return float(custodian_total)
 
     @property
     def total_net_assets(self) -> float:
         current = self.data.current
         custodian_tna = getattr(current, "total_net_assets", 0.0) or 0.0
-        if custodian_tna:
-            return float(custodian_tna)
-        nav = getattr(current, "nav", 0.0) or 0.0
-        return float(nav) if nav else self.total_assets
+        return float(custodian_tna)
 
     @property
     def total_equity_value(self) -> float:
@@ -179,7 +166,6 @@ class Fund:
                 return (equity[price_col] * equity[quantity_col]).sum()
             if "market_value" in equity.columns:
                 return equity["market_value"].sum()
-        return 0.0
 
     @property
     def total_option_value(self) -> float:
