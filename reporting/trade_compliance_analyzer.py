@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import pandas as pd
 
@@ -201,14 +201,6 @@ class TradingComplianceAnalyzer:
         ante_results: Mapping[str, Any],
         post_results: Mapping[str, Any],
     ) -> Dict[str, Any]:
-        post_fund = self._extract_fund_object(post_results)
-        ante_fund = self._extract_fund_object(ante_results)
-
-        if post_fund is None and ante_fund is None:
-            return {}
-
-        post_fund = post_results
-        ante_fund = ante_results
 
         asset_mappings: Tuple[Tuple[str, str], ...] = (
             ("equity", "equity"),
@@ -225,25 +217,20 @@ class TradingComplianceAnalyzer:
         total_traded = 0.0
 
         for key, attr in asset_mappings:
-            post_df = self._extract_holdings(post_fund, attr)
-            ante_df = self._extract_holdings(ante_fund, attr)
+            post_df = self._get_holdings(post_results, attr)
+            ante_df = self._get_holdings(ante_results, attr)
 
-            final_quantity = self._sum_column(post_df, "iiv_shares")
-            if final_quantity == 0.0:
-                final_quantity = self._sum_quantity(post_df)
+            final_quantity = post_df["iiv_shares"].sum()
+            initial_quantity = ante_df["nav_shares"].sum()
 
-            initial_quantity = self._sum_column(ante_df, "nav_shares")
-            if initial_quantity == 0.0:
-                initial_quantity = self._sum_quantity(ante_df)
-
-            quantity_delta = self._sum_column(post_df, "trade_rebal")
+            quantity_delta = post_df["trade_rebal"].sum()
             if quantity_delta == 0.0:
                 quantity_delta = final_quantity - initial_quantity
 
             final_shares[key] = final_quantity
             initial_shares[key] = initial_quantity
 
-            trade_rebal_series = self._coerce_numeric_series(post_df, "trade_rebal")
+            trade_rebal_series = post_df["trade_rebal"]
             buy_quantity = float(trade_rebal_series[trade_rebal_series > 0.0].sum())
             sell_quantity = abs(
                 float(trade_rebal_series[trade_rebal_series < 0.0].sum())
@@ -260,8 +247,8 @@ class TradingComplianceAnalyzer:
                 "net": quantity_delta,
             }
 
-            post_notional = self._sum_notional(post_df)
-            ante_notional = self._sum_notional(ante_df)
+            post_notional = self._calculate_notional(post_df, "iiv_shares", asset_type=key)
+            ante_notional = self._calculate_notional(ante_df, "nav_shares", asset_type=key)
             notional_delta = post_notional - ante_notional
             notional_changes[key] = notional_delta
 
@@ -299,131 +286,29 @@ class TradingComplianceAnalyzer:
 
         return trade_summary
 
-    def _extract_fund_object(self, result: Mapping[str, Any]) -> Optional[Any]:
-        fund_object = result.get("fund_object") if isinstance(result, Mapping) else None
-        return fund_object if fund_object is not None else None
-
-    def _extract_holdings(self, fund_object: Any, attribute: str) -> pd.DataFrame:
-        if fund_object is None:
+    def _get_holdings(self, results: Mapping[str, Any], attribute: str) -> pd.DataFrame:
+        if not isinstance(results, Mapping):
             return pd.DataFrame()
-
-        data = getattr(fund_object, "data", None)
-        current = getattr(data, "current", None)
-        holdings = getattr(current, attribute, None)
-        if isinstance(holdings, pd.DataFrame):
-            return holdings
+        candidate = results.get(attribute)
+        if isinstance(candidate, pd.DataFrame):
+            return candidate
         return pd.DataFrame()
 
-    @staticmethod
-    def _sum_column(df: pd.DataFrame, column: str) -> float:
-        if not isinstance(df, pd.DataFrame) or column not in df.columns:
-            return 0.0
-        series = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
-        return float(series.sum())
-
-    @staticmethod
-    def _coerce_numeric_series(df: pd.DataFrame, column: str) -> pd.Series:
-        if not isinstance(df, pd.DataFrame) or column not in df.columns:
-            return pd.Series(dtype=float)
-        return pd.to_numeric(df[column], errors="coerce").fillna(0.0)
-
-    @staticmethod
-    def _sum_quantity(df: pd.DataFrame, candidates: Iterable[str] = ("quantity", "shares", "units")) -> float:
-        if not isinstance(df, pd.DataFrame) or df.empty:
-            return 0.0
-        for column in candidates:
-            if column in df.columns:
-                series = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
-                return float(series.sum())
-        numeric_cols = df.select_dtypes(include=["number"]).columns
-        if len(numeric_cols) > 0:
-            series = pd.to_numeric(df[numeric_cols[0]], errors="coerce").fillna(0.0)
-            return float(series.sum())
-        return 0.0
-
-    @staticmethod
-    def _sum_notional(
+    def _calculate_notional(
+        self,
         df: pd.DataFrame,
+        quantity_column: str,
         *,
-        quantity_cols: Iterable[str] = ("quantity", "shares", "units"),
-        price_cols: Iterable[str] = ("price", "px_last", "close_price"),
+        asset_type: str,
     ) -> float:
         if not isinstance(df, pd.DataFrame) or df.empty:
             return 0.0
-
-        if "market_value" in df.columns:
-            series = pd.to_numeric(df["market_value"], errors="coerce").fillna(0.0)
-            return float(series.sum())
-
-        quantity_series: Optional[pd.Series] = None
-        price_series: Optional[pd.Series] = None
-
-        for column in quantity_cols:
-            if column in df.columns:
-                quantity_series = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
-                break
-
-        for column in price_cols:
-            if column in df.columns:
-                price_series = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
-                break
-
-        if quantity_series is not None and price_series is not None:
-            return float((quantity_series * price_series).sum())
-
-        numeric_cols = df.select_dtypes(include=["number"]).columns
-        if len(numeric_cols) > 0:
-            series = pd.to_numeric(df[numeric_cols[0]], errors="coerce").fillna(0.0)
-            return float(series.sum())
-        return 0.0
-
-
-    def _build_summary_metrics(self, results: Mapping[str, Any]) -> Dict[str, float]:
-        metrics = self._collect_summary_metrics_from_fund(results)
-        if metrics:
-            return metrics
-
-        summary_result: Any = None
-        if isinstance(results, Mapping):
-            summary_result = results.get("summary_metrics")
-
-        return self._extract_summary_metrics_payload(summary_result)
-
-    def _collect_summary_metrics_from_fund(
-        self, results: Mapping[str, Any]
-    ) -> Dict[str, float]:
-        fund = self._extract_fund_object(results)
-        if fund is None:
-            return {}
-
-        data = getattr(fund, "data", None)
-        current = getattr(data, "current", None)
-        if current is None:
-            return {}
-
-        def _coerce(value: Any) -> float:
-            try:
-                return float(value or 0.0)
-            except (TypeError, ValueError):
-                return 0.0
-
-        metrics = {
-            "cash_value": _coerce(getattr(current, "cash", 0.0)),
-            "equity_market_value": _coerce(
-                getattr(current, "total_equity_value", 0.0)
-            ),
-            "option_market_value": _coerce(
-                getattr(current, "total_option_value", 0.0)
-            ),
-            "option_delta_adjusted_notional": _coerce(
-                getattr(current, "total_option_delta_adjusted_notional", 0.0)
-            ),
-            "treasury": _coerce(getattr(current, "total_treasury_value", 0.0)),
-            "total_assets": _coerce(getattr(current, "total_assets", 0.0)),
-            "total_net_assets": _coerce(getattr(current, "total_net_assets", 0.0)),
-        }
-
-        return metrics
+        if quantity_column not in df.columns or "price" not in df.columns:
+            return 0.0
+        quantities = df[quantity_column]
+        prices = df["price"]
+        multiplier = 100.0 if asset_type == "options" else 1.0
+        return float((quantities * prices * multiplier).sum())
 
     # ------------------------------------------------------------------
     def _extract_summary_metrics_payload(self, result: Any) -> Dict[str, float]:
@@ -487,9 +372,6 @@ class TradingComplianceAnalyzer:
                 },
             }
 
-        ticker_column = self._detect_ticker_column(df, asset_type)
-        price_column = self._detect_price_column(df)
-
         buys = []
         sells = []
         total_buy_qty = 0.0
@@ -502,10 +384,10 @@ class TradingComplianceAnalyzer:
             if quantity == 0.0:
                 continue
 
-            ticker = str(row.get(ticker_column, "")) if ticker_column else ""
+            ticker = str(row.get("ticker", ""))
             ticker = ticker.upper().strip()
 
-            market_value = self._estimate_trade_market_value(row, quantity, price_column, asset_type)
+            market_value = self._estimate_trade_market_value(row, quantity, asset_type)
 
             trade_payload = {
                 "ticker": ticker,
@@ -555,66 +437,21 @@ class TradingComplianceAnalyzer:
                 return column
         return None
 
-    @staticmethod
-    def _detect_price_column(df: pd.DataFrame) -> Optional[str]:
-        for column in ("trade_price", "price", "px_last", "close_price"):
-            if column in df.columns:
-                return column
-        return None
-
     def _estimate_trade_market_value(
         self,
         row: pd.Series,
         quantity: float,
-        price_column: Optional[str],
         asset_type: str,
     ) -> float:
-        preferred_columns = (
-            "trade_rebal_market_value",
-            "trade_rebal_mv",
-            "trade_rebal_value",
-            "trade_rebal_notional",
-        )
-        for column in preferred_columns:
-            if column in row and pd.notna(row[column]):
-                try:
-                    return float(row[column])
-                except (TypeError, ValueError):
-                    continue
-
-        if price_column and price_column in row and pd.notna(row[price_column]):
+        multiplier = 100.0 if asset_type == "options" else 1.0
+        if "price" in row and pd.notna(row["price"]):
             try:
-                price_value = float(row[price_column])
-                multiplier = 100.0 if asset_type == "options" else 1.0
+                price_value = float(row["price"])
                 return price_value * quantity * multiplier
             except (TypeError, ValueError):
                 pass
+        return float(quantity * multiplier)
 
-        if "market_value" in row and pd.notna(row["market_value"]):
-            try:
-                base_quantity = float(row.get("quantity", 0.0))
-                market_value = float(row["market_value"])
-                if base_quantity:
-                    proportion = quantity / base_quantity
-                    return market_value * proportion
-                return market_value
-            except (TypeError, ValueError, ZeroDivisionError):
-                pass
-
-        return float(quantity)
-
-    # ------------------------------------------------------------------
-    def _overall_status(self, payload: Mapping[str, Any]) -> str:
-        failures = 0
-        for name, result in payload.items():
-            if name == "summary_metrics":
-                continue
-            status = self._extract_status(result)
-            if status == "FAIL":
-                failures += 1
-        if failures:
-            return "FAIL"
-        return "PASS" if payload else "UNKNOWN"
 
     # ------------------------------------------------------------------
     def _overall_status(self, payload: Mapping[str, Any]) -> str:

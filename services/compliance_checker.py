@@ -179,9 +179,43 @@ class ComplianceChecker:
             total_equity_market_value = float(fund.data.current.total_equity_value)
             total_opt_market_value = float(fund.data.current.total_option_value)
             total_tbill_value = float(fund.data.current.total_treasury_value)
-            total_opt_delta_notional_value = float(fund.data.current.total_option_delta_adjusted_notional)
+            total_opt_delta_notional_value = float(
+                fund.data.current.total_option_delta_adjusted_notional
+            )
 
-            options_in_scope = fund.name in PROSPECTUS_OPTIONS_FUNDS
+            is_closed_end = fund.name in CLOSED_END_FUNDS
+            is_trif = is_closed_end and fund.name.startswith(("P3", "TR"))
+
+            if is_trif:
+                calculations = {
+                    "total_equity_market_value": total_equity_market_value,
+                    "total_opt_market_value": total_opt_market_value,
+                    "total_tbill_value": total_tbill_value,
+                    "total_cash_value": total_cash_value,
+                    "total_assets": total_assets,
+                    "total_net_assets": total_net_assets,
+                }
+
+                return ComplianceResult(
+                    is_compliant=True,
+                    details={
+                        "rule": "80% Prospectus Policy",
+                        "skipped": True,
+                        "reason": "TRIF closed-end funds are excluded from the 80% test",
+                        "fund": fund.name,
+                    },
+                    calculations=calculations,
+                )
+
+            is_b3_closed_end = is_closed_end and fund.name.endswith("B3")
+            options_in_scope = (fund.name in PROSPECTUS_OPTIONS_FUNDS) or is_b3_closed_end
+
+            option_primary_amount = abs(total_opt_delta_notional_value)
+            option_primary_method = "delta_adjusted_notional"
+
+            if is_closed_end:
+                option_primary_amount = total_opt_market_value
+                option_primary_method = "market_value"
 
             numerator = total_equity_market_value + total_tbill_value
             denominator = (
@@ -189,8 +223,8 @@ class ComplianceChecker:
             )
 
             if options_in_scope:
-                numerator += abs(total_opt_delta_notional_value)
-                denominator += abs(total_opt_delta_notional_value)
+                numerator += option_primary_amount
+                denominator += option_primary_amount
 
             numerator_mv = total_equity_market_value + total_tbill_value
             denominator_mv = (
@@ -210,7 +244,8 @@ class ComplianceChecker:
                 "total_opt_market_value": total_opt_market_value,
                 "total_tbill_value": total_tbill_value,
                 "total_cash_value": total_cash_value,
-                "dan": total_opt_delta_notional_value,
+                "option_contribution": option_primary_amount if options_in_scope else 0.0,
+                "option_contribution_method": option_primary_method,
                 "denominator": denominator,
                 "numerator": numerator,
                 "names_test": names_test,
@@ -221,11 +256,21 @@ class ComplianceChecker:
                 "total_assets": total_assets,
                 "total_net_assets": total_net_assets,
                 "options_in_scope": options_in_scope,
+                "policy_variant": (
+                    "closed_end_b3"
+                    if is_b3_closed_end
+                    else ("closed_end" if is_closed_end else "standard")
+                ),
             }
 
             return ComplianceResult(
                 is_compliant=names_test >= PROSPECTUS_MIN_THRESHOLD,
-                details={"rule": "80% Prospectus Policy", "options_in_scope": options_in_scope},
+                details={
+                    "rule": "80% Prospectus Policy",
+                    "options_in_scope": options_in_scope,
+                    "options_valuation_method": option_primary_method,
+                    "policy_variant": calculations["policy_variant"],
+                },
                 calculations=calculations,
             )
         except Exception as exc:  # pragma: no cover - defensive logging path
@@ -776,7 +821,6 @@ class ComplianceChecker:
                 error=str(exc),
             )
 
-
     def real_estate_check(self, fund: Fund) -> ComplianceResult:
         try:
             vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
@@ -1286,12 +1330,6 @@ class ComplianceChecker:
         treasury = getattr(fund.data.current.vest, "treasury", pd.DataFrame())
 
         return equity.copy(), options.copy(), treasury.copy()
-
-    @staticmethod
-    def _sum_holdings_column(frame: Optional[pd.DataFrame], column: str) -> float:
-        if not isinstance(frame, pd.DataFrame) or column not in frame.columns:
-            return 0.0
-        return float(pd.to_numeric(frame[column], errors="coerce").fillna(0.0).sum())
 
     @staticmethod
     def _fill_numeric_defaults(df: pd.DataFrame) -> pd.DataFrame:
