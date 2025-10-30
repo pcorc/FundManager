@@ -153,6 +153,7 @@ class FundSnapshot:
                 return fallback
         return 0.0
 
+
 class FundData:
     """Complete fund data for current day (T) and prior day (T-1)."""
 

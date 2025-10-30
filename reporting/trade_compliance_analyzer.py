@@ -201,11 +201,11 @@ class TradingComplianceAnalyzer:
         ante_results: Mapping[str, Any],
         post_results: Mapping[str, Any],
     ) -> Dict[str, Any]:
-        # post_fund = self._extract_fund_object(post_results)
-        # ante_fund = self._extract_fund_object(ante_results)
-        #
-        # if post_fund is None and ante_fund is None:
-        #     return {}
+        post_fund = self._extract_fund_object(post_results)
+        ante_fund = self._extract_fund_object(ante_results)
+
+        if post_fund is None and ante_fund is None:
+            return {}
 
         post_fund = post_results
         ante_fund = ante_results
