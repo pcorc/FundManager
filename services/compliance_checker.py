@@ -166,8 +166,8 @@ class ComplianceChecker:
             "option_delta_adjusted_notional": float(options_df["option_delta_adjusted_notional"].sum()),
             "option_market_value": float(options_df["option_market_value"].sum()),
             "treasury": float(treasury_df["treasury_market_value"].sum()),
-            "total_assets": self._get_total_assets(fund)[0],
-            "total_net_assets": self._get_total_assets(fund)[1],
+            "total_assets": float(fund.total_assets or 0.0)[0],
+            "total_net_assets": float(fund.total_assets or 0.0)[1],
         }
 
         return ComplianceResult(
@@ -179,7 +179,7 @@ class ComplianceChecker:
     def prospectus_80pct_policy(self, fund: Fund) -> ComplianceResult:
         try:
             equity_df, options_df, treasury_df = self._get_holdings(fund)
-            total_assets, total_net_assets = self._get_total_assets(fund)
+            total_assets, total_net_assets = float(fund.total_assets or 0.0)
             total_cash_value = self._get_cash_value(fund)
 
             total_equity_market_value = float(equity_df["equity_market_value"].sum())
@@ -246,7 +246,7 @@ class ComplianceChecker:
     def diversification_IRS_check(self, fund: Fund) -> ComplianceResult:
         try:
             vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
-            total_assets, total_net_assets = self._get_total_assets(fund)
+            total_assets, total_net_assets = float(fund.total_assets or 0.0)
             overlap_df = self._get_overlap(fund)
             expenses = self._get_expenses(fund)
 
@@ -484,7 +484,7 @@ class ComplianceChecker:
 
         try:
             vest_eqy_holdings, vest_opt_holdings, _ = self._get_holdings(fund)
-            total_assets, total_net_assets = self._get_total_assets(fund)
+            total_assets, total_net_assets = float(fund.total_assets or 0.0)
             expenses = self._get_expenses(fund)
 
             required_opt_cols = [
@@ -702,7 +702,7 @@ class ComplianceChecker:
     def diversification_IRC_check(self, fund: Fund) -> ComplianceResult:
         try:
             vest_eqy_holdings, vest_opt_holdings, _ = self._get_holdings(fund)
-            total_assets, _ = self._get_total_assets(fund)
+            total_assets= float(fund.total_assets or 0.0)
 
             if vest_eqy_holdings.empty:
                 raise ValueError("Equity holdings missing")
@@ -866,7 +866,7 @@ class ComplianceChecker:
     def twelve_d1a_other_inv_cos(self, fund: Fund) -> ComplianceResult:
         try:
             equity_df, _, _ = self._get_holdings(fund)
-            total_assets, _ = self._get_total_assets(fund)
+            total_assets= float(fund.total_assets or 0.0)
 
             if total_assets == 0 or equity_df.empty:
                 raise ValueError("Equity holdings or total assets missing")
@@ -952,7 +952,7 @@ class ComplianceChecker:
     def twelve_d2_insurance_cos(self, fund: Fund) -> ComplianceResult:
         try:
             vest_eqy_holdings, _, _ = self._get_holdings(fund)
-            total_assets, _ = self._get_total_assets(fund)
+            total_assets= float(fund.total_assets or 0.0)
 
             insurance_mask = (
                 vest_eqy_holdings["GICS_INDUSTRY_GROUP_NAME"].eq("Insurance")
@@ -1021,7 +1021,7 @@ class ComplianceChecker:
     def twelve_d3_sec_biz(self, fund: Fund) -> ComplianceResult:
         try:
             vest_eqy_holdings, vest_opt_holdings, _ = self._get_holdings(fund)
-            total_assets, _ = self._get_total_assets(fund)
+            total_assets= float(fund.total_assets or 0.0)
 
             sec_biz_mask = vest_eqy_holdings["GICS_INDUSTRY_NAME"].isin(["Capital Markets", "Banks"])
             sec_related_businesses = vest_eqy_holdings[sec_biz_mask].copy()
@@ -1137,7 +1137,7 @@ class ComplianceChecker:
         try:
 
             vest_eqy_holdings, vest_opt_holdings, _ = self._get_holdings(fund)
-            total_assets, _ = self._get_total_assets(fund)
+            total_assets= float(fund.total_assets or 0.0)
 
             if total_assets == 0 or vest_eqy_holdings.empty:
                 raise ValueError("Equity holdings or total assets missing")

@@ -492,3 +492,6 @@ AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
 2025-10-29 20:19:27,751 - compliance_checker - ERROR - Error in 12d1-1 check for DOGG: Equity holdings or total assets missing
 2025-10-29 20:25:29,231 - compliance_checker - INFO - Running compliance tests for DOGG
 2025-10-29 21:35:58,302 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 21:42:41,688 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 22:02:24,043 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 22:07:51,089 - compliance_checker - INFO - Running compliance tests for DOGG

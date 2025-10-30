@@ -26,9 +26,9 @@ class FundSnapshot:
     def __init__(
         self,
         *,
-        equity: Optional[pd.DataFrame] = None,
-        options: Optional[pd.DataFrame] = None,
-        treasury: Optional[pd.DataFrame] = None,
+        vest_equity: Optional[pd.DataFrame] = None,
+        vest_options: Optional[pd.DataFrame] = None,
+        vest_treasury: Optional[pd.DataFrame] = None,
         custodian_equity: Optional[pd.DataFrame] = None,
         custodian_option: Optional[pd.DataFrame] = None,
         custodian_treasury: Optional[pd.DataFrame] = None,
@@ -37,10 +37,10 @@ class FundSnapshot:
         total_assets: float = 0.0,
         total_net_assets: float = 0.0,
     ) -> None:
-        self.equity = equity if isinstance(equity, pd.DataFrame) else pd.DataFrame()
-        self.options = options if isinstance(options, pd.DataFrame) else pd.DataFrame()
+        self.equity = vest_equity if isinstance(vest_equity, pd.DataFrame) else pd.DataFrame()
+        self.options = vest_options if isinstance(vest_options, pd.DataFrame) else pd.DataFrame()
         self.treasury = (
-            treasury if isinstance(treasury, pd.DataFrame) else pd.DataFrame()
+            vest_treasury if isinstance(vest_treasury, pd.DataFrame) else pd.DataFrame()
         )
         self.custodian_equity = (
             custodian_equity if isinstance(custodian_equity, pd.DataFrame) else pd.DataFrame()
