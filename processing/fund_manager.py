@@ -10,7 +10,7 @@ from services.nav_reconciliator import NAVReconciliator
 from services.reconciliator import Reconciliator
 
 # Import your domain classes
-from domain.fund import Fund, FundData, FundSnapshot
+from domain.fund import Fund, FundData, FundSnapshot, FundHoldings
 from processing.bulk_data_loader import BulkDataStore
 
 
@@ -111,47 +111,54 @@ class FundManager:
 
         # Populate current holdings with Vest (OMS) data when available
         fund_data.current = FundSnapshot(
-            equity=fund_data_dict.get('vest_equity', pd.DataFrame()),
-            options=fund_data_dict.get('vest_option', pd.DataFrame()),
-            treasury=fund_data_dict.get('vest_treasury', pd.DataFrame()),
-            custodian_equity=fund_data_dict.get('custodian_equity', pd.DataFrame()),
-            custodian_option=fund_data_dict.get('custodian_option', pd.DataFrame()),
-            custodian_treasury=fund_data_dict.get('custodian_treasury', pd.DataFrame()),
+            vest=FundHoldings(
+                equity=fund_data_dict.get('vest_equity', pd.DataFrame()),
+                options=fund_data_dict.get('vest_option', pd.DataFrame()),
+                treasury=fund_data_dict.get('vest_treasury', pd.DataFrame()),
+            ),
+            custodian=FundHoldings(
+                equity=fund_data_dict.get('custodian_equity', pd.DataFrame()),
+                options=fund_data_dict.get('custodian_option', pd.DataFrame()),
+                treasury=fund_data_dict.get('custodian_treasury', pd.DataFrame()),
+            ),
             cash=self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
             nav=self._extract_nav_per_share(fund_data_dict.get('nav', pd.DataFrame())),
             total_assets=self._extract_custodian_total_assets(fund_data_dict),
             total_net_assets=self._extract_custodian_total_net_assets(fund_data_dict),
+            flows=self._extract_flow_value(fund_data_dict.get('flows', pd.DataFrame())),
+            basket=fund_data_dict.get('basket', pd.DataFrame()),
+            index=fund_data_dict.get('index', pd.DataFrame()),
         )
 
         # Populate previous holdings (T-1) if available
         fund_data.previous = FundSnapshot(
-            equity=fund_data_dict.get('vest_equity_t1', pd.DataFrame()),
-            options=fund_data_dict.get('vest_option_t1', pd.DataFrame()),
-            treasury=fund_data_dict.get('vest_treasury_t1', pd.DataFrame()),
-            custodian_equity=fund_data_dict.get('custodian_equity_t1', pd.DataFrame()),
-            custodian_option=fund_data_dict.get('custodian_option_t1', pd.DataFrame()),
-            custodian_treasury=fund_data_dict.get('custodian_treasury_t1', pd.DataFrame()),
+            vest=FundHoldings(
+                equity=fund_data_dict.get('vest_equity_t1', pd.DataFrame()),
+                options=fund_data_dict.get('vest_option_t1', pd.DataFrame()),
+                treasury=fund_data_dict.get('vest_treasury_t1', pd.DataFrame()),
+            ),
+            custodian=FundHoldings(
+                equity=fund_data_dict.get('custodian_equity_t1', pd.DataFrame()),
+                options=fund_data_dict.get('custodian_option_t1', pd.DataFrame()),
+                treasury=fund_data_dict.get('custodian_treasury_t1', pd.DataFrame()),
+            ),
             cash=self._extract_cash_value(fund_data_dict.get('cash_t1', pd.DataFrame())),
             nav=self._extract_nav_per_share(fund_data_dict.get('nav_t1', pd.DataFrame())),
             total_assets=self._extract_custodian_total_assets(fund_data_dict, nav_key='nav_t1'),
             total_net_assets=self._extract_custodian_total_net_assets(
                 fund_data_dict, nav_key='nav_t1'
             ),
+            flows=self._extract_flow_value(fund_data_dict.get('flows_t1', pd.DataFrame())),
+            basket=fund_data_dict.get('basket_t1', pd.DataFrame()),
+            index=fund_data_dict.get('index_t1', pd.DataFrame()),
         )
 
         # Populate additional data
-        fund_data.flows = 0.0  # Calculate from flows data if available
         fund_data.expense_ratio = fund_config.expense_ratio
-        fund_data.basket = fund_data_dict.get('basket', pd.DataFrame())
-        fund_data.index = fund_data_dict.get('index', pd.DataFrame())
         fund_data.equity_trades = fund_data_dict.get('equity_trades', pd.DataFrame())
         fund_data.cr_rd_data = fund_data_dict.get('cr_rd', pd.DataFrame())
         fund_data.nav = fund_data_dict.get('nav', pd.DataFrame())
         fund_data.nav_t1 = fund_data_dict.get('nav_t1', pd.DataFrame())
-
-        # Create Fund instance
-        fund = Fund(fund_name, fund_config.mapping_data)
-        fund.data = fund_data
 
         # Create Fund instance
         fund = Fund(fund_name, fund_config.mapping_data)
@@ -187,6 +194,46 @@ class FundManager:
                 return cash_data[col].sum()
 
         self.logger.warning("No cash value column found")
+        return 0.0
+
+    def _extract_flow_value(self, flows_data: pd.DataFrame) -> float:
+        """Extract net flows value from the provided DataFrame."""
+
+        if not isinstance(flows_data, pd.DataFrame) or flows_data.empty:
+            return 0.0
+
+        flow_columns = ['net_flow', 'flow', 'flows', 'net_flows', 'amount', 'value']
+        for column in flow_columns:
+            if column in flows_data.columns:
+                series = pd.to_numeric(flows_data[column], errors='coerce').fillna(0.0)
+                if not series.empty:
+                    return float(series.sum())
+
+        numeric_columns = flows_data.select_dtypes(include=['number']).columns
+        if len(numeric_columns):
+            return float(flows_data[numeric_columns[0]].fillna(0.0).sum())
+
+        self.logger.debug("Unable to determine flows value from provided data")
+        return 0.0
+
+    def _extract_flow_value(self, flows_data: pd.DataFrame) -> float:
+        """Extract net flows value from the provided DataFrame."""
+
+        if not isinstance(flows_data, pd.DataFrame) or flows_data.empty:
+            return 0.0
+
+        flow_columns = ['net_flow', 'flow', 'flows', 'net_flows', 'amount', 'value']
+        for column in flow_columns:
+            if column in flows_data.columns:
+                series = pd.to_numeric(flows_data[column], errors='coerce').fillna(0.0)
+                if not series.empty:
+                    return float(series.sum())
+
+        numeric_columns = flows_data.select_dtypes(include=['number']).columns
+        if len(numeric_columns):
+            return float(flows_data[numeric_columns[0]].fillna(0.0).sum())
+
+        self.logger.debug("Unable to determine flows value from provided data")
         return 0.0
 
     def _extract_custodian_total_net_assets(

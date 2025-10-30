@@ -495,3 +495,25 @@ AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
 2025-10-29 21:42:41,688 - compliance_checker - INFO - Running compliance tests for DOGG
 2025-10-29 22:02:24,043 - compliance_checker - INFO - Running compliance tests for DOGG
 2025-10-29 22:07:51,089 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 22:59:09,157 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 23:18:18,270 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 23:22:31,520 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-29 23:23:05,474 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:03:35,081 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:22:44,564 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:22:52,426 - compliance_checker - ERROR - Error in prospectus policy check for DOGG: 'ComplianceChecker' object has no attribute '_get_current_snapshot_totals'
+2025-10-30 00:24:06,293 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:24:06,300 - compliance_checker - ERROR - Error in prospectus policy check for DOGG: name 'totals' is not defined
+2025-10-30 00:25:20,614 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:25:20,623 - compliance_checker - ERROR - Error in prospectus policy check for DOGG: 'FundSnapshot' object has no attribute 'option_market_value'
+2025-10-30 00:26:44,676 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:26:44,685 - compliance_checker - ERROR - Error in prospectus policy check for DOGG: 'FundSnapshot' object has no attribute 'total_opt_market_value'
+2025-10-30 00:27:35,652 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:27:35,664 - compliance_checker - ERROR - Error in prospectus policy check for DOGG: 'FundSnapshot' object has no attribute 'total_option_market_value'
+2025-10-30 00:29:46,039 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:33:07,399 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:33:07,400 - compliance_checker - ERROR - Error in prospectus policy check for DOGG: 'FundSnapshot' object has no attribute 'cash_value'
+2025-10-30 00:34:03,786 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:34:03,789 - compliance_checker - ERROR - Error in prospectus policy check for DOGG: 'FundSnapshot' object has no attribute 'cash_value'
+2025-10-30 00:35:32,198 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:35:32,199 - compliance_checker - ERROR - Error in prospectus policy check for DOGG: can only concatenate tuple (not "float") to tuple

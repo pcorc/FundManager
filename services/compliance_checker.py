@@ -9,11 +9,6 @@ import pandas as pd
 
 from domain.fund import Fund
 from utilities.logger import setup_logger
-from utilities.ticker_utils import (
-    ensure_equity_schema,
-    ensure_option_schema,
-    ensure_treasury_schema,
-)
 
 try:  # pragma: no cover - optional configuration module
     from config import constants as config_constants  # type: ignore
@@ -159,15 +154,15 @@ class ComplianceChecker:
     # Individual compliance checks
     # ------------------------------------------------------------------
     def calculate_summary_metrics(self, fund: Fund) -> ComplianceResult:
-        equity_df, options_df, treasury_df = self._get_holdings(fund)
+
         calculations = {
-            "cash_value": self._get_cash_value(fund),
-            "equity_market_value": float(equity_df["equity_market_value"].sum()),
-            "option_delta_adjusted_notional": float(options_df["option_delta_adjusted_notional"].sum()),
-            "option_market_value": float(options_df["option_market_value"].sum()),
-            "treasury": float(treasury_df["treasury_market_value"].sum()),
-            "total_assets": float(fund.total_assets or 0.0)[0],
-            "total_net_assets": float(fund.total_assets or 0.0)[1],
+            "cash_value": fund.data.current.cash,
+            "equity_market_value": fund.data.current.total_equity_value,
+            "option_delta_adjusted_notional": fund.data.current.total_option_delta_adjusted_notional,
+            "option_market_value": fund.data.current.total_option_value,
+            "treasury": fund.data.current.total_treasury_value,
+            "total_assets": fund.data.current.total_assets,
+            "total_net_assets": fund.data.current.total_net_assets,
         }
 
         return ComplianceResult(
@@ -178,14 +173,13 @@ class ComplianceChecker:
 
     def prospectus_80pct_policy(self, fund: Fund) -> ComplianceResult:
         try:
-            equity_df, options_df, treasury_df = self._get_holdings(fund)
-            total_assets, total_net_assets = float(fund.total_assets or 0.0)
-            total_cash_value = self._get_cash_value(fund)
 
-            total_equity_market_value = float(equity_df["equity_market_value"].sum())
-            total_opt_market_value = float(options_df["option_market_value"].sum())
-            total_tbill_value = float(treasury_df["treasury_market_value"].sum())
-            total_opt_delta_notional_value = float(options_df["option_delta_adjusted_notional"].sum())
+            total_assets, total_net_assets = self._get_total_assets(fund)
+            total_cash_value = fund.data.current.cash
+            total_equity_market_value = fund.data.current.total_equity_value,
+            total_opt_market_value = fund.data.current.total_option_value,
+            total_tbill_value = fund.data.current.total_treasury_value
+            total_opt_delta_notional_value = fund.data.current.total_option_delta_adjusted_notional
 
             options_in_scope = fund.name in PROSPECTUS_OPTIONS_FUNDS
 
@@ -246,7 +240,7 @@ class ComplianceChecker:
     def diversification_IRS_check(self, fund: Fund) -> ComplianceResult:
         try:
             vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
-            total_assets, total_net_assets = float(fund.total_assets or 0.0)
+            total_assets, total_net_assets = self._get_total_assets(fund)
             overlap_df = self._get_overlap(fund)
             expenses = self._get_expenses(fund)
 
@@ -483,8 +477,8 @@ class ComplianceChecker:
             )
 
         try:
-            vest_eqy_holdings, vest_opt_holdings, _ = self._get_holdings(fund)
-            total_assets, total_net_assets = float(fund.total_assets or 0.0)
+            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
+            total_assets, total_net_assets = self._get_total_assets(fund)
             expenses = self._get_expenses(fund)
 
             required_opt_cols = [
@@ -701,8 +695,8 @@ class ComplianceChecker:
 
     def diversification_IRC_check(self, fund: Fund) -> ComplianceResult:
         try:
-            vest_eqy_holdings, vest_opt_holdings, _ = self._get_holdings(fund)
-            total_assets= float(fund.total_assets or 0.0)
+            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
+            total_assets, total_net_assets = self._get_total_assets(fund)
 
             if vest_eqy_holdings.empty:
                 raise ValueError("Equity holdings missing")
@@ -787,17 +781,19 @@ class ComplianceChecker:
 
     def real_estate_check(self, fund: Fund) -> ComplianceResult:
         try:
-            equity_df, _, _ = self._get_holdings(fund)
-            if equity_df.empty:
+            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
+            total_assets, total_net_assets = self._get_total_assets(fund)
+
+            if vest_eqy_holdings.empty:
                 raise ValueError("Equity holdings missing")
 
-            real_estate_mask = equity_df["GICS_SECTOR_NAME"].str.contains(
+            real_estate_mask = vest_eqy_holdings["GICS_SECTOR_NAME"].str.contains(
                 "Real Estate", case=False, na=False
             )
             real_estate_exposure = float(
-                equity_df.loc[real_estate_mask, "equity_market_value"].sum()
+                vest_eqy_holdings.loc[real_estate_mask, "equity_market_value"].sum()
             )
-            total_exposure = float(equity_df["equity_market_value"].sum())
+            total_exposure = float(vest_eqy_holdings["equity_market_value"].sum())
             real_estate_percentage = (
                 real_estate_exposure / total_exposure if total_exposure > 0 else 0.0
             )
@@ -826,17 +822,19 @@ class ComplianceChecker:
 
     def commodities_check(self, fund: Fund) -> ComplianceResult:
         try:
-            equity_df, _, _ = self._get_holdings(fund)
-            if equity_df.empty:
+            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
+            total_assets, total_net_assets = self._get_total_assets(fund)
+
+            if vest_eqy_holdings.empty:
                 raise ValueError("Equity holdings missing")
 
-            commodities_mask = equity_df["GICS_SECTOR_NAME"].str.contains(
+            commodities_mask = vest_eqy_holdings["GICS_SECTOR_NAME"].str.contains(
                 "Commodities", case=False, na=False
             )
             commodities_exposure = float(
-                equity_df.loc[commodities_mask, "equity_market_value"].sum()
+                vest_eqy_holdings.loc[commodities_mask, "equity_market_value"].sum()
             )
-            total_exposure = float(equity_df["equity_market_value"].sum())
+            total_exposure = float(vest_eqy_holdings["equity_market_value"].sum())
             commodities_percentage = (
                 commodities_exposure / total_exposure if total_exposure > 0 else 0.0
             )
@@ -865,9 +863,8 @@ class ComplianceChecker:
 
     def twelve_d1a_other_inv_cos(self, fund: Fund) -> ComplianceResult:
         try:
-            equity_df, _, _ = self._get_holdings(fund)
-            total_assets= float(fund.total_assets or 0.0)
-
+            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
+            total_assets, total_net_assets = self._get_total_assets(fund)
             if total_assets == 0 or equity_df.empty:
                 raise ValueError("Equity holdings or total assets missing")
 
@@ -951,8 +948,8 @@ class ComplianceChecker:
 
     def twelve_d2_insurance_cos(self, fund: Fund) -> ComplianceResult:
         try:
-            vest_eqy_holdings, _, _ = self._get_holdings(fund)
-            total_assets= float(fund.total_assets or 0.0)
+            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
+            total_assets, total_net_assets = self._get_total_assets(fund)
 
             insurance_mask = (
                 vest_eqy_holdings["GICS_INDUSTRY_GROUP_NAME"].eq("Insurance")
@@ -1020,8 +1017,8 @@ class ComplianceChecker:
 
     def twelve_d3_sec_biz(self, fund: Fund) -> ComplianceResult:
         try:
-            vest_eqy_holdings, vest_opt_holdings, _ = self._get_holdings(fund)
-            total_assets= float(fund.total_assets or 0.0)
+            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
+            total_assets, total_net_assets = self._get_total_assets(fund)
 
             sec_biz_mask = vest_eqy_holdings["GICS_INDUSTRY_NAME"].isin(["Capital Markets", "Banks"])
             sec_related_businesses = vest_eqy_holdings[sec_biz_mask].copy()
@@ -1137,7 +1134,7 @@ class ComplianceChecker:
         try:
 
             vest_eqy_holdings, vest_opt_holdings, _ = self._get_holdings(fund)
-            total_assets= float(fund.total_assets or 0.0)
+            total_assets, _ = self._get_total_assets(fund)
 
             if total_assets == 0 or vest_eqy_holdings.empty:
                 raise ValueError("Equity holdings or total assets missing")
@@ -1202,7 +1199,7 @@ class ComplianceChecker:
 
     def gics_compliance(self, fund: Fund) -> ComplianceResult:
         try:
-            equity_df = getattr(fund.data.current, "equity", pd.DataFrame())
+            equity_df = getattr(fund.data.current.vest, "equity", pd.DataFrame())
 
             if equity_df.empty:
                 return ComplianceResult(
@@ -1284,10 +1281,19 @@ class ComplianceChecker:
     # Helpers
     # ------------------------------------------------------------------
     def _get_holdings(self, fund: Fund) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        equity = ensure_equity_schema(fund.equity_holdings)
-        options = ensure_option_schema(fund.options_holdings)
-        treasury = ensure_treasury_schema(fund.treasury_holdings)
-        return equity, options, treasury
+        """Return copies of the fund's current holdings snapshots."""
+
+        equity = getattr(fund.data.current.vest, "equity", pd.DataFrame())
+        options = getattr(fund.data.current.vest, "options", pd.DataFrame())
+        treasury = getattr(fund.data.current.vest, "treasury", pd.DataFrame())
+
+        return equity.copy(), options.copy(), treasury.copy()
+
+    @staticmethod
+    def _sum_holdings_column(frame: Optional[pd.DataFrame], column: str) -> float:
+        if not isinstance(frame, pd.DataFrame) or column not in frame.columns:
+            return 0.0
+        return float(pd.to_numeric(frame[column], errors="coerce").fillna(0.0).sum())
 
     @staticmethod
     def _fill_numeric_defaults(df: pd.DataFrame) -> pd.DataFrame:
@@ -1303,19 +1309,35 @@ class ComplianceChecker:
         return result
 
     def _get_total_assets(self, fund: Fund) -> Tuple[float, float]:
-        return float(fund.total_assets or 0.0), float(fund.total_net_assets or 0.0)
+        snapshot = getattr(fund, "data", None)
+        if snapshot is None:
+            return 0.0, 0.0
+
+        current = getattr(snapshot, "current", None)
+        if current is None:
+            return 0.0, 0.0
+
+        total_assets = getattr(current, "total_assets", 0.0) or 0.0
+        total_net_assets = getattr(current, "total_net_assets", 0.0) or 0.0
+        return float(total_assets), float(total_net_assets)
 
     def _get_cash_value(self, fund: Fund) -> float:
-        return float(fund.cash_value or 0.0)
+        snapshot = getattr(fund.data, "current", None)
+        if snapshot is None:
+            return 0.0
+        return float(getattr(snapshot, "cash", 0.0) or 0.0)
 
     def _get_expenses(self, fund: Fund) -> float:
         try:
-            return float(fund.expenses or 0.0)
+            current = getattr(fund.data, "current", None)
+            if current is not None and hasattr(current, "expenses"):
+                return float(getattr(current, "expenses", 0.0) or 0.0)
+            return float(getattr(fund.data, "expenses", 0.0) or 0.0)
         except Exception:
             return 0.0
 
     def _get_overlap(self, fund: Fund) -> pd.DataFrame:
-        overlap = getattr(fund.data, "index", pd.DataFrame())
+        overlap = getattr(fund.data.current, "index", pd.DataFrame())
         if not isinstance(overlap, pd.DataFrame) or overlap.empty:
             return pd.DataFrame(columns=["security_ticker", "security_weight"])
 

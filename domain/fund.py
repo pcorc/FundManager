@@ -20,36 +20,49 @@ class GainLossResult:
         )
 
 
+class FundHoldings:
+    """Wrapper for holdings data for a specific source (e.g. Vest or custodian)."""
+
+    def __init__(
+        self,
+        *,
+        equity: Optional[pd.DataFrame] = None,
+        options: Optional[pd.DataFrame] = None,
+        treasury: Optional[pd.DataFrame] = None,
+    ) -> None:
+        self.equity = equity if isinstance(equity, pd.DataFrame) else pd.DataFrame()
+        self.options = options if isinstance(options, pd.DataFrame) else pd.DataFrame()
+        self.treasury = treasury if isinstance(treasury, pd.DataFrame) else pd.DataFrame()
+
+    def copy(self) -> "FundHoldings":
+        return FundHoldings(
+            equity=self.equity.copy() if isinstance(self.equity, pd.DataFrame) else pd.DataFrame(),
+            options=self.options.copy() if isinstance(self.options, pd.DataFrame) else pd.DataFrame(),
+            treasury=self.treasury.copy()
+            if isinstance(self.treasury, pd.DataFrame)
+            else pd.DataFrame(),
+        )
+
+
 class FundSnapshot:
     """Container for all holdings data at a point in time."""
 
     def __init__(
         self,
         *,
-        vest_equity: Optional[pd.DataFrame] = None,
-        vest_options: Optional[pd.DataFrame] = None,
-        vest_treasury: Optional[pd.DataFrame] = None,
-        custodian_equity: Optional[pd.DataFrame] = None,
-        custodian_option: Optional[pd.DataFrame] = None,
-        custodian_treasury: Optional[pd.DataFrame] = None,
+        vest: Optional[FundHoldings] = None,
+        custodian: Optional[FundHoldings] = None,
         cash: float = 0.0,
         nav: float = 0.0,
         total_assets: float = 0.0,
         total_net_assets: float = 0.0,
+        flows: float = 0.0,
+        basket: Optional[pd.DataFrame] = None,
+        index: Optional[pd.DataFrame] = None,
     ) -> None:
-        self.equity = vest_equity if isinstance(vest_equity, pd.DataFrame) else pd.DataFrame()
-        self.options = vest_options if isinstance(vest_options, pd.DataFrame) else pd.DataFrame()
-        self.treasury = (
-            vest_treasury if isinstance(vest_treasury, pd.DataFrame) else pd.DataFrame()
-        )
-        self.custodian_equity = (
-            custodian_equity if isinstance(custodian_equity, pd.DataFrame) else pd.DataFrame()
-        )
-        self.custodian_option = (
-            custodian_option if isinstance(custodian_option, pd.DataFrame) else pd.DataFrame()
-        )
-        self.custodian_treasury = (
-            custodian_treasury if isinstance(custodian_treasury, pd.DataFrame) else pd.DataFrame()
+        self.vest = vest if isinstance(vest, FundHoldings) else FundHoldings()
+        self.custodian = (
+            custodian if isinstance(custodian, FundHoldings) else FundHoldings()
         )
         self.cash = float(cash or 0.0)
         self.nav = float(nav or 0.0)
@@ -57,7 +70,13 @@ class FundSnapshot:
         self.total_net_assets = float(total_net_assets or 0.0)
         self.total_equity_value = self._compute_equity_value()
         self.total_option_value = self._compute_option_value()
+        self.total_option_delta_adjusted_notional = (
+            self._compute_option_delta_adjusted_notional()
+        )
         self.total_treasury_value = self._compute_treasury_value()
+        self.flows = float(flows or 0.0)
+        self.basket = basket if isinstance(basket, pd.DataFrame) else pd.DataFrame()
+        self.index = index if isinstance(index, pd.DataFrame) else pd.DataFrame()
 
     @staticmethod
     def _frame_value_sum(frame: pd.DataFrame, columns: Sequence[str]) -> Optional[float]:
@@ -84,8 +103,10 @@ class FundSnapshot:
         return None
 
     def _compute_equity_value(self) -> float:
-        for frame in (self.equity, self.custodian_equity):
-            value = self._frame_value_sum(frame, ["market_value", "net_market_value"])
+        for frame in (self.vest.equity, self.custodian.equity):
+            value = self._frame_value_sum(
+                frame, ["equity_market_value", "market_value", "net_market_value"]
+            )
             if value is not None:
                 return value
             fallback = self._price_quantity_sum(frame)
@@ -94,7 +115,7 @@ class FundSnapshot:
         return 0.0
 
     def _compute_option_value(self) -> float:
-        for frame in (self.options, self.custodian_option):
+        for frame in (self.vest.options, self.custodian.options):
             value = self._frame_value_sum(
                 frame, ["option_market_value", "market_value", "net_market_value"]
             )
@@ -105,8 +126,21 @@ class FundSnapshot:
                 return fallback
         return 0.0
 
+    def _compute_option_delta_adjusted_notional(self) -> float:
+        for frame in (self.vest.options, self.custodian.options):
+            value = self._frame_value_sum(
+                frame,
+                [
+                    "option_delta_adjusted_notional",
+                    "delta_adjusted_notional",
+                ],
+            )
+            if value is not None:
+                return value
+        return 0.0
+
     def _compute_treasury_value(self) -> float:
-        for frame in (self.treasury, self.custodian_treasury):
+        for frame in (self.vest.treasury, self.custodian.treasury):
             value = self._frame_value_sum(
                 frame, ["treasury_market_value", "market_value", "net_market_value"]
             )
@@ -125,19 +159,13 @@ class FundData:
         *,
         current: Optional[FundSnapshot] = None,
         previous: Optional[FundSnapshot] = None,
-        flows: float = 0.0,
         expense_ratio: float = 0.0,
-        basket: Optional[pd.DataFrame] = None,
-        index: Optional[pd.DataFrame] = None,
     ) -> None:
         self.current = current if isinstance(current, FundSnapshot) else FundSnapshot()
         self.previous = (
             previous if isinstance(previous, FundSnapshot) else FundSnapshot()
         )
-        self.flows = float(flows or 0.0)
         self.expense_ratio = float(expense_ratio or 0.0)
-        self.basket = basket if isinstance(basket, pd.DataFrame) else pd.DataFrame()
-        self.index = index if isinstance(index, pd.DataFrame) else pd.DataFrame()
 
 
 class Fund:
@@ -236,13 +264,24 @@ class Fund:
     @property
     def total_option_delta_adjusted_notional(self) -> float:
         """For compliance checks that need delta-adjusted option values"""
-        options = getattr(self.data.current, "options", pd.DataFrame())
-        if (
-            isinstance(options, pd.DataFrame)
-            and not options.empty
-            and "delta_adjusted_notional" in options.columns
-        ):
-            return options["delta_adjusted_notional"].sum()
+        current = getattr(self.data, "current", None)
+        if current is not None and hasattr(current, "total_option_delta_adjusted_notional"):
+            value = getattr(current, "total_option_delta_adjusted_notional", 0.0)
+            if value not in (None, ""):
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    pass
+
+        options = getattr(self.data.current.vest, "options", pd.DataFrame())
+        column = None
+        for candidate in ("option_delta_adjusted_notional", "delta_adjusted_notional"):
+            if isinstance(options, pd.DataFrame) and candidate in options.columns:
+                column = candidate
+                break
+
+        if column:
+            return float(pd.to_numeric(options[column], errors="coerce").fillna(0.0).sum())
         return 0.0
 
     def get_dividends(self, analysis_date: str) -> float:
@@ -250,20 +289,6 @@ class Fund:
 
         dividends = getattr(self.data, "dividends", 0.0)
         return self._extract_numeric_value(dividends, ["dividend", "dividends", "amount", "value"])
-
-    def get_expenses(self, analysis_date: str) -> float:
-        """Return total expenses using stored expense ratio and NAV."""
-
-        expenses = getattr(self.data, "expenses", None)
-        if expenses not in (None, ""):
-            try:
-                return float(expenses)
-            except (TypeError, ValueError):
-                pass
-        try:
-            return float(self.expenses)
-        except Exception:
-            return 0.0
 
     def get_distributions(self, analysis_date: str) -> float:
         """Return distributions paid on the analysis date."""
@@ -276,19 +301,7 @@ class Fund:
 
     def get_flows_adjustment(self, analysis_date: str, prior_date: str) -> float:
         """Return flows adjustment between the two analysis dates."""
-
-        flows = getattr(self.data, "flows", 0.0)
-        return float(flows or 0.0)
-
-
-    # Method stubs that your services might call
-    def get_irs_holdings_data(self) -> pd.DataFrame:
-        """Return data formatted for IRS checks"""
-        return self.data.current.equity
-
-    def get_40act_holdings_data(self) -> pd.DataFrame:
-        """Return data formatted for 40 Act checks"""
-        return self.data.current.equity
+        return float(self.data.current.flows or 0.0)
 
 
     # ------------------------------------------------------------------
@@ -296,87 +309,63 @@ class Fund:
     # ------------------------------------------------------------------
     @property
     def equity_holdings(self) -> pd.DataFrame:
-        vest = getattr(self.data, "vest_equity", None)
-        if isinstance(vest, pd.DataFrame) and not vest.empty:
-            return self._copy_dataframe(vest)
-        return self._copy_dataframe(getattr(self.data.current, "equity", pd.DataFrame()))
+        return self._copy_dataframe(getattr(self.data.current.vest, "equity", pd.DataFrame()))
 
     @property
     def custodian_equity_holdings(self) -> pd.DataFrame:
-        custodian = getattr(self.data, "custodian_equity", None)
-        if isinstance(custodian, pd.DataFrame) and not custodian.empty:
-            return self._copy_dataframe(custodian)
-        return self._copy_dataframe(getattr(self.data.current, "equity", pd.DataFrame()))
+        return self._copy_dataframe(
+            getattr(self.data.current.custodian, "equity", pd.DataFrame())
+        )
 
     @property
     def previous_equity_holdings(self) -> pd.DataFrame:
-        vest_prev = getattr(self.data, "vest_equity_t1", None)
-        if isinstance(vest_prev, pd.DataFrame) and not vest_prev.empty:
-            return self._copy_dataframe(vest_prev)
-        return self._copy_dataframe(getattr(self.data.previous, "equity", pd.DataFrame()))
+        return self._copy_dataframe(getattr(self.data.previous.vest, "equity", pd.DataFrame()))
 
     @property
     def previous_custodian_equity_holdings(self) -> pd.DataFrame:
-        cust_prev = getattr(self.data, "previous_custodian_equity", None)
-        if isinstance(cust_prev, pd.DataFrame) and not cust_prev.empty:
-            return self._copy_dataframe(cust_prev)
-        return pd.DataFrame()
+        return self._copy_dataframe(
+            getattr(self.data.previous.custodian, "equity", pd.DataFrame())
+        )
 
     @property
     def options_holdings(self) -> pd.DataFrame:
-        vest = getattr(self.data, "vest_option", None)
-        if isinstance(vest, pd.DataFrame) and not vest.empty:
-            return self._copy_dataframe(vest)
-        return self._copy_dataframe(getattr(self.data.current, "options", pd.DataFrame()))
+        return self._copy_dataframe(getattr(self.data.current.vest, "options", pd.DataFrame()))
 
     @property
     def custodian_option_holdings(self) -> pd.DataFrame:
-        custodian = getattr(self.data, "custodian_option", None)
-        if isinstance(custodian, pd.DataFrame) and not custodian.empty:
-            return self._copy_dataframe(custodian)
-        return self._copy_dataframe(getattr(self.data.current, "options", pd.DataFrame()))
+        return self._copy_dataframe(
+            getattr(self.data.current.custodian, "options", pd.DataFrame())
+        )
 
     @property
     def previous_options_holdings(self) -> pd.DataFrame:
-        vest_prev = getattr(self.data, "vest_option_t1", None)
-        if isinstance(vest_prev, pd.DataFrame) and not vest_prev.empty:
-            return self._copy_dataframe(vest_prev)
-        return self._copy_dataframe(getattr(self.data.previous, "options", pd.DataFrame()))
+        return self._copy_dataframe(getattr(self.data.previous.vest, "options", pd.DataFrame()))
 
     @property
     def previous_custodian_option_holdings(self) -> pd.DataFrame:
-        cust_prev = getattr(self.data, "previous_custodian_option", None)
-        if isinstance(cust_prev, pd.DataFrame) and not cust_prev.empty:
-            return self._copy_dataframe(cust_prev)
-        return pd.DataFrame()
+        return self._copy_dataframe(
+            getattr(self.data.previous.custodian, "options", pd.DataFrame())
+        )
 
     @property
     def treasury_holdings(self) -> pd.DataFrame:
-        vest = getattr(self.data, "vest_treasury", None)
-        if isinstance(vest, pd.DataFrame) and not vest.empty:
-            return self._copy_dataframe(vest)
-        return self._copy_dataframe(getattr(self.data.current, "treasury", pd.DataFrame()))
+        return self._copy_dataframe(getattr(self.data.current.vest, "treasury", pd.DataFrame()))
 
     @property
     def custodian_treasury_holdings(self) -> pd.DataFrame:
-        custodian = getattr(self.data, "custodian_treasury", None)
-        if isinstance(custodian, pd.DataFrame) and not custodian.empty:
-            return self._copy_dataframe(custodian)
-        return self._copy_dataframe(getattr(self.data.current, "treasury", pd.DataFrame()))
+        return self._copy_dataframe(
+            getattr(self.data.current.custodian, "treasury", pd.DataFrame())
+        )
 
     @property
     def previous_treasury_holdings(self) -> pd.DataFrame:
-        vest_prev = getattr(self.data, "vest_treasury_t1", None)
-        if isinstance(vest_prev, pd.DataFrame) and not vest_prev.empty:
-            return self._copy_dataframe(vest_prev)
-        return self._copy_dataframe(getattr(self.data.previous, "treasury", pd.DataFrame()))
+        return self._copy_dataframe(getattr(self.data.previous.vest, "treasury", pd.DataFrame()))
 
     @property
     def previous_custodian_treasury_holdings(self) -> pd.DataFrame:
-        cust_prev = getattr(self.data, "previous_custodian_treasury", None)
-        if isinstance(cust_prev, pd.DataFrame) and not cust_prev.empty:
-            return self._copy_dataframe(cust_prev)
-        return pd.DataFrame()
+        return self._copy_dataframe(
+            getattr(self.data.previous.custodian, "treasury", pd.DataFrame())
+        )
 
     @property
     def equity_trades(self) -> pd.DataFrame:
@@ -390,7 +379,7 @@ class Fund:
 
     @property
     def index_holdings(self) -> pd.DataFrame:
-        index_df = getattr(self.data, "index", pd.DataFrame())
+        index_df = getattr(self.data.current, "index", pd.DataFrame())
         return self._copy_dataframe(index_df)
 
     def calculate_gain_loss(self, current_date: str, prior_date: str, asset_class: str) -> GainLossResult:
