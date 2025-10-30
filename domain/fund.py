@@ -203,40 +203,15 @@ class Fund:
     # Add these properties that your services use:
     @property
     def cash_value(self) -> float:
-        current = self.data.current
-        return getattr(current, "cash", 0.0) or 0.0
+        return float(getattr(self.data.current, "cash", 0.0)) or 0.0
 
     @property
     def total_assets(self) -> float:
-        current = self.data.current
-        value = getattr(current, "total_assets", None)
-        if value not in (None, 0, 0.0):
-            return float(value)
-
-        nav_df = getattr(self.data, "nav", pd.DataFrame())
-        if isinstance(nav_df, pd.DataFrame) and not nav_df.empty and "total_assets" in nav_df.columns:
-            series = pd.to_numeric(nav_df["total_assets"], errors="coerce").dropna()
-            if not series.empty:
-                return float(series.iloc[0])
-        return 0.0
+        return float(getattr(self.data.current, "total_assets", 0.0)) or 0.0
 
     @property
     def total_net_assets(self) -> float:
-        current = self.data.current
-        value = getattr(current, "total_net_assets", None)
-        if value not in (None, 0, 0.0):
-            return float(value)
-
-        nav_df = getattr(self.data, "nav", pd.DataFrame())
-        if (
-            isinstance(nav_df, pd.DataFrame)
-            and not nav_df.empty
-            and "total_net_assets" in nav_df.columns
-        ):
-            series = pd.to_numeric(nav_df["total_net_assets"], errors="coerce").dropna()
-            if not series.empty:
-                return float(series.iloc[0])
-        return 0.0
+        return float(getattr(self.data.current, "total_net_assets", 0.0)) or 0.0
 
     @property
     def total_equity_value(self) -> float:
@@ -252,33 +227,7 @@ class Fund:
 
     @property
     def expenses(self) -> float:
-        nav = getattr(self.data.current, "nav", 0.0) or 0.0
-        expense_ratio = getattr(self.data, "expense_ratio", 0.0) or 0.0
-        return expense_ratio * nav
-
-    def _extract_nav_metric(self, columns: Sequence[str]) -> Optional[float]:
-        nav_df = getattr(self.data, "nav", pd.DataFrame())
-        if not isinstance(nav_df, pd.DataFrame) or nav_df.empty:
-            return None
-
-        nav_df = nav_df.copy()
-        date_column = next(
-            (
-                column
-                for column in nav_df.columns
-                if column.lower() in {"date", "nav_date", "business_date", "effective_date", "valuation_date"}
-            ),
-            None,
-        )
-        if date_column and date_column in nav_df.columns:
-            nav_df = nav_df.sort_values(by=date_column, ascending=False)
-
-        for column in columns:
-            if column in nav_df.columns:
-                series = pd.to_numeric(nav_df[column], errors="coerce").dropna()
-                if not series.empty:
-                    return float(series.iloc[0])
-        return None
+        return float(getattr(self.data.current, "expenses", 0.0) or 0.0)
 
     @property
     def is_private_fund(self) -> bool:
@@ -295,42 +244,6 @@ class Fund:
         ):
             return options["delta_adjusted_notional"].sum()
         return 0.0
-
-    def get_dividends(self, analysis_date: str) -> float:
-        """Return dividend impact for the requested analysis date."""
-
-        dividends = getattr(self.data, "dividends", 0.0)
-        return self._extract_numeric_value(dividends, ["dividend", "dividends", "amount", "value"])
-
-    def get_expenses(self, analysis_date: str) -> float:
-        """Return total expenses using stored expense ratio and NAV."""
-
-        expenses = getattr(self.data, "expenses", None)
-        if expenses not in (None, ""):
-            try:
-                return float(expenses)
-            except (TypeError, ValueError):
-                pass
-        try:
-            return float(self.expenses)
-        except Exception:
-            return 0.0
-
-    def get_distributions(self, analysis_date: str) -> float:
-        """Return distributions paid on the analysis date."""
-
-        distributions = getattr(self.data, "distributions", 0.0)
-        return self._extract_numeric_value(
-            distributions,
-            ["distribution", "distributions", "amount", "value"],
-        )
-
-    def get_flows_adjustment(self, analysis_date: str, prior_date: str) -> float:
-        """Return flows adjustment between the two analysis dates."""
-
-        flows = getattr(self.data, "flows", 0.0)
-        return float(flows or 0.0)
-
 
     def get_dividends(self, analysis_date: str) -> float:
         """Return dividend impact for the requested analysis date."""
