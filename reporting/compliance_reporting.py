@@ -841,14 +841,26 @@ class ComplianceReport:
             workbook = writer.book
             for sheet in workbook.sheetnames:
                 ws = workbook[sheet]
+                header_row = next(ws.iter_rows(min_row=1, max_row=1), ())
+                headers = {
+                    cell.column_letter: (cell.value or "")
+                    for cell in header_row
+                }
                 for column_cells in ws.columns:
                     max_length = 0
                     column_letter = column_cells[0].column_letter
+                    header_text = str(headers.get(column_letter, "")).lower()
+                    is_percent = any(
+                        keyword in header_text
+                        for keyword in ("percent", "pct", "weight", "ownership")
+                    )
                     for cell in column_cells:
                         try:
                             value = cell.value
                             if value is not None:
                                 max_length = max(max_length, len(str(value)))
+                                if cell.row > 1 and cell.data_type in {"n", "f"}:
+                                    cell.number_format = "0.00%" if is_percent else "#,##0.00"
                         except Exception:  # pragma: no cover - defensive
                             continue
                     ws.column_dimensions[column_letter].width = min(max_length + 2, 50)

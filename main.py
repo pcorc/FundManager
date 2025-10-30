@@ -293,42 +293,42 @@ if __name__ == "__main__":
     #     "output_dir": "./outputs",
     # }
 
-    RUNTIME_OVERRIDES = {
-        "analysis_type": "eod",
-        "as_of_date": "2025-10-24",
-        "funds": ["DOGG"],
-        "previous_date": "2025-10-23",
-        "eod_reports": ["compliance"],
-        "compliance_tests": [
-            # "gics_compliance",
-            "prospectus_80pct_policy",
-            # "diversification_40act_check",
-            # "diversification_IRS_check",
-            # "diversification_IRC_check",
-            # "max_15pct_illiquid_sai",
-            # "real_estate_check",
-            # "commodities_check",
-            # "twelve_d1a_other_inv_cos",
-            # "twelve_d2_insurance_cos",
-            # "twelve_d3_sec_biz",
-        ],
-        "create_pdf": True,
-        "output_dir": "./outputs",
-    }
-    raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
-
-    # TIME_SERIES_OVERRIDES = {
+    # RUNTIME_OVERRIDES = {
     #     "analysis_type": "eod",
+    #     "as_of_date": "2025-10-24",
     #     "funds": ["DOGG"],
-    #     "eod_reports": ["compliance", "holdings", "nav"],
+    #     "previous_date": "2025-10-23",
+    #     "eod_reports": ["compliance"],
     #     "compliance_tests": [
-    #         "diversification_40act_check",
-    #         "diversification_IRS_check",
+    #         # "gics_compliance",
+    #         "prospectus_80pct_policy",
+    #         # "diversification_40act_check",
+    #         # "diversification_IRS_check",
+    #         # "diversification_IRC_check",
+    #         # "max_15pct_illiquid_sai",
+    #         # "real_estate_check",
+    #         # "commodities_check",
+    #         # "twelve_d1a_other_inv_cos",
+    #         # "twelve_d2_insurance_cos",
+    #         # "twelve_d3_sec_biz",
     #     ],
-    #     "start_date": "2024-06-30",
-    #     "end_date": "2024-09-30",
     #     "create_pdf": True,
     #     "output_dir": "./outputs",
-    #     "generate_daily_reports": True,
     # }
-    # raise SystemExit(run_time_series(overrides=TIME_SERIES_OVERRIDES))
+    # raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
+
+    TIME_SERIES_OVERRIDES = {
+        "analysis_type": "ex_post",
+        "funds": ["DOGG"],
+        "eod_reports": ["compliance",],
+        "compliance_tests": [
+            "diversification_40act_check",
+            "diversification_IRS_check",
+        ],
+        "start_date": "2025-09-15",
+        "end_date": "2025-09-19",
+        "create_pdf": True,
+        "output_dir": "./outputs",
+        "generate_daily_reports": False,
+    }
+    raise SystemExit(run_time_series(overrides=TIME_SERIES_OVERRIDES))

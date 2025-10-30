@@ -176,10 +176,10 @@ class ComplianceChecker:
 
             total_assets, total_net_assets = self._get_total_assets(fund)
             total_cash_value = fund.data.current.cash
-            total_equity_market_value = fund.data.current.total_equity_value,
-            total_opt_market_value = fund.data.current.total_option_value,
-            total_tbill_value = fund.data.current.total_treasury_value
-            total_opt_delta_notional_value = fund.data.current.total_option_delta_adjusted_notional
+            total_equity_market_value = float(fund.data.current.total_equity_value)
+            total_opt_market_value = float(fund.data.current.total_option_value)
+            total_tbill_value = float(fund.data.current.total_treasury_value)
+            total_opt_delta_notional_value = float(fund.data.current.total_option_delta_adjusted_notional)
 
             options_in_scope = fund.name in PROSPECTUS_OPTIONS_FUNDS
 
@@ -501,7 +501,6 @@ class ComplianceChecker:
             if fund.name in {"RDVI", "SDVD", "TDVI", "FTCSH", "FDND", "FGSI"}:
                 holdings_df = vest_eqy_holdings.copy()
                 holdings_df["net_market_value"] = holdings_df["equity_market_value"]
-                net_assets = float(holdings_df["net_market_value"].sum())
             else:
                 holdings_df = pd.merge(
                     vest_eqy_holdings,
@@ -521,7 +520,6 @@ class ComplianceChecker:
                 holdings_df["net_market_value"] = (
                     holdings_df["equity_market_value"] + holdings_df["option_market_value"]
                 )
-                net_assets = float(holdings_df["net_market_value"].sum())
 
             non_qualifying_assets = 0.0
             condition_1_met = (

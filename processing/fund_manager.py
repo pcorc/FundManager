@@ -123,6 +123,7 @@ class FundManager:
             ),
             cash=self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
             nav=self._extract_nav_per_share(fund_data_dict.get('nav', pd.DataFrame())),
+            expenses=self._extract_expenses(fund_data_dict.get('nav', pd.DataFrame())),
             total_assets=self._extract_custodian_total_assets(fund_data_dict),
             total_net_assets=self._extract_custodian_total_net_assets(fund_data_dict),
             flows=self._extract_flow_value(fund_data_dict.get('flows', pd.DataFrame())),
@@ -144,6 +145,7 @@ class FundManager:
             ),
             cash=self._extract_cash_value(fund_data_dict.get('cash_t1', pd.DataFrame())),
             nav=self._extract_nav_per_share(fund_data_dict.get('nav_t1', pd.DataFrame())),
+            expenses=self._extract_expenses(fund_data_dict.get('nav_t1', pd.DataFrame())),
             total_assets=self._extract_custodian_total_assets(fund_data_dict, nav_key='nav_t1'),
             total_net_assets=self._extract_custodian_total_net_assets(
                 fund_data_dict, nav_key='nav_t1'
@@ -196,25 +198,6 @@ class FundManager:
         self.logger.warning("No cash value column found")
         return 0.0
 
-    def _extract_flow_value(self, flows_data: pd.DataFrame) -> float:
-        """Extract net flows value from the provided DataFrame."""
-
-        if not isinstance(flows_data, pd.DataFrame) or flows_data.empty:
-            return 0.0
-
-        flow_columns = ['net_flow', 'flow', 'flows', 'net_flows', 'amount', 'value']
-        for column in flow_columns:
-            if column in flows_data.columns:
-                series = pd.to_numeric(flows_data[column], errors='coerce').fillna(0.0)
-                if not series.empty:
-                    return float(series.sum())
-
-        numeric_columns = flows_data.select_dtypes(include=['number']).columns
-        if len(numeric_columns):
-            return float(flows_data[numeric_columns[0]].fillna(0.0).sum())
-
-        self.logger.debug("Unable to determine flows value from provided data")
-        return 0.0
 
     def _extract_flow_value(self, flows_data: pd.DataFrame) -> float:
         """Extract net flows value from the provided DataFrame."""
@@ -253,16 +236,44 @@ class FundManager:
         self.logger.warning("No custodian total net assets found")
         return 0.0
 
-    def _extract_custodian_nav_per_share(self, fund_data_dict: dict) -> float:
+    def _extract_expenses(self, fund_data_dict: dict, custodian_type=None) -> float:
         """Extract NAV per share using known field name from your custodian"""
-        nav_data = fund_data_dict.get('nav_per_share', 0.0)
+        if isinstance(fund_data_dict, dict):
+            nav_data = fund_data_dict.get('custodian_nav', pd.DataFrame())
+        else:
+            nav_data = fund_data_dict
 
-        try:
-            if hasattr(nav_data, 'iloc'):  # Handle DataFrame/Series
-                return float(nav_data.iloc[0]) if len(nav_data) > 0 else 0.0
-            return float(nav_data)
-        except (ValueError, TypeError):
+        if not isinstance(nav_data, pd.DataFrame) or nav_data.empty:
             return 0.0
+
+        row = nav_data.iloc[0]
+
+        # Custodian-specific column mapping
+        custodian_columns = {
+            'bny': 'expenses',
+            'umb': 'expenses',
+            'socgen': 'expenses'  # if you have SocGen
+        }
+
+        # If we know the custodian, try their specific column first
+        if custodian_type and custodian_type in custodian_columns:
+            custodian_col = custodian_columns[custodian_type]
+            if custodian_col in row and pd.notna(row[custodian_col]):
+                try:
+                    return float(row[custodian_col])
+                except (ValueError, TypeError):
+                    pass
+
+        # Fallback: try all common column names
+        for col in ['expenses']:
+            if col in row and pd.notna(row[col]):
+                try:
+                    return float(row[col])
+                except (ValueError, TypeError):
+                    continue
+
+        return 0.0
+
 
     def _get_prior_date(self, current_date: Any) -> str:
         """Get prior business date - you might want to improve this"""
@@ -302,7 +313,6 @@ class FundManager:
         except Exception as e:
             self.logger.error(f"NAV reconciliation error for {fund.name}: {e}")
             return {'errors': [str(e)], 'differences': []}
-
 
     def _run_reconciliation(self, fund: Fund) -> Dict[str, Any]:
         """Run reconciliation"""

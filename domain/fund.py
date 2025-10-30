@@ -54,6 +54,7 @@ class FundSnapshot:
         custodian: Optional[FundHoldings] = None,
         cash: float = 0.0,
         nav: float = 0.0,
+        expenses: float = 0.0,
         total_assets: float = 0.0,
         total_net_assets: float = 0.0,
         flows: float = 0.0,
@@ -66,6 +67,7 @@ class FundSnapshot:
         )
         self.cash = float(cash or 0.0)
         self.nav = float(nav or 0.0)
+        self.expenses = float(expenses or 0.0)
         self.total_assets = float(total_assets or 0.0)
         self.total_net_assets = float(total_net_assets or 0.0)
         self.total_equity_value = self._compute_equity_value()

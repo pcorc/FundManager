@@ -517,3 +517,25 @@ AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
 2025-10-30 00:34:03,789 - compliance_checker - ERROR - Error in prospectus policy check for DOGG: 'FundSnapshot' object has no attribute 'cash_value'
 2025-10-30 00:35:32,198 - compliance_checker - INFO - Running compliance tests for DOGG
 2025-10-30 00:35:32,199 - compliance_checker - ERROR - Error in prospectus policy check for DOGG: can only concatenate tuple (not "float") to tuple
+2025-10-30 00:47:52,031 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:47:52,032 - compliance_checker - ERROR - Error in prospectus policy check for DOGG: can only concatenate tuple (not "float") to tuple
+2025-10-30 00:52:49,245 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:52:49,246 - compliance_checker - ERROR - Error in prospectus policy check for DOGG: can only concatenate tuple (not "float") to tuple
+2025-10-30 00:56:03,849 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:57:16,720 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:57:16,722 - compliance_checker - ERROR - Error in prospectus policy check for DOGG: can only concatenate tuple (not "float") to tuple
+2025-10-30 00:57:56,206 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 00:59:24,351 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 01:01:07,509 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 01:03:34,550 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 01:09:42,821 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 01:13:25,293 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 01:16:44,802 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 01:19:10,631 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 01:20:14,960 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 01:26:23,570 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 01:33:36,377 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 01:34:31,945 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 01:42:43,598 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 01:44:50,907 - compliance_checker - INFO - Running compliance tests for DOGG
+2025-10-30 01:46:26,370 - compliance_checker - INFO - Running compliance tests for DOGG
