@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Dict, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 from config.fund_registry import FundRegistry
 from processing.bulk_data_loader import BulkDataLoader, BulkDataStore
 from processing.fund_manager import FundManager, ProcessingResults
-from reporting.compliance_reporter import build_compliance_reports
+from reporting.compliance_reporter import (
+    build_compliance_reports,
+    build_compliance_reports_for_range,
+)
+from reporting.compliance_reporting import GeneratedComplianceReport
 from reporting.reconciliation_reporter import build_reconciliation_reports
 from reporting.nav_recon_reporter import build_nav_reconciliation_reports
 from reporting.trade_compliance_reporter import build_trading_compliance_reports
@@ -24,6 +29,16 @@ class DataLoadRequest:
     target_date: date
     previous_date: Optional[date] = None
     analysis_type: Optional[str] = None
+
+
+
+@dataclass(frozen=True)
+class RangeRunResults:
+    """Aggregated artefacts for a multi-day EOD run."""
+
+    results_by_date: "OrderedDict[date, ProcessingResults]"
+    daily_artefacts: "OrderedDict[str, Mapping[str, object]]"
+    stacked_compliance: Optional["GeneratedComplianceReport"]
 
 
 
@@ -169,6 +184,88 @@ def run_trading_mode(
 
     return results_ex_ante, results_ex_post, artefacts
 
+def run_eod_range_mode(
+    session,
+    base_cls,
+    registry: FundRegistry,
+    *,
+    start_date: date,
+    end_date: date,
+    operations: Sequence[str],
+    compliance_tests: Sequence[str],
+    output_dir: Path,
+    create_pdf: bool = True,
+    generate_daily_reports: bool = True,
+) -> RangeRunResults:
+    """Execute the EOD workflow for each business day in ``[start_date, end_date]``."""
+
+    if start_date > end_date:
+        raise ValueError("start_date must be on or before end_date")
+
+    loader = BulkDataLoader(session, base_cls, registry)
+    results_by_date: "OrderedDict[date, ProcessingResults]" = OrderedDict()
+    daily_artefacts: "OrderedDict[str, Mapping[str, object]]" = OrderedDict()
+
+    for trade_date in _iter_business_days(start_date, end_date):
+        previous_date = _previous_business_day(trade_date)
+        data_store = loader.load_all_data_for_date(
+            trade_date,
+            previous_date=previous_date,
+            analysis_type="eod",
+        )
+
+        day_results = _run_operations(
+            registry,
+            data_store,
+            operations=operations,
+            analysis_type="eod",
+            compliance_tests=compliance_tests,
+        )
+
+        results_by_date[trade_date] = day_results
+
+        if not generate_daily_reports:
+            continue
+
+        artefacts: Dict[str, object] = {}
+
+        compliance_payload = _extract_payload(day_results, "compliance_results")
+        reconciliation_payload = _extract_payload(day_results, "reconciliation_results")
+        nav_payload = _extract_payload(day_results, "nav_results")
+
+        if "compliance" in operations and compliance_payload:
+            artefacts["compliance"] = build_compliance_reports(
+                day_results,
+                report_date=trade_date,
+                output_dir=str(output_dir),
+                create_pdf=create_pdf,
+            )
+
+        if any(name in operations for name in ("reconciliation", "nav_reconciliation")):
+            artefacts["reconciliation"] = build_nav_reconciliation_reports(
+                holdings_results=reconciliation_payload if "reconciliation" in operations else None,
+                nav_results=nav_payload if "nav_reconciliation" in operations else None,
+                report_date=trade_date,
+                output_dir=str(output_dir),
+                create_pdf=create_pdf,
+                compliance_results=compliance_payload if "compliance" in operations else None,
+            )
+
+        daily_artefacts[trade_date.isoformat()] = artefacts
+
+    stacked_report = None
+    if "compliance" in operations and results_by_date:
+        stacked_report = build_compliance_reports_for_range(
+            results_by_date.items(),
+            output_dir=str(output_dir),
+            create_pdf=create_pdf,
+        )
+
+    return RangeRunResults(
+        results_by_date=results_by_date,
+        daily_artefacts=daily_artefacts,
+        stacked_compliance=stacked_report,
+    )
 
 def flatten_eod_paths(artefacts: Mapping[str, object]) -> Dict[str, str]:
     paths: Dict[str, str] = {}
@@ -237,6 +334,19 @@ def _run_operations(
         list(operations), compliance_tests=list(compliance_tests)
     )
 
+def _iter_business_days(start: date, end: date):
+    current = start
+    while current <= end:
+        if current.weekday() < 5:
+            yield current
+        current += timedelta(days=1)
+
+
+def _previous_business_day(anchor: date) -> date:
+    current = anchor - timedelta(days=1)
+    while current.weekday() >= 5:
+        current -= timedelta(days=1)
+    return current
 
 def _extract_payload(results: ProcessingResults, attribute: str) -> Dict[str, Mapping[str, object]]:
     payload: Dict[str, Mapping[str, object]] = {}
@@ -247,12 +357,15 @@ def _extract_payload(results: ProcessingResults, attribute: str) -> Dict[str, Ma
     return payload
 
 
+
 __all__ = [
     "DataLoadRequest",
+    "RangeRunResults",
     "plan_eod_requests",
     "plan_trading_requests",
     "fetch_data_stores",
     "run_eod_mode",
+    "run_eod_range_mode",
     "run_trading_mode",
     "flatten_eod_paths",
     "flatten_trading_paths",

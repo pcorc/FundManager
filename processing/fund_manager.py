@@ -119,6 +119,8 @@ class FundManager:
             custodian_treasury=fund_data_dict.get('custodian_treasury', pd.DataFrame()),
             cash=self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
             nav=self._extract_nav_per_share(fund_data_dict.get('nav', pd.DataFrame())),
+            total_assets=self._extract_custodian_total_assets(fund_data_dict),
+            total_net_assets=self._extract_custodian_total_net_assets(fund_data_dict),
         )
 
         # Populate previous holdings (T-1) if available
@@ -129,8 +131,12 @@ class FundManager:
             custodian_equity=fund_data_dict.get('custodian_equity_t1', pd.DataFrame()),
             custodian_option=fund_data_dict.get('custodian_option_t1', pd.DataFrame()),
             custodian_treasury=fund_data_dict.get('custodian_treasury_t1', pd.DataFrame()),
-            cash=0.0,
-            nav=0.0,
+            cash=self._extract_cash_value(fund_data_dict.get('cash_t1', pd.DataFrame())),
+            nav=self._extract_nav_per_share(fund_data_dict.get('nav_t1', pd.DataFrame())),
+            total_assets=self._extract_custodian_total_assets(fund_data_dict, nav_key='nav_t1'),
+            total_net_assets=self._extract_custodian_total_net_assets(
+                fund_data_dict, nav_key='nav_t1'
+            ),
         )
 
         # Populate additional data
@@ -153,9 +159,11 @@ class FundManager:
 
         return fund
 
-    def _extract_custodian_total_assets(self, fund_data_dict: Dict) -> float:
+    def _extract_custodian_total_assets(
+            self, fund_data_dict: Dict, *, nav_key: str = 'nav'
+    ) -> float:
         """Extract total assets from custodian NAV data"""
-        nav_data = fund_data_dict.get('nav', pd.DataFrame())
+        nav_data = fund_data_dict.get(nav_key, pd.DataFrame())
         if nav_data.empty:
             return 0.0
 
@@ -181,9 +189,11 @@ class FundManager:
         self.logger.warning("No cash value column found")
         return 0.0
 
-    def _extract_custodian_total_net_assets(self, fund_data_dict: Dict) -> float:
+    def _extract_custodian_total_net_assets(
+            self, fund_data_dict: Dict, *, nav_key: str = 'nav'
+    ) -> float:
         """Extract total net assets from custodian NAV data"""
-        nav_data = fund_data_dict.get('nav', pd.DataFrame())
+        nav_data = fund_data_dict.get(nav_key, pd.DataFrame())
         if nav_data.empty:
             return 0.0
 
@@ -210,16 +220,6 @@ class FundManager:
     def _get_prior_date(self, current_date: Any) -> str:
         """Get prior business date - you might want to improve this"""
         from datetime import datetime, timedelta, date as date_cls
-
-        if isinstance(current_date, datetime):
-            current = current_date
-        elif isinstance(current_date, date_cls):
-            current = datetime.combine(current_date, datetime.min.time())
-        else:
-            current = datetime.strptime(str(current_date), '%Y-%m-%d')
-
-        prior = current - timedelta(days=1)
-        return prior.strftime('%Y-%m-%d')
 
     def _run_compliance(self, fund: Fund, tests: Sequence[str]) -> Dict[str, Any]:
         """Run compliance checks"""

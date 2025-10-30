@@ -53,7 +53,69 @@ class FundSnapshot:
         )
         self.cash = float(cash or 0.0)
         self.nav = float(nav or 0.0)
+        self.total_assets = float(total_assets or 0.0)
+        self.total_net_assets = float(total_net_assets or 0.0)
+        self.total_equity_value = self._compute_equity_value()
+        self.total_option_value = self._compute_option_value()
+        self.total_treasury_value = self._compute_treasury_value()
 
+    @staticmethod
+    def _frame_value_sum(frame: pd.DataFrame, columns: Sequence[str]) -> Optional[float]:
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            return None
+
+        for column in columns:
+            if column in frame.columns:
+                series = pd.to_numeric(frame[column], errors="coerce").dropna()
+                if not series.empty:
+                    return float(series.sum())
+        return None
+
+    @staticmethod
+    def _price_quantity_sum(frame: pd.DataFrame, multiplier: float = 1.0) -> Optional[float]:
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            return None
+
+        if {"price", "quantity"}.issubset(frame.columns):
+            price = pd.to_numeric(frame["price"], errors="coerce").fillna(0.0)
+            quantity = pd.to_numeric(frame["quantity"], errors="coerce").fillna(0.0)
+            if not price.empty and not quantity.empty:
+                return float((price * quantity * multiplier).sum())
+        return None
+
+    def _compute_equity_value(self) -> float:
+        for frame in (self.equity, self.custodian_equity):
+            value = self._frame_value_sum(frame, ["market_value", "net_market_value"])
+            if value is not None:
+                return value
+            fallback = self._price_quantity_sum(frame)
+            if fallback is not None:
+                return fallback
+        return 0.0
+
+    def _compute_option_value(self) -> float:
+        for frame in (self.options, self.custodian_option):
+            value = self._frame_value_sum(
+                frame, ["option_market_value", "market_value", "net_market_value"]
+            )
+            if value is not None:
+                return value
+            fallback = self._price_quantity_sum(frame, multiplier=100.0)
+            if fallback is not None:
+                return fallback
+        return 0.0
+
+    def _compute_treasury_value(self) -> float:
+        for frame in (self.treasury, self.custodian_treasury):
+            value = self._frame_value_sum(
+                frame, ["treasury_market_value", "market_value", "net_market_value"]
+            )
+            if value is not None:
+                return value
+            fallback = self._price_quantity_sum(frame)
+            if fallback is not None:
+                return fallback
+        return 0.0
 
 class FundData:
     """Complete fund data for current day (T) and prior day (T-1)."""
@@ -147,45 +209,46 @@ class Fund:
     @property
     def total_assets(self) -> float:
         current = self.data.current
-        custodian_total = getattr(current, "total_assets", 0.0) or 0.0
-        return float(custodian_total)
+        value = getattr(current, "total_assets", None)
+        if value not in (None, 0, 0.0):
+            return float(value)
+
+        nav_df = getattr(self.data, "nav", pd.DataFrame())
+        if isinstance(nav_df, pd.DataFrame) and not nav_df.empty and "total_assets" in nav_df.columns:
+            series = pd.to_numeric(nav_df["total_assets"], errors="coerce").dropna()
+            if not series.empty:
+                return float(series.iloc[0])
+        return 0.0
 
     @property
     def total_net_assets(self) -> float:
         current = self.data.current
-        custodian_tna = getattr(current, "total_net_assets", 0.0) or 0.0
-        return float(custodian_tna)
+        value = getattr(current, "total_net_assets", None)
+        if value not in (None, 0, 0.0):
+            return float(value)
+
+        nav_df = getattr(self.data, "nav", pd.DataFrame())
+        if (
+            isinstance(nav_df, pd.DataFrame)
+            and not nav_df.empty
+            and "total_net_assets" in nav_df.columns
+        ):
+            series = pd.to_numeric(nav_df["total_net_assets"], errors="coerce").dropna()
+            if not series.empty:
+                return float(series.iloc[0])
+        return 0.0
 
     @property
     def total_equity_value(self) -> float:
-        equity = getattr(self.data.current, "equity", pd.DataFrame())
-        if isinstance(equity, pd.DataFrame) and not equity.empty:
-            price_col = "price" if "price" in equity.columns else None
-            quantity_col = "quantity" if "quantity" in equity.columns else None
-            if price_col and quantity_col:
-                return (equity[price_col] * equity[quantity_col]).sum()
-            if "market_value" in equity.columns:
-                return equity["market_value"].sum()
+        return float(getattr(self.data.current, "total_equity_value", 0.0) or 0.0)
 
     @property
     def total_option_value(self) -> float:
-        options = getattr(self.data.current, "options", pd.DataFrame())
-        if isinstance(options, pd.DataFrame) and not options.empty:
-            if {"price", "quantity"}.issubset(options.columns):
-                return (options["price"] * options["quantity"]).sum()
-            if "market_value" in options.columns:
-                return options["market_value"].sum()
-        return 0.0
+        return float(getattr(self.data.current, "total_option_value", 0.0) or 0.0)
 
     @property
     def total_treasury_value(self) -> float:
-        treasury = getattr(self.data.current, "treasury", pd.DataFrame())
-        if isinstance(treasury, pd.DataFrame) and not treasury.empty:
-            if {"price", "quantity"}.issubset(treasury.columns):
-                return (treasury["price"] * treasury["quantity"]).sum()
-            if "market_value" in treasury.columns:
-                return treasury["market_value"].sum()
-        return 0.0
+        return float(getattr(self.data.current, "total_treasury_value", 0.0) or 0.0)
 
     @property
     def expenses(self) -> float:
