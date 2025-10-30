@@ -906,7 +906,6 @@ class ComplianceReportPDF(BaseReportPDF):
                 .get("calculations", {})
                 .get("total_opt_market_value", 0)
             )
-            flex_option_dan = 0
 
             summary_data.append(
                 [
@@ -916,7 +915,6 @@ class ComplianceReportPDF(BaseReportPDF):
                     f"{equity:,.0f}",
                     f"{std_option_dan:,.0f}",
                     f"{std_option_mv:,.0f}",
-                    f"{flex_option_dan:,.0f}",
                 ]
             )
 
@@ -930,7 +928,6 @@ class ComplianceReportPDF(BaseReportPDF):
                 "Equity",
                 "Std Option (DAN)",
                 "Std Option (MV)",
-                "Flex Option (DAN)",
             ],
             summary_data,
         )

@@ -201,11 +201,14 @@ class TradingComplianceAnalyzer:
         ante_results: Mapping[str, Any],
         post_results: Mapping[str, Any],
     ) -> Dict[str, Any]:
-        post_fund = self._extract_fund_object(post_results)
-        ante_fund = self._extract_fund_object(ante_results)
+        # post_fund = self._extract_fund_object(post_results)
+        # ante_fund = self._extract_fund_object(ante_results)
+        #
+        # if post_fund is None and ante_fund is None:
+        #     return {}
 
-        if post_fund is None and ante_fund is None:
-            return {}
+        post_fund = post_results
+        ante_fund = ante_results
 
         asset_mappings: Tuple[Tuple[str, str], ...] = (
             ("equity", "equity"),
@@ -214,6 +217,7 @@ class TradingComplianceAnalyzer:
         )
 
         final_shares: Dict[str, float] = {}
+        initial_shares: Dict[str, float] = {}
         net_trades: Dict[str, Dict[str, float]] = {}
         notional_changes: Dict[str, float] = {}
         trade_activity: Dict[str, Dict[str, Any]] = {}
@@ -224,14 +228,35 @@ class TradingComplianceAnalyzer:
             post_df = self._extract_holdings(post_fund, attr)
             ante_df = self._extract_holdings(ante_fund, attr)
 
-            final_quantity = self._sum_quantity(post_df)
-            initial_quantity = self._sum_quantity(ante_df)
-            quantity_delta = final_quantity - initial_quantity
+            final_quantity = self._sum_column(post_df, "iiv_shares")
+            if final_quantity == 0.0:
+                final_quantity = self._sum_quantity(post_df)
+
+            initial_quantity = self._sum_column(ante_df, "nav_shares")
+            if initial_quantity == 0.0:
+                initial_quantity = self._sum_quantity(ante_df)
+
+            quantity_delta = self._sum_column(post_df, "trade_rebal")
+            if quantity_delta == 0.0:
+                quantity_delta = final_quantity - initial_quantity
 
             final_shares[key] = final_quantity
+            initial_shares[key] = initial_quantity
+
+            trade_rebal_series = self._coerce_numeric_series(post_df, "trade_rebal")
+            buy_quantity = float(trade_rebal_series[trade_rebal_series > 0.0].sum())
+            sell_quantity = abs(
+                float(trade_rebal_series[trade_rebal_series < 0.0].sum())
+            )
+            if buy_quantity == 0.0 and sell_quantity == 0.0:
+                if quantity_delta >= 0.0:
+                    buy_quantity = quantity_delta
+                else:
+                    sell_quantity = abs(quantity_delta)
+
             net_trades[key] = {
-                "buys": max(quantity_delta, 0.0),
-                "sells": abs(min(quantity_delta, 0.0)),
+                "buys": buy_quantity,
+                "sells": sell_quantity,
                 "net": quantity_delta,
             }
 
@@ -263,6 +288,7 @@ class TradingComplianceAnalyzer:
         # Provide convenience aliases for downstream reporting
         trade_summary: Dict[str, Any] = {
             "final_shares": final_shares,
+            "initial_shares": initial_shares,
             "net_trades": net_trades,
             "total_traded": total_traded,
             "trade_activity": trade_activity,
@@ -287,6 +313,19 @@ class TradingComplianceAnalyzer:
         if isinstance(holdings, pd.DataFrame):
             return holdings
         return pd.DataFrame()
+
+    @staticmethod
+    def _sum_column(df: pd.DataFrame, column: str) -> float:
+        if not isinstance(df, pd.DataFrame) or column not in df.columns:
+            return 0.0
+        series = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
+        return float(series.sum())
+
+    @staticmethod
+    def _coerce_numeric_series(df: pd.DataFrame, column: str) -> pd.Series:
+        if not isinstance(df, pd.DataFrame) or column not in df.columns:
+            return pd.Series(dtype=float)
+        return pd.to_numeric(df[column], errors="coerce").fillna(0.0)
 
     @staticmethod
     def _sum_quantity(df: pd.DataFrame, candidates: Iterable[str] = ("quantity", "shares", "units")) -> float:
@@ -337,6 +376,54 @@ class TradingComplianceAnalyzer:
             series = pd.to_numeric(df[numeric_cols[0]], errors="coerce").fillna(0.0)
             return float(series.sum())
         return 0.0
+
+
+    def _build_summary_metrics(self, results: Mapping[str, Any]) -> Dict[str, float]:
+        metrics = self._collect_summary_metrics_from_fund(results)
+        if metrics:
+            return metrics
+
+        summary_result: Any = None
+        if isinstance(results, Mapping):
+            summary_result = results.get("summary_metrics")
+
+        return self._extract_summary_metrics_payload(summary_result)
+
+    def _collect_summary_metrics_from_fund(
+        self, results: Mapping[str, Any]
+    ) -> Dict[str, float]:
+        fund = self._extract_fund_object(results)
+        if fund is None:
+            return {}
+
+        data = getattr(fund, "data", None)
+        current = getattr(data, "current", None)
+        if current is None:
+            return {}
+
+        def _coerce(value: Any) -> float:
+            try:
+                return float(value or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        metrics = {
+            "cash_value": _coerce(getattr(current, "cash", 0.0)),
+            "equity_market_value": _coerce(
+                getattr(current, "total_equity_value", 0.0)
+            ),
+            "option_market_value": _coerce(
+                getattr(current, "total_option_value", 0.0)
+            ),
+            "option_delta_adjusted_notional": _coerce(
+                getattr(current, "total_option_delta_adjusted_notional", 0.0)
+            ),
+            "treasury": _coerce(getattr(current, "total_treasury_value", 0.0)),
+            "total_assets": _coerce(getattr(current, "total_assets", 0.0)),
+            "total_net_assets": _coerce(getattr(current, "total_net_assets", 0.0)),
+        }
+
+        return metrics
 
     # ------------------------------------------------------------------
     def _extract_summary_metrics_payload(self, result: Any) -> Dict[str, float]:

@@ -268,74 +268,75 @@ def _coerce_date(value: object, field_name: str) -> date:
 
 
 if __name__ == "__main__":
-    # RUNTIME_OVERRIDES = {
-    #     "analysis_type": "trading_compliance",
-    #     "as_of_date": "2025-10-24",
-    #     "funds": ["DOGG"],
-    #     "compliance_tests": [
-    #         # "gics_compliance",
-    #         "prospectus_80pct_policy",
-    #         "diversification_40act_check",
-    #         "diversification_IRS_check",
-    #         # "diversification_IRC_check",
-    #         # "max_15pct_illiquid_sai",
-    #         # "real_estate_check",
-    #         # "commodities_check",
-    #         # "twelve_d1a_other_inv_cos",
-    #         # "twelve_d2_insurance_cos",
-    #         # "twelve_d3_sec_biz",
-    #     ],
-    #     "ex_ante_date": "2025-10-24",
-    #     "ex_post_date": "2025-10-24",
-    #     "custodian_date": "2025-10-23",
-    #     "custodian_previous_date": "2025-10-22",
-    #     "create_pdf": True,
-    #     "output_dir": "./outputs",
-    # }
-    # raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
+    RUNTIME_OVERRIDES = {
+        "analysis_type": "trading_compliance",
+        "as_of_date": "2025-10-24",
+        "funds": ["DOGG"],
+        "compliance_tests": [
+            # "gics_compliance",
+            "prospectus_80pct_policy",
+            "diversification_40act_check",
+            "diversification_IRS_check",
+            # "diversification_IRC_check",
+            # "max_15pct_illiquid_sai",
+            # "real_estate_check",
+            # "commodities_check",
+            # "twelve_d1a_other_inv_cos",
+            # "twelve_d2_insurance_cos",
+            # "twelve_d3_sec_biz",
+        ],
+        "ex_ante_date": "2025-10-24",
+        "ex_post_date": "2025-10-24",
+        "custodian_date": "2025-10-23",
+        "custodian_previous_date": "2025-10-22",
+        "create_pdf": True,
+        "output_dir": "./outputs",
+    }
+    raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
 
     # 'KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',
     # 'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727',
     # 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2', 'FTCSH'
 
-    # RUNTIME_OVERRIDES = {
-    #     "analysis_type": "eod",
-    #     "as_of_date": "2025-10-24",
-    #     "funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',
-    #     'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727',
-    #     'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'],
-    #     "previous_date": "2025-10-23",
-    #     "eod_reports": ["compliance"],
-    #     "compliance_tests": [
-    #         # "gics_compliance",
-    #         "prospectus_80pct_policy",
-    #         # "diversification_40act_check",
-    #         # "diversification_IRS_check",
-    #         # "diversification_IRC_check",
-    #         # "max_15pct_illiquid_sai",
-    #         # "real_estate_check",
-    #         # "commodities_check",
-    #         # "twelve_d1a_other_inv_cos",
-    #         # "twelve_d2_insurance_cos",
-    #         # "twelve_d3_sec_biz",
-    #     ],
-    #     "create_pdf": True,
-    #     "output_dir": "./outputs",
-    # }
-    # raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
-
-    TIME_SERIES_OVERRIDES = {
+    RUNTIME_OVERRIDES = {
         "analysis_type": "eod",
-        "funds": ["HE3B1"],
-        "eod_reports": ["compliance",],
+        "as_of_date": "2025-10-24",
+        "funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',
+        'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727',
+        'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'],
+        "previous_date": "2025-10-23",
+        "eod_reports": ["compliance"],
         "compliance_tests": [
-            "diversification_40act_check",
-            "diversification_IRS_check",
+            # "gics_compliance",
+            "prospectus_80pct_policy",
+            # "diversification_40act_check",
+            # "diversification_IRS_check",
+            # "diversification_IRC_check",
+            # "max_15pct_illiquid_sai",
+            # "real_estate_check",
+            # "commodities_check",
+            # "twelve_d1a_other_inv_cos",
+            # "twelve_d2_insurance_cos",
+            # "twelve_d3_sec_biz",
         ],
-        "start_date": "2025-09-15",
-        "end_date": "2025-09-19",
         "create_pdf": True,
         "output_dir": "./outputs",
-        "generate_daily_reports": False,
     }
+    raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
+
+    # TIME_SERIES_OVERRIDES = {
+    #     "analysis_type": "eod",
+    #     "funds": [    'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727',
+    # 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'],
+    #     "eod_reports": ["compliance",],
+    #     "compliance_tests": [
+    #         "diversification_40act_check",
+    #         "diversification_IRS_check",
+    #     ],
+    #     "start_date": "2025-06-30",
+    #     "end_date": "2025-09-19",
+    #     "create_pdf": True,
+    #     "output_dir": "./outputs",
+    #     "generate_daily_reports": False,
+    # }
     raise SystemExit(run_time_series(overrides=TIME_SERIES_OVERRIDES))

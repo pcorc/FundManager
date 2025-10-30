@@ -664,66 +664,58 @@ class BulkDataLoader:
                 table = getattr(self.base_cls.classes, table_name)
 
                 if table_name == 'umb_cef_nav':
-                    # UMB has fund column - query for all relevant funds at once
-                    date_column = self._get_table_column(table, 'date')
-                    fund_column = self._get_table_column(table, 'fund')
-                    query = self.session.query(table)
-                    if date_column is not None:
-                        query = self._apply_date_filter(
-                            query, date_column, target_date, previous_date
-                        )
-                    if fund_column is not None:
-                        query = query.filter(fund_column.in_([fund.name for fund in funds]))
-                    all_nav_data = pd.read_sql(query.statement, self.session.bind)
-
                     for fund in funds:
                         fund_name = fund.name
-                        fund_nav = self._filter_by_fund(all_nav_data, fund_name, fund.mapping_data)
-                        current, previous = self._split_current_previous(
-                            fund_nav,
-                            self._find_date_column(
-                                fund_nav,
-                                'date',
-                            ),
-                            target_date,
-                            previous_date,
+                        current = self._get_umb_cef_nav(
+                            table_name, fund_name, target_date
+                        )
+                        previous = (
+                            self._get_umb_cef_nav(
+                                table_name, fund_name, previous_date
+                            )
+                            if previous_date is not None
+                            else pd.DataFrame()
                         )
                         self._store_fund_data(data_store, fund_name, 'nav', current)
                         if previous_date is not None:
-                            self._store_fund_data(data_store, fund_name, 'nav_t1', previous)
+                            self._store_fund_data(
+                                data_store, fund_name, 'nav_t1', previous
+                            )
+                    continue
 
-                else:
-                    # Default handling for NAV tables with standard fund identifiers
-                    date_column = self._get_table_column(
-                        table, 'date',
+                table = getattr(self.base_cls.classes, table_name)
+
+                # Default handling for NAV tables with standard fund identifiers
+                date_column = self._get_table_column(
+                    table, 'date',
+                )
+                query = self.session.query(table)
+                if date_column is not None:
+                    query = self._apply_date_filter(
+                        query, date_column, target_date, previous_date
                     )
-                    query = self.session.query(table)
-                    if date_column is not None:
-                        query = self._apply_date_filter(
-                            query, date_column, target_date, previous_date
-                        )
-                    all_nav_data = pd.read_sql(query.statement, self.session.bind)
+                all_nav_data = pd.read_sql(query.statement, self.session.bind)
 
-                    for fund in funds:
-                        fund_name = fund.name
-                        fund_nav = self._filter_by_fund(
-                            all_nav_data, fund_name, fund.mapping_data
-                        )
-                        current, previous = self._split_current_previous(
+                for fund in funds:
+                    fund_name = fund.name
+                    fund_nav = self._filter_by_fund(
+                        all_nav_data, fund_name, fund.mapping_data
+                    )
+                    current, previous = self._split_current_previous(
+                        fund_nav,
+                        self._find_date_column(
                             fund_nav,
-                            self._find_date_column(
-                                fund_nav,
-                                'date',
-                                'nav_date',
-                                'business_date',
-                                'effective_date',
-                            ),
-                            target_date,
-                            previous_date,
-                        )
-                        self._store_fund_data(data_store, fund_name, 'nav', current)
-                        if previous_date is not None:
-                            self._store_fund_data(data_store, fund_name, 'nav_t1', previous)
+                            'date',
+                            'nav_date',
+                            'business_date',
+                            'effective_date',
+                        ),
+                        target_date,
+                        previous_date,
+                    )
+                    self._store_fund_data(data_store, fund_name, 'nav', current)
+                    if previous_date is not None:
+                        self._store_fund_data(data_store, fund_name, 'nav_t1', previous)
 
             except Exception as e:
                 self.logger.warning(f"Failed to load NAV {table_name}: {e}")
@@ -748,6 +740,25 @@ class BulkDataLoader:
                     continue
                 if table_name == 'bny_vit_cash':
                     self._load_bny_vit_cash(data_store, funds, target_date, previous_date)
+                    continue
+                if table_name == 'umb_cef_cash':
+                    for fund in funds:
+                        fund_name = fund.name
+                        current = self._get_umb_cef_cash(
+                            table_name, fund_name, target_date
+                        )
+                        previous = (
+                            self._get_umb_cef_cash(
+                                table_name, fund_name, previous_date
+                            )
+                            if previous_date is not None
+                            else pd.DataFrame()
+                        )
+                        self._store_fund_data(data_store, fund_name, 'cash', current)
+                        if previous_date is not None:
+                            self._store_fund_data(
+                                data_store, fund_name, 'cash_t1', previous
+                            )
                     continue
 
                 table = getattr(self.base_cls.classes, table_name)
@@ -1089,6 +1100,107 @@ class BulkDataLoader:
         if fund_identifier and hasattr(table, 'fund'):
             query = query.filter(table.fund == fund_identifier)
         query = query.group_by(table.fund, table.date)
+        return pd.read_sql(query.statement, self.session.bind)
+
+    def _get_umb_cef_cash(
+        self,
+        cash_table: str,
+        fund_name: str,
+        cash_date: Optional[date],
+    ) -> pd.DataFrame:
+        if cash_date is None:
+            return pd.DataFrame()
+
+        if cash_table != 'umb_cef_cash':
+            return pd.DataFrame()
+
+        UMB = self.base_cls.classes.umb_cef_cash
+
+        try:
+            latest_uploads = (
+                self.session.query(
+                    UMB.fund,
+                    UMB.as_of_date,
+                    UMB.portfolio_id,
+                    UMB.type,
+                    UMB.description,
+                    func.max(UMB.upload_time).label("max_upload_time"),
+                )
+                .filter(
+                    UMB.fund == fund_name,
+                    UMB.as_of_date == cash_date,
+                )
+                .group_by(
+                    UMB.fund,
+                    UMB.as_of_date,
+                    UMB.portfolio_id,
+                    UMB.type,
+                    UMB.description,
+                )
+                .subquery()
+            )
+
+            query = (
+                self.session.query(
+                    func.sum(UMB.current_balance).label("cash_value"),
+                )
+                .join(
+                    latest_uploads,
+                    and_(
+                        UMB.fund == latest_uploads.c.fund,
+                        UMB.as_of_date == latest_uploads.c.as_of_date,
+                        UMB.portfolio_id == latest_uploads.c.portfolio_id,
+                        UMB.type == latest_uploads.c.type,
+                        UMB.description == latest_uploads.c.description,
+                        UMB.upload_time == latest_uploads.c.max_upload_time,
+                    ),
+                )
+                .group_by(UMB.fund, UMB.as_of_date)
+            )
+
+            cash_value = query.scalar()
+        except Exception:
+            return pd.DataFrame()
+
+        if cash_value is None:
+            return pd.DataFrame()
+
+        return pd.DataFrame(
+            [
+                {
+                    "fund": fund_name,
+                    "date": cash_date,
+                    "cash_value": cash_value,
+                }
+            ]
+        )
+
+    def _get_umb_cef_nav(
+        self,
+        nav_table: str,
+        fund_name: str,
+        nav_date: Optional[date],
+    ) -> pd.DataFrame:
+        if nav_date is None:
+            return pd.DataFrame()
+
+        if nav_table != 'umb_cef_nav':
+            return pd.DataFrame()
+
+        actual_fund_name = 'R21126' if fund_name == 'RDATR' else fund_name
+
+        query = self.session.query(
+            self.base_cls.classes.umb_cef_nav.date.label('date'),
+            self.base_cls.classes.umb_cef_nav.fund.label('fund'),
+            self.base_cls.classes.umb_cef_nav.cntnavpershr.label('nav'),
+            self.base_cls.classes.umb_cef_nav.cntassets.label('total_assets'),
+            self.base_cls.classes.umb_cef_nav.cntadjnetasst.label('total_net_assets'),
+            self.base_cls.classes.umb_cef_nav.cntexpense.label('expenses'),
+            self.base_cls.classes.umb_cef_nav.cntshares.label('shares_outstanding'),
+        ).filter(
+            self.base_cls.classes.umb_cef_nav.fund == actual_fund_name,
+            self.base_cls.classes.umb_cef_nav.date == nav_date,
+        )
         return pd.read_sql(query.statement, self.session.bind)
 
     def _bulk_load_index_data(
