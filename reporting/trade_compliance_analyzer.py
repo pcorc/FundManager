@@ -136,6 +136,14 @@ class TradingComplianceAnalyzer:
             elif overall_after == "FAIL":
                 status_change = "OUT_OF_COMPLIANCE"
 
+        summary_metrics = {
+            "ex_ante": self._extract_summary_metrics_payload(
+                ante_results.get("summary_metrics")
+            ),
+            "ex_post": self._extract_summary_metrics_payload(
+                post_results.get("summary_metrics")
+            ),
+        }
         return {
             "fund_name": fund_name,
             "trade_info": trade_info,
@@ -146,6 +154,7 @@ class TradingComplianceAnalyzer:
             "violations_after": violations_after,
             "num_changes": num_changes,
             "checks": checks,
+            "summary_metrics": summary_metrics,
         }
 
     # ------------------------------------------------------------------
@@ -185,6 +194,8 @@ class TradingComplianceAnalyzer:
         final_shares: Dict[str, float] = {}
         net_trades: Dict[str, Dict[str, float]] = {}
         notional_changes: Dict[str, float] = {}
+        trade_activity: Dict[str, Dict[str, Any]] = {}
+        asset_trade_totals: Dict[str, float] = {}
         total_traded = 0.0
 
         for key, attr in asset_mappings:
@@ -206,16 +217,37 @@ class TradingComplianceAnalyzer:
             ante_notional = self._sum_notional(ante_df)
             notional_delta = post_notional - ante_notional
             notional_changes[key] = notional_delta
-            total_traded += abs(notional_delta)
+
+            activity_details = self._calculate_trade_activity(post_df, asset_type=key)
+            if activity_details["buys"] or activity_details["sells"]:
+                trade_activity[key] = activity_details
+
+            buy_value = activity_details["net"].get("buy_value", 0.0)
+            sell_value = activity_details["net"].get("sell_value", 0.0)
+            net_trades[key].update(
+                {
+                    "buy_value": buy_value,
+                    "sell_value": sell_value,
+                    "net_value": buy_value - sell_value,
+                }
+            )
+
+            trade_total = buy_value + sell_value
+            if trade_total <= 0.0:
+                trade_total = abs(notional_delta)
+            asset_trade_totals[key] = trade_total
+            total_traded += trade_total
 
         # Provide convenience aliases for downstream reporting
         trade_summary: Dict[str, Any] = {
             "final_shares": final_shares,
             "net_trades": net_trades,
             "total_traded": total_traded,
+            "trade_activity": trade_activity,
+            "notional_changes": notional_changes,
         }
 
-        trade_summary.update(notional_changes)
+        trade_summary.update(asset_trade_totals)
 
         return trade_summary
 
@@ -283,6 +315,197 @@ class TradingComplianceAnalyzer:
             series = pd.to_numeric(df[numeric_cols[0]], errors="coerce").fillna(0.0)
             return float(series.sum())
         return 0.0
+
+    # ------------------------------------------------------------------
+    def _extract_summary_metrics_payload(self, result: Any) -> Dict[str, float]:
+        calculations: Mapping[str, Any]
+        if isinstance(result, Mapping):
+            calculations = result
+        else:
+            calculations = getattr(result, "calculations", {}) or {}
+
+        metrics: Dict[str, float] = {}
+        for key, value in calculations.items():
+            try:
+                metrics[key] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return metrics
+
+    def _calculate_trade_activity(
+        self,
+        holdings: pd.DataFrame,
+        *,
+        asset_type: str,
+    ) -> Dict[str, Any]:
+        if not isinstance(holdings, pd.DataFrame) or holdings.empty:
+            return {
+                "buys": [],
+                "sells": [],
+                "net": {
+                    "buy_quantity": 0.0,
+                    "sell_quantity": 0.0,
+                    "buy_value": 0.0,
+                    "sell_value": 0.0,
+                },
+            }
+
+        if "trade_rebal" not in holdings.columns:
+            return {
+                "buys": [],
+                "sells": [],
+                "net": {
+                    "buy_quantity": 0.0,
+                    "sell_quantity": 0.0,
+                    "buy_value": 0.0,
+                    "sell_value": 0.0,
+                },
+            }
+
+        df = holdings.copy()
+        df["trade_rebal"] = pd.to_numeric(df["trade_rebal"], errors="coerce").fillna(0.0)
+        df = df.loc[df["trade_rebal"] != 0.0]
+
+        if df.empty:
+            return {
+                "buys": [],
+                "sells": [],
+                "net": {
+                    "buy_quantity": 0.0,
+                    "sell_quantity": 0.0,
+                    "buy_value": 0.0,
+                    "sell_value": 0.0,
+                },
+            }
+
+        ticker_column = self._detect_ticker_column(df, asset_type)
+        price_column = self._detect_price_column(df)
+
+        buys = []
+        sells = []
+        total_buy_qty = 0.0
+        total_sell_qty = 0.0
+        total_buy_value = 0.0
+        total_sell_value = 0.0
+
+        for _, row in df.iterrows():
+            quantity = float(row.get("trade_rebal", 0.0))
+            if quantity == 0.0:
+                continue
+
+            ticker = str(row.get(ticker_column, "")) if ticker_column else ""
+            ticker = ticker.upper().strip()
+
+            market_value = self._estimate_trade_market_value(row, quantity, price_column, asset_type)
+
+            trade_payload = {
+                "ticker": ticker,
+                "quantity": abs(quantity),
+                "market_value": abs(market_value),
+            }
+
+            if quantity > 0:
+                total_buy_qty += abs(quantity)
+                total_buy_value += abs(market_value)
+                buys.append(trade_payload)
+            else:
+                total_sell_qty += abs(quantity)
+                total_sell_value += abs(market_value)
+                sells.append(trade_payload)
+
+        return {
+            "buys": buys,
+            "sells": sells,
+            "net": {
+                "buy_quantity": total_buy_qty,
+                "sell_quantity": total_sell_qty,
+                "buy_value": total_buy_value,
+                "sell_value": total_sell_value,
+            },
+        }
+
+    @staticmethod
+    def _detect_ticker_column(df: pd.DataFrame, asset_type: str) -> Optional[str]:
+        candidates = {
+            "equity": (
+                "equity_ticker",
+                "ticker",
+                "symbol",
+                "underlying_symbol",
+            ),
+            "options": ("optticker", "occ_symbol", "ticker"),
+            "treasury": (
+                "cusip",
+                "ticker",
+                "security_id",
+            ),
+        }
+
+        for column in candidates.get(asset_type, ("ticker",)):
+            if column in df.columns:
+                return column
+        return None
+
+    @staticmethod
+    def _detect_price_column(df: pd.DataFrame) -> Optional[str]:
+        for column in ("trade_price", "price", "px_last", "close_price"):
+            if column in df.columns:
+                return column
+        return None
+
+    def _estimate_trade_market_value(
+        self,
+        row: pd.Series,
+        quantity: float,
+        price_column: Optional[str],
+        asset_type: str,
+    ) -> float:
+        preferred_columns = (
+            "trade_rebal_market_value",
+            "trade_rebal_mv",
+            "trade_rebal_value",
+            "trade_rebal_notional",
+        )
+        for column in preferred_columns:
+            if column in row and pd.notna(row[column]):
+                try:
+                    return float(row[column])
+                except (TypeError, ValueError):
+                    continue
+
+        if price_column and price_column in row and pd.notna(row[price_column]):
+            try:
+                price_value = float(row[price_column])
+                multiplier = 100.0 if asset_type == "options" else 1.0
+                return price_value * quantity * multiplier
+            except (TypeError, ValueError):
+                pass
+
+        if "market_value" in row and pd.notna(row["market_value"]):
+            try:
+                base_quantity = float(row.get("quantity", 0.0))
+                market_value = float(row["market_value"])
+                if base_quantity:
+                    proportion = quantity / base_quantity
+                    return market_value * proportion
+                return market_value
+            except (TypeError, ValueError, ZeroDivisionError):
+                pass
+
+        return float(quantity)
+
+    # ------------------------------------------------------------------
+    def _overall_status(self, payload: Mapping[str, Any]) -> str:
+        failures = 0
+        for name, result in payload.items():
+            if name == "summary_metrics":
+                continue
+            status = self._extract_status(result)
+            if status == "FAIL":
+                failures += 1
+        if failures:
+            return "FAIL"
+        return "PASS" if payload else "UNKNOWN"
 
     # ------------------------------------------------------------------
     def _overall_status(self, payload: Mapping[str, Any]) -> str:
