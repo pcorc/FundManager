@@ -385,7 +385,7 @@ class BulkDataLoader:
                 )
 
         df = pd.read_sql(query.statement, self.session.bind)
-        df = self._augment_equity_holdings(df)
+        df = self._augment_equity_holdings(df, analysis_type=analysis_type)
 
         if analysis_type and 'analysis_type' in df.columns:
             mask = df['analysis_type'].astype(str).str.lower() == analysis_type.lower()
@@ -453,7 +453,7 @@ class BulkDataLoader:
                 )
 
         df = pd.read_sql(query.statement, self.session.bind)
-        df = self._augment_option_holdings(df)
+        df = self._augment_option_holdings(df, analysis_type=analysis_type)
 
         if analysis_type and 'analysis_type' in df.columns:
             mask = df['analysis_type'].astype(str).str.lower() == analysis_type.lower()
@@ -501,7 +501,7 @@ class BulkDataLoader:
                 )
 
         df = pd.read_sql(query.statement, self.session.bind)
-        df = self._augment_treasury_holdings(df)
+        df = self._augment_treasury_holdings(df, analysis_type=analysis_type)
 
         if analysis_type and 'analysis_type' in df.columns:
             mask = df['analysis_type'].astype(str).str.lower() == analysis_type.lower()
@@ -510,33 +510,39 @@ class BulkDataLoader:
         return df
 
 
-    def _augment_equity_holdings(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _augment_equity_holdings(
+        self, df: pd.DataFrame, *, analysis_type: Optional[str] = None
+    ) -> pd.DataFrame:
         if df.empty:
             return df
 
         result = df.copy()
 
-        quantity, _ = self._get_numeric_series(
-            result, 'quantity', 'nav_shares',
+        quantity = self._resolve_shares_series(
+            result, analysis_type=analysis_type, candidates=("quantity",)
         )
         price, _ = self._get_numeric_series(
             result, 'price', 'equity_price'
         )
 
+        price = price.fillna(0.0)
+        result['quantity'] = quantity
         result['equity_market_value'] = quantity * price
 
         result = result.drop(columns=['row_num', 'BBG_SEC_ID'], errors='ignore')
 
         return result
 
-    def _augment_option_holdings(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _augment_option_holdings(
+        self, df: pd.DataFrame, *, analysis_type: Optional[str] = None
+    ) -> pd.DataFrame:
         if df.empty:
             return df
 
         result = df.copy()
 
-        quantity, _ = self._get_numeric_series(
-            result, 'quantity', 'nav_shares',
+        quantity = self._resolve_shares_series(
+            result, analysis_type=analysis_type, candidates=("quantity",)
         )
         price, _ = self._get_numeric_series(result, 'price')
         equity_price, _ = self._get_numeric_series(
@@ -546,6 +552,11 @@ class BulkDataLoader:
             result, 'delta',
         )
 
+        price = price.fillna(0.0)
+        equity_price = equity_price.fillna(0.0)
+        delta = delta.fillna(0.0)
+
+        result['quantity'] = quantity
         result['option_market_value'] = quantity * price * 100
         result['option_notional_value'] = quantity * equity_price * 100
         result['option_delta_adjusted_notional'] = quantity * equity_price * delta * 100
@@ -562,14 +573,52 @@ class BulkDataLoader:
         series = pd.to_numeric(df[column], errors='coerce')
         return series, True
 
-    def _augment_treasury_holdings(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _resolve_shares_series(
+        self,
+        df: pd.DataFrame,
+        *,
+        analysis_type: Optional[str] = None,
+        candidates: Tuple[str, ...] = (),
+    ) -> pd.Series:
+        if df.empty:
+            return pd.Series(0.0, index=df.index, dtype=float)
+
+        analysis = (analysis_type or "").strip().lower()
+        priority: List[str] = []
+
+        if analysis == "ex_post":
+            priority.append("iiv_shares")
+        elif analysis == "ex_ante":
+            priority.append("nav_shares")
+
+        for candidate in candidates:
+            if candidate not in priority:
+                priority.append(candidate)
+
+        for fallback in ("quantity", "nav_shares", "iiv_shares", "shares", "units"):
+            if fallback not in priority:
+                priority.append(fallback)
+
+        series, found = self._get_numeric_series(df, *priority)
+        if not found:
+            return series
+        return series.fillna(0.0)
+
+    def _augment_treasury_holdings(
+        self, df: pd.DataFrame, *, analysis_type: Optional[str] = None
+    ) -> pd.DataFrame:
         if df.empty:
             return df
 
         result = df.copy()
 
-        quantity, _ = self._get_numeric_series(result, 'nav_shares', 'quantity')
+        quantity = self._resolve_shares_series(
+            result, analysis_type=analysis_type, candidates=("quantity",)
+        )
         price, _ = self._get_numeric_series(result, 'price')
+
+        price = price.fillna(0.0)
+        result['quantity'] = quantity
 
         result['treasury_market_value'] = quantity * price / 1000
 
@@ -584,14 +633,6 @@ class BulkDataLoader:
                 return column
         return None
 
-    @staticmethod
-    def _find_dataframe_column(df: pd.DataFrame, *candidates: str) -> Optional[str]:
-        lower_map = {col.lower(): col for col in df.columns}
-        for candidate in candidates:
-            column = lower_map.get(candidate.lower())
-            if column:
-                return column
-        return None
 
     def _bulk_load_nav_data(
         self,

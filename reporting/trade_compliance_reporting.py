@@ -119,6 +119,51 @@ def _create_summary_sheet(workbook: Workbook, data: Mapping[str, Any]) -> None:
     sheet.column_dimensions["A"].width = 45
     sheet.column_dimensions["B"].width = 25
 
+    aggregate_metrics = summary.get("summary_metrics_totals", {}) or {}
+    ex_ante_totals = aggregate_metrics.get("ex_ante", {}) or {}
+    ex_post_totals = aggregate_metrics.get("ex_post", {}) or {}
+
+    if ex_ante_totals or ex_post_totals:
+        row += 1
+        sheet[f"A{row}"] = "Aggregate Summary Metrics"
+        sheet[f"A{row}"].font = Font(size=12, bold=True)
+        row += 1
+
+        headers = ["Metric", "Ex-Ante", "Ex-Post", "Delta"]
+        for col, header in enumerate(headers, start=1):
+            cell = sheet.cell(row=row, column=col, value=header)
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(
+                start_color="DDDDDD", end_color="DDDDDD", fill_type="solid"
+            )
+            cell.alignment = Alignment(horizontal="center")
+        row += 1
+
+        metric_labels = {
+            "cash_value": "Cash Value",
+            "equity_market_value": "Equity Market Value",
+            "option_market_value": "Option Market Value",
+            "option_delta_adjusted_notional": "Option Delta Adjusted Notional",
+            "treasury": "Treasury Market Value",
+            "total_assets": "Total Assets",
+            "total_net_assets": "Total Net Assets",
+        }
+
+        for metric_key, label in metric_labels.items():
+            if metric_key not in ex_ante_totals and metric_key not in ex_post_totals:
+                continue
+            ante_value = float(ex_ante_totals.get(metric_key, 0.0) or 0.0)
+            post_value = float(ex_post_totals.get(metric_key, 0.0) or 0.0)
+            delta = post_value - ante_value
+
+            sheet.cell(row=row, column=1, value=label)
+            sheet.cell(row=row, column=2, value=ante_value)
+            sheet.cell(row=row, column=3, value=post_value)
+            sheet.cell(row=row, column=4, value=delta)
+            row += 1
+
+        sheet.column_dimensions["C"].width = 25
+        sheet.column_dimensions["D"].width = 25
 
 def _create_compliance_changes_sheet(workbook: Workbook, data: Mapping[str, Any]) -> None:
     """Tab summarising compliance status transitions by fund."""

@@ -294,10 +294,16 @@ if __name__ == "__main__":
     }
     raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
 
+    # 'KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',
+    # 'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727',
+    # 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2', 'FTCSH'
+
     # RUNTIME_OVERRIDES = {
     #     "analysis_type": "eod",
     #     "as_of_date": "2025-10-24",
-    #     "funds": ["DOGG"],
+    #     "funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',
+    #     'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727',
+    #     'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'],
     #     "previous_date": "2025-10-23",
     #     "eod_reports": ["compliance"],
     #     "compliance_tests": [

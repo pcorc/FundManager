@@ -1,6 +1,7 @@
 """Analytics for comparing ex-ante and ex-post compliance results."""
 
 from __future__ import annotations
+from collections import defaultdict
 
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
@@ -41,6 +42,7 @@ class TradingComplianceAnalyzer:
         }
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     def analyze(self) -> Dict[str, Any]:
         """Return a serialisable comparison of compliance changes."""
 
@@ -62,6 +64,10 @@ class TradingComplianceAnalyzer:
         }
 
         fund_details: Dict[str, Dict[str, Any]] = {}
+        summary_metric_totals = {
+            "ex_ante": defaultdict(float),
+            "ex_post": defaultdict(float),
+        }
 
         for fund_name in fund_names:
             comparison = self._compare_fund(fund_name)
@@ -80,6 +86,16 @@ class TradingComplianceAnalyzer:
             summary["total_violations_before"] += comparison["violations_before"]
             summary["total_violations_after"] += comparison["violations_after"]
 
+            fund_summary_metrics = comparison.get("summary_metrics", {}) or {}
+            for phase in ("ex_ante", "ex_post"):
+                metrics = fund_summary_metrics.get(phase, {}) or {}
+                aggregates = summary_metric_totals[phase]
+                for key, value in metrics.items():
+                    try:
+                        aggregates[key] += float(value)
+                    except (TypeError, ValueError):
+                        continue
+
             trade_total = float(comparison["trade_info"].get("total_traded", 0.0) or 0.0)
             if trade_total:
                 summary["total_funds_traded"] += 1
@@ -87,7 +103,13 @@ class TradingComplianceAnalyzer:
 
         return {
             "date": self.date,
-            "summary": summary,
+            "summary": {
+                **summary,
+                "summary_metrics_totals": {
+                    "ex_ante": dict(summary_metric_totals["ex_ante"]),
+                    "ex_post": dict(summary_metric_totals["ex_post"]),
+                },
+            },
             "funds": fund_details,
         }
 
