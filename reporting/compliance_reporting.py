@@ -78,9 +78,8 @@ class ComplianceReport:
         }
 
         for test_name, processor in test_map.items():
-            if self.test_functions and test_name not in self.test_functions:
-                continue
-            processor()
+            if self.test_functions is None or test_name in self.test_functions:
+                processor()
 
     # ------------------------------------------------------------------
     @staticmethod
