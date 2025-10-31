@@ -512,6 +512,12 @@ class ComplianceChecker:
                     holdings_df["equity_market_value"] + holdings_df["option_market_value"]
                 )
 
+            holdings_df = self._fill_numeric_defaults(holdings_df)
+            holdings_df = self._reweight_holdings_by_issuer(
+                fund,
+                holdings_df
+            )
+
             non_qualifying_assets = 0.0
             condition_1_met = (
                 (total_assets + non_qualifying_assets) / total_assets >= ACT_40_QUALIFYING_ASSETS_MIN

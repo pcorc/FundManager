@@ -1342,3 +1342,5 @@ AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
 2025-10-31 05:13:19,209 - compliance_checker - INFO - Running compliance tests for P20127
 2025-10-31 05:22:29,013 - compliance_checker - INFO - Running compliance tests for P20127
 2025-10-31 06:26:28,541 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 10:00:42,754 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 10:00:42,770 - compliance_checker - ERROR - Error in IRS diversification check for P20127: 'equity_market_value'
