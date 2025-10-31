@@ -102,7 +102,7 @@ def summarise_compliance_status(normalized_results: Mapping[str, Any]) -> Dict[s
         summary["funds"] += 1
         fund_failed = False
         for check_name, payload in fund_results.items():
-            if check_name == "summary_metrics":
+            if check_name in {"summary_metrics", "fund_current_totals"}:
                 continue
             summary["total_checks"] += 1
             if isinstance(payload, Mapping):

@@ -419,10 +419,7 @@ class BulkDataLoader:
                 )
 
         df = pd.read_sql(query.statement, self.session.bind)
-
-        if analysis_type and 'analysis_type' in df.columns:
-            mask = df['analysis_type'].astype(str).str.lower() == analysis_type.lower()
-            df = df.loc[mask].copy()
+        df['equity_market_value'] = df['nav_shares'] * df['price']
 
         return df
 
@@ -479,10 +476,11 @@ class BulkDataLoader:
                 )
 
         df = pd.read_sql(query.statement, self.session.bind)
-
-        if analysis_type and 'analysis_type' in df.columns:
-            mask = df['analysis_type'].astype(str).str.lower() == analysis_type.lower()
-            df = df.loc[mask].copy()
+        df[['price', 'nav_shares', 'delta']] = df[['price', 'nav_shares', 'delta']].apply(pd.to_numeric, errors='coerce')
+        df['option_notional_value'] = df['equity_underlying_price'] * df['nav_shares'] * 100
+        df['option_market_value'] = df['price'] * df['nav_shares'] * 100
+        df['option_delta_adjusted_notional'] = df['equity_underlying_price'] * df['nav_shares'] * df['delta'] * 100
+        df['option_delta_adjusted_market_value'] = df['price'] * df['nav_shares'] * df['delta'] * 100
 
         return df
 
@@ -1517,9 +1515,7 @@ class BulkDataLoader:
         )
         fund_values = self._collect_fund_aliases(funds)
         if fund_values:
-            query = query.filter(fund_column.in_([fund_values]))
-
-        x= pd.read_sql(query.statement, self.session.bind)
+            query = query.filter(fund_column.in_(fund_values))
 
         return pd.read_sql(query.statement, self.session.bind)
 
@@ -1605,7 +1601,7 @@ class BulkDataLoader:
                 table.security_catgry.label('category_description'),
                 table.mkt_mktval.label('market_value'),
             ).filter(
-                table.security_catgry.in_(['COMMON', 'REIT']),  # Common Stock, ETF, REIT
+                table.security_catgry.in_(['COMMON', 'REIT']),
             )
             return query
 

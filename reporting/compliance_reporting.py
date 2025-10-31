@@ -156,20 +156,25 @@ class ComplianceReport:
         rows = []
         for date_str, funds in self.results.items():
             for fund_name, data in funds.items():
-                summary = data.get("summary_metrics", {})
-                if not summary:
+                summary = data.get("summary_metrics") or {}
+                fund_totals = data.get("fund_current_totals") or {}
+
+                if not summary and not fund_totals:
                     continue
+
+                combined = {**fund_totals, **summary}
+
                 rows.append(
                     {
                         "Date": date_str,
                         "Fund": fund_name,
-                        "Cash": summary.get("cash_value", 0.0),
-                        "Treasury": summary.get("treasury", 0.0),
-                        "Equity": summary.get("equity_market_value", 0.0),
-                        "Option DAN": summary.get("option_delta_adjusted_notional", 0.0),
-                        "Option MV": summary.get("option_market_value", 0.0),
-                        "Total Assets": summary.get("total_assets", 0.0),
-                        "Total Net Assets": summary.get("total_net_assets", 0.0),
+                        "Cash": combined.get("cash_value", 0.0),
+                        "Treasury": combined.get("treasury", 0.0),
+                        "Equity": combined.get("equity_market_value", 0.0),
+                        "Option DAN": combined.get("option_delta_adjusted_notional", 0.0),
+                        "Option MV": combined.get("option_market_value", 0.0),
+                        "Total Assets": combined.get("total_assets", 0.0),
+                        "Total Net Assets": combined.get("total_net_assets", 0.0),
                     }
                 )
 

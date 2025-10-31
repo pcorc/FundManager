@@ -292,7 +292,43 @@ class FundManager:
             )
             requested = list(tests) if tests else None
             results = compliance_checker.run_compliance_tests(requested)
-            return results.get(fund.name, {})
+            fund_results = dict(results.get(fund.name, {}) or {})
+
+            if "summary_metrics" not in fund_results:
+                fund_results["summary_metrics"] = compliance_checker.calculate_summary_metrics(fund)
+
+            current_snapshot = getattr(fund.data, "current", None)
+            fund_results.setdefault(
+                "fund_current_totals",
+                {
+                    "cash_value": float(getattr(current_snapshot, "cash", 0.0) or 0.0),
+                    "equity_market_value": float(
+                        getattr(current_snapshot, "total_equity_value", 0.0) or 0.0
+                    ),
+                    "option_delta_adjusted_notional": float(
+                        getattr(
+                            current_snapshot,
+                            "total_option_delta_adjusted_notional",
+                            0.0,
+                        )
+                        or 0.0
+                    ),
+                    "option_market_value": float(
+                        getattr(current_snapshot, "total_option_value", 0.0) or 0.0
+                    ),
+                    "treasury": float(
+                        getattr(current_snapshot, "total_treasury_value", 0.0) or 0.0
+                    ),
+                    "total_assets": float(
+                        getattr(current_snapshot, "total_assets", 0.0) or 0.0
+                    ),
+                    "total_net_assets": float(
+                        getattr(current_snapshot, "total_net_assets", 0.0) or 0.0
+                    ),
+                },
+            )
+
+            return fund_results
         except Exception as e:
             self.logger.error(f"Compliance error for {fund.name}: {e}")
             return {'errors': [str(e)], 'violations': []}

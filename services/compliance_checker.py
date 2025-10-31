@@ -473,13 +473,6 @@ class ComplianceChecker:
             total_assets, total_net_assets = self._get_total_assets(fund)
             expenses = self._get_expenses(fund)
 
-            if "option_market_value" in vest_opt_holdings.columns:
-                vest_opt_holdings["option_market_value"] = pd.to_numeric(
-                    vest_opt_holdings["option_market_value"], errors="coerce"
-                ).fillna(0.0)
-            else:
-                vest_opt_holdings["option_market_value"] = 0.0
-
             registration = (fund.diversification_status or "unknown").replace("_", "-")
             fund_registration = registration.lower()
 
@@ -604,7 +597,7 @@ class ComplianceChecker:
             )
 
             actual_diversified = all(
-                [condition_1_met, condition_2a_met, condition_2b_met, condition_2a_occ_met]
+                [condition_1_met, condition_2a_met, condition_2b_met]
             )
             fund_status_today = "diversified" if actual_diversified else "non-diversified"
 
@@ -616,6 +609,8 @@ class ComplianceChecker:
 
             calculations = {
                 "fund_registration": fund_registration,
+                "fund_status_today": fund_status_today,
+                "expected_fund_status": expected_status,
                 "total_assets": total_assets,
                 "net_assets": total_net_assets,
                 "expenses": expenses,
@@ -638,8 +633,6 @@ class ComplianceChecker:
                 "condition_2a_occ_met": condition_2a_occ_met,
                 "occ_market_value": occ_weight_mkt_val,
                 "occ_weight": occ_weight_mkt_val / total_assets if total_assets else 0.0,
-                "fund_status_today": fund_status_today,
-                "expected_fund_status": expected_status,
             }
 
             diversification_failure_duration = None

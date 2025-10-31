@@ -1351,3 +1351,275 @@ AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
 2025-10-31 17:05:35,345 - compliance_checker - ERROR - Error in 40 Act diversification check for P20127: 'float' object has no attribute 'fillna'
 2025-10-31 17:11:07,527 - compliance_checker - INFO - Running compliance tests for P20127
 2025-10-31 17:20:41,003 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 17:41:46,069 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 17:43:51,301 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 17:45:17,506 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 17:51:19,611 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 17:57:39,729 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:07:13,822 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:14:37,997 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:17:53,288 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:17:53,421 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:17:53,536 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:17:53,662 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:17:53,788 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:17:53,901 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:17:54,013 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:17:54,137 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:17:54,258 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:17:54,363 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:17:54,484 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:18:18,820 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:18:18,933 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:18:19,046 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:18:19,158 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:18:19,262 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:18:19,372 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:18:19,470 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:18:19,576 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:18:19,719 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:18:19,852 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:18:19,966 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:18:42,776 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:18:42,885 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:18:43,008 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:18:43,133 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:18:43,243 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:18:43,341 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:18:43,453 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:18:43,562 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:18:43,673 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:18:43,772 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:18:43,884 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:23:03,505 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:28:08,599 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:28:13,200 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:28:18,526 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:28:20,706 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:28:23,339 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:28:25,529 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:28:27,706 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:28:30,191 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:28:35,983 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:28:40,096 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:29:07,218 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:29:07,763 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:29:08,409 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:29:08,973 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:29:09,541 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:29:10,213 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:29:10,765 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:29:11,350 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:29:11,883 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:29:12,433 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:29:12,954 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:32:01,818 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:36:59,168 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:36:59,172 - compliance_checker - ERROR - Error in IRS diversification check for HE3B1: 'net_market_value'
+2025-10-31 18:36:59,206 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:36:59,210 - compliance_checker - ERROR - Error in IRS diversification check for P20127: 'net_market_value'
+2025-10-31 18:36:59,244 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:36:59,249 - compliance_checker - ERROR - Error in IRS diversification check for P2726: 'net_market_value'
+2025-10-31 18:36:59,280 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:36:59,286 - compliance_checker - ERROR - Error in IRS diversification check for P31027: 'net_market_value'
+2025-10-31 18:36:59,314 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:36:59,322 - compliance_checker - ERROR - Error in IRS diversification check for HE3B2: 'net_market_value'
+2025-10-31 18:36:59,358 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:36:59,365 - compliance_checker - ERROR - Error in IRS diversification check for P30128: 'net_market_value'
+2025-10-31 18:36:59,405 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:36:59,410 - compliance_checker - ERROR - Error in IRS diversification check for P21026: 'net_market_value'
+2025-10-31 18:36:59,452 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:36:59,458 - compliance_checker - ERROR - Error in IRS diversification check for TR2B1: 'net_market_value'
+2025-10-31 18:36:59,488 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:36:59,497 - compliance_checker - ERROR - Error in IRS diversification check for TR2B2: 'net_market_value'
+2025-10-31 18:36:59,528 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:36:59,533 - compliance_checker - ERROR - Error in IRS diversification check for R21126: 'net_market_value'
+2025-10-31 18:36:59,565 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:36:59,571 - compliance_checker - ERROR - Error in IRS diversification check for P3727: 'net_market_value'
+2025-10-31 18:37:24,217 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:37:24,221 - compliance_checker - ERROR - Error in IRS diversification check for HE3B1: 'net_market_value'
+2025-10-31 18:37:24,254 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:37:24,259 - compliance_checker - ERROR - Error in IRS diversification check for P20127: 'net_market_value'
+2025-10-31 18:37:24,291 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:37:24,296 - compliance_checker - ERROR - Error in IRS diversification check for P2726: 'net_market_value'
+2025-10-31 18:37:24,326 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:37:24,330 - compliance_checker - ERROR - Error in IRS diversification check for P31027: 'net_market_value'
+2025-10-31 18:37:24,370 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:37:24,378 - compliance_checker - ERROR - Error in IRS diversification check for HE3B2: 'net_market_value'
+2025-10-31 18:37:24,414 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:37:24,420 - compliance_checker - ERROR - Error in IRS diversification check for P30128: 'net_market_value'
+2025-10-31 18:37:24,458 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:37:24,461 - compliance_checker - ERROR - Error in IRS diversification check for P21026: 'net_market_value'
+2025-10-31 18:37:24,501 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:37:24,508 - compliance_checker - ERROR - Error in IRS diversification check for TR2B1: 'net_market_value'
+2025-10-31 18:37:24,539 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:37:24,547 - compliance_checker - ERROR - Error in IRS diversification check for TR2B2: 'net_market_value'
+2025-10-31 18:37:24,580 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:37:24,585 - compliance_checker - ERROR - Error in IRS diversification check for R21126: 'net_market_value'
+2025-10-31 18:37:24,615 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:37:24,622 - compliance_checker - ERROR - Error in IRS diversification check for P3727: 'net_market_value'
+2025-10-31 18:37:48,559 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:37:48,565 - compliance_checker - ERROR - Error in IRS diversification check for HE3B1: 'net_market_value'
+2025-10-31 18:37:48,598 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:37:48,606 - compliance_checker - ERROR - Error in IRS diversification check for P20127: 'net_market_value'
+2025-10-31 18:37:48,642 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:37:48,646 - compliance_checker - ERROR - Error in IRS diversification check for P2726: 'net_market_value'
+2025-10-31 18:37:48,677 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:37:48,683 - compliance_checker - ERROR - Error in IRS diversification check for P31027: 'net_market_value'
+2025-10-31 18:37:48,712 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:37:48,720 - compliance_checker - ERROR - Error in IRS diversification check for HE3B2: 'net_market_value'
+2025-10-31 18:37:48,754 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:37:48,761 - compliance_checker - ERROR - Error in IRS diversification check for P30128: 'net_market_value'
+2025-10-31 18:37:48,801 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:37:48,808 - compliance_checker - ERROR - Error in IRS diversification check for P21026: 'net_market_value'
+2025-10-31 18:37:48,846 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:37:48,852 - compliance_checker - ERROR - Error in IRS diversification check for TR2B1: 'net_market_value'
+2025-10-31 18:37:48,882 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:37:48,887 - compliance_checker - ERROR - Error in IRS diversification check for TR2B2: 'net_market_value'
+2025-10-31 18:37:48,916 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:37:48,922 - compliance_checker - ERROR - Error in IRS diversification check for R21126: 'net_market_value'
+2025-10-31 18:37:48,955 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:37:48,961 - compliance_checker - ERROR - Error in IRS diversification check for P3727: 'net_market_value'
+2025-10-31 18:38:12,819 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:38:12,826 - compliance_checker - ERROR - Error in IRS diversification check for HE3B1: 'net_market_value'
+2025-10-31 18:38:12,858 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:38:12,862 - compliance_checker - ERROR - Error in IRS diversification check for P20127: 'net_market_value'
+2025-10-31 18:38:12,893 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:38:12,897 - compliance_checker - ERROR - Error in IRS diversification check for P2726: 'net_market_value'
+2025-10-31 18:38:12,930 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:38:12,935 - compliance_checker - ERROR - Error in IRS diversification check for P31027: 'net_market_value'
+2025-10-31 18:38:12,965 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:38:12,973 - compliance_checker - ERROR - Error in IRS diversification check for HE3B2: 'net_market_value'
+2025-10-31 18:38:13,007 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:38:13,013 - compliance_checker - ERROR - Error in IRS diversification check for P30128: 'net_market_value'
+2025-10-31 18:38:13,053 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:38:13,060 - compliance_checker - ERROR - Error in IRS diversification check for P21026: 'net_market_value'
+2025-10-31 18:38:13,100 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:38:13,107 - compliance_checker - ERROR - Error in IRS diversification check for TR2B1: 'net_market_value'
+2025-10-31 18:38:13,139 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:38:13,147 - compliance_checker - ERROR - Error in IRS diversification check for TR2B2: 'net_market_value'
+2025-10-31 18:38:13,178 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:38:13,183 - compliance_checker - ERROR - Error in IRS diversification check for R21126: 'net_market_value'
+2025-10-31 18:38:13,215 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:38:13,220 - compliance_checker - ERROR - Error in IRS diversification check for P3727: 'net_market_value'
+2025-10-31 18:38:37,402 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:38:37,409 - compliance_checker - ERROR - Error in IRS diversification check for HE3B1: 'net_market_value'
+2025-10-31 18:38:37,440 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:38:37,448 - compliance_checker - ERROR - Error in IRS diversification check for P20127: 'net_market_value'
+2025-10-31 18:38:37,477 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:38:37,485 - compliance_checker - ERROR - Error in IRS diversification check for P2726: 'net_market_value'
+2025-10-31 18:38:37,515 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:38:37,523 - compliance_checker - ERROR - Error in IRS diversification check for P31027: 'net_market_value'
+2025-10-31 18:38:37,551 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:38:37,558 - compliance_checker - ERROR - Error in IRS diversification check for HE3B2: 'net_market_value'
+2025-10-31 18:38:37,593 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:38:37,601 - compliance_checker - ERROR - Error in IRS diversification check for P30128: 'net_market_value'
+2025-10-31 18:38:37,638 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:38:37,646 - compliance_checker - ERROR - Error in IRS diversification check for P21026: 'net_market_value'
+2025-10-31 18:38:37,683 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:38:37,689 - compliance_checker - ERROR - Error in IRS diversification check for TR2B1: 'net_market_value'
+2025-10-31 18:38:37,720 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:38:37,727 - compliance_checker - ERROR - Error in IRS diversification check for TR2B2: 'net_market_value'
+2025-10-31 18:38:37,758 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:38:37,766 - compliance_checker - ERROR - Error in IRS diversification check for R21126: 'net_market_value'
+2025-10-31 18:38:37,808 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:38:37,818 - compliance_checker - ERROR - Error in IRS diversification check for P3727: 'net_market_value'
+2025-10-31 18:39:01,924 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:39:01,929 - compliance_checker - ERROR - Error in IRS diversification check for HE3B1: 'net_market_value'
+2025-10-31 18:39:01,960 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:39:01,965 - compliance_checker - ERROR - Error in IRS diversification check for P20127: 'net_market_value'
+2025-10-31 18:39:02,000 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:39:02,007 - compliance_checker - ERROR - Error in IRS diversification check for P2726: 'net_market_value'
+2025-10-31 18:39:02,037 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:39:02,043 - compliance_checker - ERROR - Error in IRS diversification check for P31027: 'net_market_value'
+2025-10-31 18:39:02,075 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:39:02,082 - compliance_checker - ERROR - Error in IRS diversification check for HE3B2: 'net_market_value'
+2025-10-31 18:39:02,113 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:39:02,120 - compliance_checker - ERROR - Error in IRS diversification check for P30128: 'net_market_value'
+2025-10-31 18:39:02,154 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:39:02,159 - compliance_checker - ERROR - Error in IRS diversification check for P21026: 'net_market_value'
+2025-10-31 18:39:02,194 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:39:02,199 - compliance_checker - ERROR - Error in IRS diversification check for TR2B1: 'net_market_value'
+2025-10-31 18:39:02,231 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:39:02,238 - compliance_checker - ERROR - Error in IRS diversification check for TR2B2: 'net_market_value'
+2025-10-31 18:39:02,266 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:39:02,272 - compliance_checker - ERROR - Error in IRS diversification check for R21126: 'net_market_value'
+2025-10-31 18:39:02,301 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:39:02,306 - compliance_checker - ERROR - Error in IRS diversification check for P3727: 'net_market_value'
+2025-10-31 18:39:26,615 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:39:26,620 - compliance_checker - ERROR - Error in IRS diversification check for HE3B1: 'net_market_value'
+2025-10-31 18:39:26,651 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:39:26,656 - compliance_checker - ERROR - Error in IRS diversification check for P20127: 'net_market_value'
+2025-10-31 18:39:26,686 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:39:26,691 - compliance_checker - ERROR - Error in IRS diversification check for P2726: 'net_market_value'
+2025-10-31 18:39:26,723 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:39:26,729 - compliance_checker - ERROR - Error in IRS diversification check for P31027: 'net_market_value'
+2025-10-31 18:39:26,760 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:39:26,766 - compliance_checker - ERROR - Error in IRS diversification check for HE3B2: 'net_market_value'
+2025-10-31 18:39:26,799 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:39:26,806 - compliance_checker - ERROR - Error in IRS diversification check for P30128: 'net_market_value'
+2025-10-31 18:39:26,846 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:39:26,853 - compliance_checker - ERROR - Error in IRS diversification check for P21026: 'net_market_value'
+2025-10-31 18:39:26,894 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:39:26,900 - compliance_checker - ERROR - Error in IRS diversification check for TR2B1: 'net_market_value'
+2025-10-31 18:39:26,928 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:39:26,936 - compliance_checker - ERROR - Error in IRS diversification check for TR2B2: 'net_market_value'
+2025-10-31 18:39:26,969 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:39:26,975 - compliance_checker - ERROR - Error in IRS diversification check for R21126: 'net_market_value'
+2025-10-31 18:39:27,006 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:39:27,012 - compliance_checker - ERROR - Error in IRS diversification check for P3727: 'net_market_value'
+2025-10-31 18:45:05,855 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:45:06,231 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:45:06,577 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:45:06,856 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:45:07,142 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:45:07,756 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:45:08,012 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:45:08,238 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:45:08,535 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:45:09,114 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:45:09,377 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:45:47,232 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:45:47,407 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:45:47,597 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:45:47,768 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:45:47,917 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:45:48,170 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:45:48,302 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:45:48,450 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:45:48,580 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:45:48,816 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:45:48,949 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:46:14,888 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:46:14,894 - compliance_checker - ERROR - Error in IRS diversification check for HE3B1: 'net_market_value'
+2025-10-31 18:46:14,924 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:46:14,929 - compliance_checker - ERROR - Error in IRS diversification check for P20127: 'net_market_value'
+2025-10-31 18:46:14,967 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:46:14,974 - compliance_checker - ERROR - Error in IRS diversification check for P2726: 'net_market_value'
+2025-10-31 18:46:15,008 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:46:15,014 - compliance_checker - ERROR - Error in IRS diversification check for P31027: 'net_market_value'
+2025-10-31 18:46:15,044 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:46:15,052 - compliance_checker - ERROR - Error in IRS diversification check for HE3B2: 'net_market_value'
+2025-10-31 18:46:15,092 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:46:15,099 - compliance_checker - ERROR - Error in IRS diversification check for P30128: 'net_market_value'
+2025-10-31 18:46:15,139 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:46:15,146 - compliance_checker - ERROR - Error in IRS diversification check for P21026: 'net_market_value'
+2025-10-31 18:46:15,193 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:46:15,197 - compliance_checker - ERROR - Error in IRS diversification check for TR2B1: 'net_market_value'
+2025-10-31 18:46:15,242 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:46:15,250 - compliance_checker - ERROR - Error in IRS diversification check for TR2B2: 'net_market_value'
+2025-10-31 18:46:15,286 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:46:15,292 - compliance_checker - ERROR - Error in IRS diversification check for R21126: 'net_market_value'
+2025-10-31 18:46:15,333 - compliance_checker - INFO - Running compliance tests for P3727
+2025-10-31 18:46:15,340 - compliance_checker - ERROR - Error in IRS diversification check for P3727: 'net_market_value'
+2025-10-31 18:46:42,770 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-10-31 18:46:42,889 - compliance_checker - INFO - Running compliance tests for P20127
+2025-10-31 18:46:43,006 - compliance_checker - INFO - Running compliance tests for P2726
+2025-10-31 18:46:43,126 - compliance_checker - INFO - Running compliance tests for P31027
+2025-10-31 18:46:43,238 - compliance_checker - INFO - Running compliance tests for HE3B2
+2025-10-31 18:46:43,496 - compliance_checker - INFO - Running compliance tests for P30128
+2025-10-31 18:46:43,620 - compliance_checker - INFO - Running compliance tests for P21026
+2025-10-31 18:46:43,743 - compliance_checker - INFO - Running compliance tests for TR2B1
+2025-10-31 18:46:43,870 - compliance_checker - INFO - Running compliance tests for TR2B2
+2025-10-31 18:46:44,102 - compliance_checker - INFO - Running compliance tests for R21126
+2025-10-31 18:46:44,245 - compliance_checker - INFO - Running compliance tests for P3727
