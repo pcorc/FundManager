@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from config.fund_classifications import CLOSED_END_FUNDS, PRIVATE_FUNDS
+from config.fund_definitions import FUND_DEFINITIONS
 from reporting.base_report_pdf import BaseReportPDF
 from reporting.holdings_recon_renderer import HoldingsReconciliationRenderer
 from reporting.report_utils import normalize_reconciliation_payload, normalize_report_date

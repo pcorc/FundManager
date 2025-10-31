@@ -307,7 +307,7 @@ if __name__ == "__main__":
         "compliance_tests": [
             # "gics_compliance",
             # "prospectus_80pct_policy",
-            # "diversification_40act_check",
+            "diversification_40act_check",
             "diversification_IRS_check",
             # "diversification_IRC_check",
             # "max_15pct_illiquid_sai",

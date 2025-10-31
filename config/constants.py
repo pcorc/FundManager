@@ -33,3 +33,12 @@ RULE_12D2_INSURANCE_LIMIT: float = 0.05
 RULE_12D3_EQUITY_LIMIT: float = 0.05
 RULE_12D3_DEBT_LIMIT: float = 0.25
 RULE_12D3_ASSET_LIMIT: float = 0.10
+
+# Vehicle helper tokens
+VEHICLE_CLOSED_END = "closed_end_fund"
+VEHICLE_PRIVATE = "private_fund"
+VEHICLE_ETF = "etf"
+VEHICLE_VIT = "vit"
+
+# Flex option helpers
+FLEX_BENCHMARK_TICKER = "SPX"

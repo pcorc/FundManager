@@ -31,6 +31,7 @@ from config.constants import (
     RULE_12D3_EQUITY_LIMIT,
     VEHICLE_CLOSED_END,
     VEHICLE_PRIVATE,
+    VEHICLE_VIT,
 )
 from domain.fund import Fund
 from utilities.logger import setup_logger
@@ -91,11 +92,6 @@ class ComplianceChecker:
         skip_tests_by_ticker: Dict[str, set[str]] = {
             "gics_compliance": {"DOGG"},  # Add tickers here to bypass the GICS test.
         }
-        whitelist_tests_by_ticker: Dict[str, set[str]] = {
-            # Only FTCSH should run the IRC diversification test.
-            "diversification_IRC_check": {"FTCSH"},
-        }
-
         if test_functions:
             requested = set(test_functions)
             available_tests = {
@@ -113,8 +109,10 @@ class ComplianceChecker:
                 if fund_name in excluded_funds:
                     continue
 
-                whitelist = whitelist_tests_by_ticker.get(test_name)
-                if whitelist is not None and fund_name not in whitelist:
+                if (
+                    test_name == "diversification_IRC_check"
+                    and (fund.vehicle or "").lower() != VEHICLE_VIT
+                ):
                     continue
 
                 try:
@@ -317,84 +315,20 @@ class ComplianceChecker:
             )
             holdings_df = self._fill_numeric_defaults(holdings_df)
 
-            if "equity_ticker" in holdings_df.columns:
-                mask_google = holdings_df["ticker"].isin(["GOOG", "GOOGL"])
-                if mask_google.any():
-                    tmp = holdings_df.copy()
-                    tmp["ticker"] = np.where(
-                        tmp["ticker"].isin(["GOOG", "GOOGL"]),
-                        "GOOGLE",
-                        tmp["ticker"],
-                    )
-                    num_cols = tmp.select_dtypes(include=[np.number]).columns.tolist()
-                    holdings_df = (
-                        tmp.groupby("ticker", as_index=False)
-                        .agg(
-                            {
-                                **{
-                                    c: "first"
-                                    for c in tmp.columns
-                                    if c not in num_cols and c != "ticker"
-                                },
-                                **{c: "sum" for c in num_cols},
-                            }
-                        )
-                        .copy()
-                    )
-
-            holdings_df["flex_market_value"] = 0.0
-
-            if fund.has_flex_option and fund.is_closed_end_fund:
-                flex_mask = holdings_df["equity_ticker"].isin(["SPX", "XSP"])
-                if "optticker" in holdings_df.columns:
-                    flex_mask |= holdings_df["optticker"].astype(str).str.startswith(("SPX", "XSP"))
-
-                if flex_mask.any():
-                    flex_options = holdings_df.loc[flex_mask].copy()
-                    qty_col = None
-                    if "quantity_option" in flex_options.columns:
-                        qty_col = "quantity_option"
-                    elif "quantity" in flex_options.columns:
-                        qty_col = "quantity"
-
-                    if qty_col:
-                        long_flex = flex_options[flex_options[qty_col] > 0]
-                    else:
-                        long_flex = flex_options[flex_options["option_market_value"] > 0]
-
-                    total_flex_mv = float(long_flex["option_market_value"].sum())
-
-                    if total_flex_mv > 0 and not overlap_df.empty:
-                        overlap = overlap_df[["security_ticker", "security_weight"]].drop_duplicates()
-
-                        holdings_df = holdings_df.merge(
-                            overlap,
-                            left_on="equity_ticker",
-                            right_on="security_ticker",
-                            how="left",
-                        )
-
-                        holdings_df["security_weight"] = (
-                            pd.to_numeric(holdings_df["security_weight"], errors="coerce").fillna(0.0)
-                        )
-                        holdings_df["flex_market_value"] = (
-                            total_flex_mv * holdings_df["security_weight"]
-                        )
-                        holdings_df = holdings_df.drop(columns=["security_ticker"], errors="ignore")
-
-                        flex_mask_updated = holdings_df["equity_ticker"].isin(["SPX", "XSP"])
-                        if "optticker" in holdings_df.columns:
-                            flex_mask_updated |= holdings_df["optticker"].astype(str).str.startswith(("SPX", "XSP"))
-                        holdings_df = holdings_df.loc[~flex_mask_updated].reset_index(drop=True)
-
-            holdings_df["net_market_value"] = (
-                holdings_df["equity_market_value"] + holdings_df["flex_market_value"]
+            holdings_df = self._reweight_holdings_by_issuer(
+                fund,
+                holdings_df,
+                overlap_df=overlap_df,
             )
-
             if total_assets:
                 holdings_df["weight"] = holdings_df["net_market_value"] / total_assets
             else:
                 holdings_df["weight"] = 0.0
+
+            if total_net_assets:
+                holdings_df["tna_wgt"] = holdings_df["net_market_value"] / total_net_assets
+            else:
+                holdings_df["tna_wgt"] = 0.0
 
             if total_net_assets:
                 holdings_df["tna_wgt"] = holdings_df["equity_market_value"] / total_net_assets
@@ -539,25 +473,22 @@ class ComplianceChecker:
             total_assets, total_net_assets = self._get_total_assets(fund)
             expenses = self._get_expenses(fund)
 
-            required_opt_cols = [
-                "option_notional_value",
-                "option_market_value",
-                "option_delta_adjusted_notional",
-                "option_delta_adjusted_market_value",
-            ]
+            if "option_market_value" in vest_opt_holdings.columns:
+                vest_opt_holdings["option_market_value"] = pd.to_numeric(
+                    vest_opt_holdings["option_market_value"], errors="coerce"
+                ).fillna(0.0)
+            else:
+                vest_opt_holdings["option_market_value"] = 0.0
 
-            for col in required_opt_cols:
-                if col not in vest_opt_holdings.columns:
-                    vest_opt_holdings[col] = 0.0
-                else:
-                    vest_opt_holdings[col] = pd.to_numeric(
-                        vest_opt_holdings[col], errors="coerce"
-                    ).fillna(0.0)
+            registration = (fund.diversification_status or "unknown").replace("_", "-")
+            fund_registration = registration.lower()
 
-            fund_registration = "Diversified" if fund.name in DIVERSIFIED_FUNDS else "Non-diversified"
-
-            if fund.name in {"RDVI", "SDVD", "TDVI", "FTCSH", "FDND", "FGSI"}:
+            if fund.has_listed_option and fund.listed_option_type == "index":
                 holdings_df = vest_eqy_holdings.copy()
+                holdings_df["equity_market_value"] = pd.to_numeric(
+                    holdings_df.get("equity_market_value", 0.0), errors="coerce"
+                ).fillna(0.0)
+                holdings_df["option_market_value"] = 0.0
                 holdings_df["net_market_value"] = holdings_df["equity_market_value"]
             else:
                 holdings_df = pd.merge(
@@ -568,13 +499,15 @@ class ComplianceChecker:
                     right_on="equity_ticker",
                     suffixes=("", "_opt"),
                 )
-                for col in required_opt_cols:
-                    if col not in holdings_df.columns:
-                        holdings_df[col] = 0.0
-                    else:
-                        holdings_df[col] = pd.to_numeric(holdings_df[col], errors="coerce").fillna(0.0)
-                if "equity_market_value" not in holdings_df.columns:
-                    holdings_df["equity_market_value"] = 0.0
+                holdings_df["equity_market_value"] = pd.to_numeric(
+                    holdings_df.get("equity_market_value", 0.0), errors="coerce"
+                ).fillna(0.0)
+                if "option_market_value" in holdings_df.columns:
+                    holdings_df["option_market_value"] = pd.to_numeric(
+                        holdings_df["option_market_value"], errors="coerce"
+                    ).fillna(0.0)
+                else:
+                    holdings_df["option_market_value"] = 0.0
                 holdings_df["net_market_value"] = (
                     holdings_df["equity_market_value"] + holdings_df["option_market_value"]
                 )
@@ -664,6 +597,17 @@ class ComplianceChecker:
                 else 0.0
             )
 
+            actual_diversified = all(
+                [condition_1_met, condition_2a_met, condition_2b_met, condition_2a_occ_met]
+            )
+            fund_status_today = "diversified" if actual_diversified else "non-diversified"
+
+            if fund_registration in {"diversified", "non-diversified"}:
+                expected_diversified = fund_registration == "diversified"
+            else:
+                expected_diversified = actual_diversified
+            expected_status = "diversified" if expected_diversified else "non-diversified"
+
             calculations = {
                 "fund_registration": fund_registration,
                 "total_assets": total_assets,
@@ -688,6 +632,8 @@ class ComplianceChecker:
                 "condition_2a_occ_met": condition_2a_occ_met,
                 "occ_market_value": occ_weight_mkt_val,
                 "occ_weight": occ_weight_mkt_val / total_assets if total_assets else 0.0,
+                "fund_status_today": fund_status_today,
+                "expected_fund_status": expected_status,
             }
 
             diversification_failure_duration = None
@@ -731,9 +677,11 @@ class ComplianceChecker:
                 "condition_40act_2a_occ": condition_2a_occ_met,
                 "diversified_since_inception_40act": condition_1_met and condition_2a_met and condition_2b_met,
                 "diversification_failure_duration_40act": diversification_failure_duration,
+                "expected_registration_status": expected_status,
+                "actual_registration_status": fund_status_today,
             }
 
-            is_compliant = condition_1_met and condition_2a_met and condition_2b_met and condition_2a_occ_met
+            is_compliant = actual_diversified == expected_diversified
 
             return ComplianceResult(
                 is_compliant=is_compliant,
@@ -750,6 +698,17 @@ class ComplianceChecker:
             )
 
     def diversification_IRC_check(self, fund: Fund) -> ComplianceResult:
+        if (fund.vehicle or "").lower() != VEHICLE_VIT:
+            return ComplianceResult(
+                is_compliant=True,
+                details={
+                    "rule": "IRC Diversification",
+                    "skipped": True,
+                    "reason": "IRC diversification applies only to VIT vehicles",
+                },
+                calculations={},
+            )
+
         try:
             vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
             total_assets, total_net_assets = self._get_total_assets(fund)
@@ -1343,6 +1302,165 @@ class ComplianceChecker:
         treasury = getattr(fund.data.current.vest, "treasury", pd.DataFrame())
 
         return equity.copy(), options.copy(), treasury.copy()
+
+    def _reweight_holdings_by_issuer(
+        self,
+        fund: Fund,
+        holdings_df: pd.DataFrame,
+        *,
+        overlap_df: Optional[pd.DataFrame] = None,
+    ) -> pd.DataFrame:
+        """Consolidate issuer exposure for private and closed-end funds."""
+
+        if holdings_df.empty:
+            return holdings_df.copy()
+
+        df = holdings_df.copy()
+        df["equity_market_value"] = pd.to_numeric(
+            df.get("equity_market_value", 0.0), errors="coerce"
+        ).fillna(0.0)
+        if "option_market_value" in df.columns:
+            df["option_market_value"] = pd.to_numeric(
+                df["option_market_value"], errors="coerce"
+            ).fillna(0.0)
+        else:
+            df["option_market_value"] = 0.0
+
+        if "long_box_market_value_overlap" not in df.columns:
+            df["long_box_market_value_overlap"] = 0.0
+        if "call_overwrite_market_value" not in df.columns:
+            df["call_overwrite_market_value"] = 0.0
+
+        is_private_or_closed_end = fund.is_private_fund or fund.is_closed_end_fund
+        if not is_private_or_closed_end:
+            df["net_market_value"] = (
+                df["equity_market_value"]
+                + pd.to_numeric(df["long_box_market_value_overlap"], errors="coerce").fillna(0.0)
+                - pd.to_numeric(df["call_overwrite_market_value"], errors="coerce").fillna(0.0)
+            )
+            return df
+
+        if "equity_ticker" in df.columns and "ticker" in df.columns:
+            mask_google = df["ticker"].isin(["GOOG", "GOOGL"])
+            if mask_google.any():
+                tmp = df.copy()
+                tmp["ticker"] = np.where(
+                    tmp["ticker"].isin(["GOOG", "GOOGL"]), "GOOGLE", tmp["ticker"]
+                )
+                num_cols = tmp.select_dtypes(include=[np.number]).columns.tolist()
+                df = (
+                    tmp.groupby("ticker", as_index=False)
+                    .agg(
+                        {
+                            **{
+                                c: "first"
+                                for c in tmp.columns
+                                if c not in num_cols and c != "ticker"
+                            },
+                            **{c: "sum" for c in num_cols},
+                        }
+                    )
+                    .copy()
+                )
+                if "equity_ticker" in df.columns:
+                    df["equity_ticker"] = np.where(
+                        df["ticker"] == "GOOGLE", "GOOGLE", df["equity_ticker"]
+                    )
+
+        df["long_box_market_value_overlap"] = pd.to_numeric(
+            df["long_box_market_value_overlap"], errors="coerce"
+        ).fillna(0.0)
+
+        if (
+            fund.has_flex_option
+            and fund.flex_option_type == "index"
+            and overlap_df is not None
+            and not overlap_df.empty
+        ):
+            if "equity_ticker" in df.columns:
+                flex_mask = df["equity_ticker"].isin(["SPX", "XSP"])
+            else:
+                flex_mask = pd.Series(False, index=df.index)
+            if "optticker" in df.columns:
+                flex_mask = flex_mask | df["optticker"].astype(str).str.startswith(("SPX", "XSP"))
+
+            if flex_mask.any():
+                flex_options = df.loc[flex_mask].copy()
+                qty_col = None
+                if "quantity_option" in flex_options.columns:
+                    qty_col = "quantity_option"
+                elif "quantity" in flex_options.columns:
+                    qty_col = "quantity"
+
+                if qty_col:
+                    quantities = pd.to_numeric(
+                        flex_options[qty_col], errors="coerce"
+                    ).fillna(0.0)
+                    long_flex = flex_options.loc[quantities > 0].copy()
+                else:
+                    long_flex = flex_options.loc[
+                        pd.to_numeric(
+                            flex_options["option_market_value"], errors="coerce"
+                        ).fillna(0.0)
+                        > 0
+                    ].copy()
+
+                total_flex_mv = float(
+                    pd.to_numeric(
+                        long_flex["option_market_value"], errors="coerce"
+                    ).fillna(0.0).sum()
+                )
+
+                if total_flex_mv > 0:
+                    overlap = overlap_df[["security_ticker", "security_weight"]].drop_duplicates()
+                    overlap["security_weight"] = pd.to_numeric(
+                        overlap["security_weight"], errors="coerce"
+                    ).fillna(0.0)
+
+                    df = df.merge(
+                        overlap,
+                        left_on="equity_ticker",
+                        right_on="security_ticker",
+                        how="left",
+                    )
+
+                    df["security_weight"] = pd.to_numeric(
+                        df["security_weight"], errors="coerce"
+                    ).fillna(0.0)
+                    df["long_box_market_value_overlap"] = (
+                        total_flex_mv * df["security_weight"]
+                    )
+                    df = df.drop(columns=["security_ticker"], errors="ignore")
+
+                    flex_mask_updated = (
+                        df["equity_ticker"].isin(["SPX", "XSP"])
+                        if "equity_ticker" in df.columns
+                        else pd.Series(False, index=df.index)
+                    )
+                    if "optticker" in df.columns:
+                        flex_mask_updated = flex_mask_updated | df["optticker"].astype(str).str.startswith(("SPX", "XSP"))
+                    df = df.loc[~flex_mask_updated].reset_index(drop=True)
+
+        df["call_overwrite_market_value"] = 0.0
+        if fund.has_listed_option and fund.listed_option_type == "single_stock":
+            option_mv = pd.to_numeric(df["option_market_value"], errors="coerce").fillna(0.0)
+            df["call_overwrite_market_value"] = option_mv.where(option_mv < 0, 0.0).abs()
+
+        df["long_box_market_value_overlap"] = pd.to_numeric(
+            df["long_box_market_value_overlap"], errors="coerce"
+        ).fillna(0.0)
+        df["call_overwrite_market_value"] = pd.to_numeric(
+            df["call_overwrite_market_value"], errors="coerce"
+        ).fillna(0.0)
+
+        df["net_market_value"] = (
+            df["equity_market_value"]
+            + df["long_box_market_value_overlap"]
+            - df["call_overwrite_market_value"]
+        )
+
+        return df
+
 
     @staticmethod
     def _fill_numeric_defaults(df: pd.DataFrame) -> pd.DataFrame:
