@@ -478,7 +478,6 @@ class BulkDataLoader:
                 )
 
         df = pd.read_sql(query.statement, self.session.bind)
-        df = self._augment_treasury_holdings(df, analysis_type=analysis_type)
 
         if analysis_type and 'analysis_type' in df.columns:
             mask = df['analysis_type'].astype(str).str.lower() == analysis_type.lower()
