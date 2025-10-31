@@ -3,10 +3,6 @@ import numpy as np
 import logging
 from dataclasses import dataclass
 from typing import Dict, Optional
-from config.fund_classifications import (
-    DIVERSIFIED_FUNDS, NON_DIVERSIFIED_FUNDS, PRIVATE_FUNDS,
-    CLOSED_END_FUNDS, FUNDS_WITH_SG_EQUITY
-)
 from domain.fund import Fund, FundSnapshot, FundHoldings
 
 
@@ -32,11 +28,13 @@ class Reconciliator:
             analysis_type: Type of analysis ('ex_ante', 'eod', etc.)
         """
         self.fund = fund
+        self.fund_name = fund.name
         self.analysis_type = analysis_type
         self.results: Dict[str, ReconciliationResult] = {}
         self._detailed_calculations: Dict[str, Dict] = {}
         self.logger = logging.getLogger(f"Reconciliator_{fund.name}")
-        self.is_etf = fund.name not in PRIVATE_FUNDS and fund.name not in CLOSED_END_FUNDS
+        self.is_etf = not fund.is_private_fund and not fund.is_closed_end_fund
+        self.has_sg_equity = bool(fund.config.get("sg_custodian_holdings"))
 
     # ------------------------------------------------------------------
     # Snapshot helpers
@@ -90,7 +88,7 @@ class Reconciliator:
         # Only run SG if not end-of-day
         if self.analysis_type != "eod":
             recon_funcs.append(("sg_option", self.reconcile_sg_option))
-            if self.fund_name in FUNDS_WITH_SG_EQUITY:
+            if self.has_sg_equity:
                 recon_funcs.append(("sg_equity", self.reconcile_sg_equity))
 
         for name, func in recon_funcs:
@@ -424,7 +422,7 @@ class Reconciliator:
             df_oms['market_value'] = df_oms['quantity'].fillna(0) * df_oms['price'].fillna(0) * 100
             df_oms['is_flex'] = (
                     df_oms['optticker'].str.contains("SPX|XSP", na=False) &
-                    (self.fund_name in PRIVATE_FUNDS or self.fund_name in CLOSED_END_FUNDS)
+                    (self.fund.is_private_fund or self.fund.is_closed_end_fund)
             )
 
             standard_option_mask = ~df_oms['is_flex']
@@ -473,7 +471,7 @@ class Reconciliator:
         df_issues['breakdown'] = breakdowns
         df_issues['is_flex'] = (
                 df_issues['optticker'].str.contains("SPX|XSP", na=False) &
-                (self.fund_name in PRIVATE_FUNDS or self.fund_name in CLOSED_END_FUNDS)
+                (self.fund.is_private_fund or self.fund.is_closed_end_fund)
         )
 
         # Separate FLEX and regular options
@@ -516,7 +514,7 @@ class Reconciliator:
             if not price_discrepancies.empty:
                 price_discrepancies['is_flex'] = (
                         price_discrepancies['optticker'].str.contains("SPX|XSP", na=False) &
-                        (self.fund_name in PRIVATE_FUNDS or self.fund_name in CLOSED_END_FUNDS)
+                        (self.fund.is_private_fund or self.fund.is_closed_end_fund)
                 )
 
                 # Add option weights
@@ -531,7 +529,7 @@ class Reconciliator:
                     price_discrepancies['option_weight'] = 0.0
 
                 # Filter standard options for private/closed-end funds
-                if self.fund_name in PRIVATE_FUNDS or self.fund_name in CLOSED_END_FUNDS:
+                if self.fund.is_private_fund or self.fund.is_closed_end_fund:
                     standard_price = price_discrepancies[~price_discrepancies['is_flex']].copy()
                     flex_price = price_discrepancies[price_discrepancies['is_flex']].copy()
 
@@ -560,7 +558,7 @@ class Reconciliator:
 
         if self.analysis_type != "eod":
             recon_keys["sg_option"] = ["final_recon", "price_discrepancies"]
-            if self.fund_name in FUNDS_WITH_SG_EQUITY:
+            if self.has_sg_equity:
                 recon_keys["sg_equity"] = ["final_recon", "price_discrepancies"]
 
         for recon_type, keys in recon_keys.items():
@@ -738,8 +736,8 @@ class Reconciliator:
             ])
 
         df_issues['is_flex'] = (
-            df_issues.get('optticker', pd.Series(dtype=str)).str.contains("SPX|XSP", na=False)
-            & (self.fund_name in PRIVATE_FUNDS or self.fund_name in CLOSED_END_FUNDS)
+            df_issues.get('optticker', pd.Series(dtype=str)).str.contains("SPX|XSP", na=False) &
+            (self.fund.is_private_fund or self.fund.is_closed_end_fund)
         )
 
         flex_issues = df_issues[df_issues['is_flex']].copy() if not df_issues.empty else pd.DataFrame()

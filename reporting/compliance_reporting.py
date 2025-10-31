@@ -475,6 +475,15 @@ class ComplianceReport:
                 else:
                     large_securities_str = "None"
 
+                overlap_records = calculations.get("overlap", []) or []
+                if overlap_records:
+                    overlap_summary = ", ".join(
+                        f"{item.get('security_ticker', '')}: {float(item.get('security_weight', 0) or 0):.2%}"
+                        for item in overlap_records
+                    )
+                else:
+                    overlap_summary = "None"
+
                 largest = calculations.get("bottom_50_largest", {}) or {}
                 second = calculations.get("bottom_50_second_largest", {}) or {}
 
@@ -512,6 +521,11 @@ class ComplianceReport:
                             int(calculations.get("large_securities_count", 0) or 0),
                         ),
                         ("large_securities", large_securities_str),
+                        (
+                            "overlap_weight",
+                            float(calculations.get("overlap_weight_sum", 0.0) or 0.0),
+                        ),
+                        ("overlap_constituents", overlap_summary),
                         (
                             "bottom_50_largest_holding",
                             f"{largest.get('equity_ticker', 'N/A')} ({float(largest.get('tna_wgt', 0) or 0):.2%})",

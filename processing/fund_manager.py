@@ -129,6 +129,7 @@ class FundManager:
             flows=self._extract_flow_value(fund_data_dict.get('flows', pd.DataFrame())),
             basket=fund_data_dict.get('basket', pd.DataFrame()),
             index=fund_data_dict.get('index', pd.DataFrame()),
+            overlap=fund_data_dict.get('overlap', pd.DataFrame()),
         )
 
         # Populate previous holdings (T-1) if available
@@ -153,6 +154,7 @@ class FundManager:
             flows=self._extract_flow_value(fund_data_dict.get('flows_t1', pd.DataFrame())),
             basket=fund_data_dict.get('basket_t1', pd.DataFrame()),
             index=fund_data_dict.get('index_t1', pd.DataFrame()),
+            overlap=fund_data_dict.get('overlap_t1', pd.DataFrame()),
         )
 
         # Populate additional data

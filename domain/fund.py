@@ -60,6 +60,7 @@ class FundSnapshot:
         flows: float = 0.0,
         basket: Optional[pd.DataFrame] = None,
         index: Optional[pd.DataFrame] = None,
+        overlap: Optional[pd.DataFrame] = None,
     ) -> None:
         self.vest = vest if isinstance(vest, FundHoldings) else FundHoldings()
         self.custodian = (
@@ -79,6 +80,9 @@ class FundSnapshot:
         self.flows = float(flows or 0.0)
         self.basket = basket if isinstance(basket, pd.DataFrame) else pd.DataFrame()
         self.index = index if isinstance(index, pd.DataFrame) else pd.DataFrame()
+        self.overlap = (
+            overlap if isinstance(overlap, pd.DataFrame) else pd.DataFrame()
+        )
 
     @staticmethod
     def _frame_value_sum(frame: pd.DataFrame, columns: Sequence[str]) -> Optional[float]:
@@ -261,8 +265,41 @@ class Fund:
         return float(getattr(self.data.current, "expenses", 0.0) or 0.0)
 
     @property
+    def vehicle(self) -> Optional[str]:
+        return self.config.get("vehicle_wrapper")
+
+    @property
     def is_private_fund(self) -> bool:
-        return self.config.get('strategy') == 'PF'  # Adjust based on your config
+        return (self.vehicle or "").lower() == "private_fund"
+
+    @property
+    def is_closed_end_fund(self) -> bool:
+        return (self.vehicle or "").lower() == "closed_end_fund"
+
+    @property
+    def has_equity(self) -> bool:
+        return bool(self.config.get("has_equity", True))
+
+    @property
+    def has_listed_option(self) -> bool:
+        return bool(self.config.get("has_listed_option", False))
+
+    @property
+    def has_flex_option(self) -> bool:
+        return bool(self.config.get("has_flex_option", False))
+
+    @property
+    def flex_option_type(self) -> Optional[str]:
+        value = self.config.get("flex_option_type")
+        return value if isinstance(value, str) and value else None
+
+    @property
+    def has_otc(self) -> bool:
+        return bool(self.config.get("has_otc", False))
+
+    @property
+    def has_treasury(self) -> bool:
+        return bool(self.config.get("has_treasury", False))
 
     @property
     def total_option_delta_adjusted_notional(self) -> float:
@@ -359,6 +396,14 @@ class Fund:
         return self._copy_dataframe(
             getattr(self.data.current.custodian, "treasury", pd.DataFrame())
         )
+
+    @property
+    def overlap_holdings(self) -> pd.DataFrame:
+        return self._copy_dataframe(getattr(self.data.current, "overlap", pd.DataFrame()))
+
+    @property
+    def previous_overlap_holdings(self) -> pd.DataFrame:
+        return self._copy_dataframe(getattr(self.data.previous, "overlap", pd.DataFrame()))
 
     @property
     def previous_treasury_holdings(self) -> pd.DataFrame:

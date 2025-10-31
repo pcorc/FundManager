@@ -71,6 +71,9 @@ class BulkDataLoader:
         self._bulk_load_index_data(
             data_store, all_funds, target_date, previous_date
         )
+        self._bulk_load_overlap_data(
+            data_store, all_funds, target_date, previous_date
+        )
         self._normalise_loaded_holdings(data_store)
 
 
@@ -1203,6 +1206,73 @@ class BulkDataLoader:
         )
         return pd.read_sql(query.statement, self.session.bind)
 
+    def _bulk_load_overlap_data(
+        self,
+        data_store: BulkDataStore,
+        all_funds: Dict,
+        target_date: date,
+        previous_date: Optional[date],
+    ) -> None:
+        """Retrieve FLEX overlap data for closed-end funds."""
+
+        for fund_name, fund in all_funds.items():
+            mapping = getattr(fund, 'mapping_data', {}) or {}
+            if (mapping.get('vehicle_wrapper') or '').lower() != 'closed_end_fund':
+                continue
+
+            current = self._query_overlap_table(fund, target_date)
+            previous = (
+                self._query_overlap_table(fund, previous_date)
+                if previous_date is not None
+                else pd.DataFrame()
+            )
+
+            if not current.empty:
+                self._store_fund_data(data_store, fund_name, 'overlap', current)
+            if not previous.empty:
+                self._store_fund_data(data_store, fund_name, 'overlap_t1', previous)
+
+    def _query_overlap_table(self, fund, target_date: Optional[date]) -> pd.DataFrame:
+        if target_date is None:
+            return pd.DataFrame()
+
+        mapping = getattr(fund, 'mapping_data', {}) or {}
+        table_name = mapping.get('overlap_table')
+        if not table_name:
+            return pd.DataFrame()
+
+        try:
+            table = getattr(self.base_cls.classes, table_name)
+        except AttributeError:
+            return pd.DataFrame()
+
+        security_col = self._get_table_column(table, 'security_ticker', 'ticker')
+        weight_col = self._get_table_column(table, 'security_weight', 'weight')
+        date_col = self._get_table_column(table, 'date', 'valuation_date')
+        if not all([security_col, weight_col, date_col]):
+            return pd.DataFrame()
+
+        query = self.session.query(
+            security_col.label('security_ticker'),
+            weight_col.label('security_weight'),
+        ).filter(date_col == target_date)
+
+        benchmark = mapping.get('overlap_benchmark_ticker')
+        benchmark_col = self._get_table_column(table, 'etf_ticker', 'fund_ticker')
+        if benchmark and benchmark_col is not None:
+            query = query.filter(benchmark_col == benchmark)
+
+        try:
+            df = pd.read_sql(query.statement, self.session.bind)
+        except Exception:
+            return pd.DataFrame()
+
+        if 'security_weight' in df.columns:
+            df['security_weight'] = (
+                pd.to_numeric(df['security_weight'], errors='coerce').fillna(0.0) / 100.0
+            )
+        return df
+
     def _bulk_load_index_data(
         self,
         data_store: BulkDataStore,
@@ -1280,8 +1350,6 @@ class BulkDataLoader:
         if previous_date is None:
             return current
         return current, previous
-
-
 
     def _resolve_index_identifier(self, fund) -> str:
         """Determine which identifier to use when filtering provider data."""

@@ -461,7 +461,10 @@ class ReconciliationReport:
         )
 
         worksheet = writer.sheets["RECONCILIATION BREAKS SUMMARY"]
-        has_private_or_closed = any(f in PRIVATE_FUNDS or f in CLOSED_END_FUNDS for f in funds)
+        has_private_or_closed = any(
+            (FUND_DEFINITIONS.get(f, {}).get("vehicle_wrapper") in {"private_fund", "closed_end_fund"})
+            for f in funds
+        )
         if has_private_or_closed:
             note_row = len(summary_df) + 3
             cell = worksheet.cell(row=note_row, column=1)

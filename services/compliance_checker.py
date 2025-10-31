@@ -7,45 +7,33 @@ from typing import Callable, Dict, Iterable, Mapping, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from config.constants import (
+    ACT_40_ISSUER_LIMIT,
+    ACT_40_OWNERSHIP_LIMIT,
+    ACT_40_QUALIFYING_ASSETS_MIN,
+    EQUITY_MIN_THRESHOLD,
+    ILLIQUID_MAX_THRESHOLD,
+    IRC_TOP_1_LIMIT,
+    IRC_TOP_2_LIMIT,
+    IRC_TOP_3_LIMIT,
+    IRC_TOP_4_LIMIT,
+    IRS_BOTTOM_50_LIMIT,
+    IRS_OWNERSHIP_LIMIT,
+    IRS_QUALIFYING_ASSETS_MIN,
+    PROSPECTUS_MIN_THRESHOLD,
+    PROSPECTUS_OPTIONS_FUNDS,
+    RULE_12D1A_OWNERSHIP_LIMIT,
+    RULE_12D1A_SINGLE_ASSETS_LIMIT,
+    RULE_12D1A_TOTAL_ASSETS_LIMIT,
+    RULE_12D2_INSURANCE_LIMIT,
+    RULE_12D3_ASSET_LIMIT,
+    RULE_12D3_DEBT_LIMIT,
+    RULE_12D3_EQUITY_LIMIT,
+    VEHICLE_CLOSED_END,
+    VEHICLE_PRIVATE,
+)
 from domain.fund import Fund
 from utilities.logger import setup_logger
-
-try:  # pragma: no cover - optional configuration module
-    from config import constants as config_constants  # type: ignore
-except Exception:  # pragma: no cover - the module is optional
-    config_constants = None
-
-
-def _constant(name: str, default):
-    if config_constants is None:
-        return default
-    return getattr(config_constants, name, default)
-
-
-PROSPECTUS_MIN_THRESHOLD: float = float(_constant("PROSPECTUS_MIN_THRESHOLD", 0.8))
-PROSPECTUS_OPTIONS_FUNDS = set(_constant("PROSPECTUS_OPTIONS_FUNDS", {"KNG", "KNGIX", "DOGG", "FTCSH", "FGSI"}))
-IRS_QUALIFYING_ASSETS_MIN: float = float(_constant("IRS_QUALIFYING_ASSETS_MIN", 0.5))
-IRS_BOTTOM_50_LIMIT: float = float(_constant("IRS_BOTTOM_50_LIMIT", 0.05))
-IRS_OWNERSHIP_LIMIT: float = float(_constant("IRS_OWNERSHIP_LIMIT", 0.1))
-CLOSED_END_FUNDS = set(_constant("CLOSED_END_FUNDS", set()))
-PRIVATE_FUNDS = set(_constant("PRIVATE_FUNDS", set()))
-DIVERSIFIED_FUNDS = set(_constant("DIVERSIFIED_FUNDS", set()))
-ACT_40_QUALIFYING_ASSETS_MIN: float = float(_constant("ACT_40_QUALIFYING_ASSETS_MIN", 0.75))
-ACT_40_ISSUER_LIMIT: float = float(_constant("ACT_40_ISSUER_LIMIT", 0.05))
-ACT_40_OWNERSHIP_LIMIT: float = float(_constant("ACT_40_OWNERSHIP_LIMIT", 0.1))
-RULE_12D1A_OWNERSHIP_LIMIT: float = float(_constant("RULE_12D1A_OWNERSHIP_LIMIT", 0.03))
-RULE_12D1A_SINGLE_ASSETS_LIMIT: float = float(_constant("RULE_12D1A_SINGLE_ASSETS_LIMIT", 0.05))
-RULE_12D1A_TOTAL_ASSETS_LIMIT: float = float(_constant("RULE_12D1A_TOTAL_ASSETS_LIMIT", 0.1))
-RULE_12D2_INSURANCE_LIMIT: float = float(_constant("RULE_12D2_INSURANCE_LIMIT", 0.05))
-RULE_12D3_EQUITY_LIMIT: float = float(_constant("RULE_12D3_EQUITY_LIMIT", 0.05))
-RULE_12D3_DEBT_LIMIT: float = float(_constant("RULE_12D3_DEBT_LIMIT", 0.25))
-RULE_12D3_ASSET_LIMIT: float = float(_constant("RULE_12D3_ASSET_LIMIT", 0.1))
-IRC_TOP_1_LIMIT: float = float(_constant("IRC_TOP_1_LIMIT", 0.55))
-IRC_TOP_2_LIMIT: float = float(_constant("IRC_TOP_2_LIMIT", 0.7))
-IRC_TOP_3_LIMIT: float = float(_constant("IRC_TOP_3_LIMIT", 0.8))
-IRC_TOP_4_LIMIT: float = float(_constant("IRC_TOP_4_LIMIT", 0.9))
-ILLIQUID_MAX_THRESHOLD: float = float(_constant("ILLIQUID_MAX_THRESHOLD", 0.15))
-EQUITY_MIN_THRESHOLD: float = float(_constant("EQUITY_MIN_THRESHOLD", 0.85))
 
 
 logger = setup_logger("compliance_checker", "compliance/logs/compliance_checker.log")
@@ -183,9 +171,29 @@ class ComplianceChecker:
                 fund.data.current.total_option_delta_adjusted_notional
             )
 
-            is_closed_end = fund.name in CLOSED_END_FUNDS
-            is_trif = is_closed_end and fund.name.startswith(("P3", "TR"))
+            is_closed_end = fund.is_closed_end_fund
+            if fund.vehicle == VEHICLE_PRIVATE:
+                calculations = {
+                    "total_equity_market_value": total_equity_market_value,
+                    "total_opt_market_value": total_opt_market_value,
+                    "total_tbill_value": total_tbill_value,
+                    "total_cash_value": total_cash_value,
+                    "total_assets": total_assets,
+                    "total_net_assets": total_net_assets,
+                }
 
+                return ComplianceResult(
+                    is_compliant=True,
+                    details={
+                        "rule": "80% Prospectus Policy",
+                        "skipped": True,
+                        "reason": "Private funds are excluded from the 80% test",
+                        "fund": fund.name,
+                    },
+                    calculations=calculations,
+                )
+
+            is_trif = is_closed_end and fund.name.startswith(("P3", "TR"))
             if is_trif:
                 calculations = {
                     "total_equity_market_value": total_equity_market_value,
@@ -208,7 +216,9 @@ class ComplianceChecker:
                 )
 
             is_b3_closed_end = is_closed_end and fund.name.endswith("B3")
-            options_in_scope = (fund.name in PROSPECTUS_OPTIONS_FUNDS) or is_b3_closed_end
+            options_in_scope = fund.has_listed_option and fund.name in PROSPECTUS_OPTIONS_FUNDS
+            if is_closed_end:
+                options_in_scope = fund.has_flex_option or fund.has_listed_option or is_b3_closed_end
 
             option_primary_amount = abs(total_opt_delta_notional_value)
             option_primary_method = "delta_adjusted_notional"
@@ -300,36 +310,31 @@ class ComplianceChecker:
             holdings_df = pd.merge(
                 vest_eqy_holdings,
                 vest_opt_holdings,
-                on="equity_ticker",
+                left_on="ticker",
+                right_on="equity_ticker",
                 how="outer",
                 suffixes=("", "_option"),
             )
             holdings_df = self._fill_numeric_defaults(holdings_df)
 
-            for col in ["equity_market_value", "option_market_value"]:
-                if col not in holdings_df.columns:
-                    holdings_df[col] = 0.0
-                else:
-                    holdings_df[col] = pd.to_numeric(holdings_df[col], errors="coerce").fillna(0.0)
-
             if "equity_ticker" in holdings_df.columns:
-                mask_google = holdings_df["equity_ticker"].isin(["GOOG", "GOOGL"])
+                mask_google = holdings_df["ticker"].isin(["GOOG", "GOOGL"])
                 if mask_google.any():
                     tmp = holdings_df.copy()
-                    tmp["equity_ticker"] = np.where(
-                        tmp["equity_ticker"].isin(["GOOG", "GOOGL"]),
+                    tmp["ticker"] = np.where(
+                        tmp["ticker"].isin(["GOOG", "GOOGL"]),
                         "GOOGLE",
-                        tmp["equity_ticker"],
+                        tmp["ticker"],
                     )
                     num_cols = tmp.select_dtypes(include=[np.number]).columns.tolist()
                     holdings_df = (
-                        tmp.groupby("equity_ticker", as_index=False)
+                        tmp.groupby("ticker", as_index=False)
                         .agg(
                             {
                                 **{
                                     c: "first"
                                     for c in tmp.columns
-                                    if c not in num_cols and c != "equity_ticker"
+                                    if c not in num_cols and c != "ticker"
                                 },
                                 **{c: "sum" for c in num_cols},
                             }
@@ -339,47 +344,48 @@ class ComplianceChecker:
 
             holdings_df["flex_market_value"] = 0.0
 
-            flex_mask = holdings_df["equity_ticker"].isin(["SPX", "XSP"])
-            if "optticker" in holdings_df.columns:
-                flex_mask = flex_mask | holdings_df["optticker"].astype(str).str.startswith(("SPX", "XSP"))
+            if fund.has_flex_option and fund.is_closed_end_fund:
+                flex_mask = holdings_df["equity_ticker"].isin(["SPX", "XSP"])
+                if "optticker" in holdings_df.columns:
+                    flex_mask |= holdings_df["optticker"].astype(str).str.startswith(("SPX", "XSP"))
 
-            is_closed_end_fund = fund.name in CLOSED_END_FUNDS
+                if flex_mask.any():
+                    flex_options = holdings_df.loc[flex_mask].copy()
+                    qty_col = None
+                    if "quantity_option" in flex_options.columns:
+                        qty_col = "quantity_option"
+                    elif "quantity" in flex_options.columns:
+                        qty_col = "quantity"
 
-            if flex_mask.any() and is_closed_end_fund:
-                flex_options = holdings_df.loc[flex_mask].copy()
-                qty_col = None
-                if "quantity_option" in flex_options.columns:
-                    qty_col = "quantity_option"
-                elif "quantity" in flex_options.columns:
-                    qty_col = "quantity"
+                    if qty_col:
+                        long_flex = flex_options[flex_options[qty_col] > 0]
+                    else:
+                        long_flex = flex_options[flex_options["option_market_value"] > 0]
 
-                if qty_col:
-                    long_flex = flex_options[flex_options[qty_col] > 0]
-                else:
-                    long_flex = flex_options[flex_options["option_market_value"] > 0]
+                    total_flex_mv = float(long_flex["option_market_value"].sum())
 
-                total_flex_mv = float(long_flex["option_market_value"].sum())
+                    if total_flex_mv > 0 and not overlap_df.empty:
+                        overlap = overlap_df[["security_ticker", "security_weight"]].drop_duplicates()
 
-                if total_flex_mv > 0 and not overlap_df.empty:
-                    overlap = overlap_df[["security_ticker", "security_weight"]].drop_duplicates()
+                        holdings_df = holdings_df.merge(
+                            overlap,
+                            left_on="equity_ticker",
+                            right_on="security_ticker",
+                            how="left",
+                        )
 
-                    holdings_df = holdings_df.merge(
-                        overlap,
-                        left_on="equity_ticker",
-                        right_on="security_ticker",
-                        how="left",
-                    )
+                        holdings_df["security_weight"] = (
+                            pd.to_numeric(holdings_df["security_weight"], errors="coerce").fillna(0.0)
+                        )
+                        holdings_df["flex_market_value"] = (
+                            total_flex_mv * holdings_df["security_weight"]
+                        )
+                        holdings_df = holdings_df.drop(columns=["security_ticker"], errors="ignore")
 
-                    holdings_df["security_weight"] = (
-                        pd.to_numeric(holdings_df["security_weight"], errors="coerce").fillna(0.0)
-                    )
-                    holdings_df["flex_market_value"] = total_flex_mv * holdings_df["security_weight"]
-                    holdings_df = holdings_df.drop(columns=["security_ticker"], errors="ignore")
-
-                    flex_mask_updated = holdings_df["equity_ticker"].isin(["SPX", "XSP"])
-                    if "optticker" in holdings_df.columns:
-                        flex_mask_updated |= holdings_df["optticker"].astype(str).str.startswith(("SPX", "XSP"))
-                    holdings_df = holdings_df.loc[~flex_mask_updated].reset_index(drop=True)
+                        flex_mask_updated = holdings_df["equity_ticker"].isin(["SPX", "XSP"])
+                        if "optticker" in holdings_df.columns:
+                            flex_mask_updated |= holdings_df["optticker"].astype(str).str.startswith(("SPX", "XSP"))
+                        holdings_df = holdings_df.loc[~flex_mask_updated].reset_index(drop=True)
 
             holdings_df["net_market_value"] = (
                 holdings_df["equity_market_value"] + holdings_df["flex_market_value"]
@@ -483,6 +489,12 @@ class ComplianceChecker:
                 if "exceeds_10_percent" in bottom_50_df
                 else 0,
                 "large_securities": large_securities.to_dict("records"),
+                "overlap": overlap_df.to_dict("records"),
+                "overlap_weight_sum": float(
+                    overlap_df["security_weight"].sum()
+                )
+                if "security_weight" in overlap_df.columns
+                else 0.0,
             }
 
             is_compliant = all(
@@ -509,7 +521,7 @@ class ComplianceChecker:
             )
 
     def diversification_40act_check(self, fund: Fund) -> ComplianceResult:
-        if fund.name in PRIVATE_FUNDS:
+        if fund.is_private_fund:
             return ComplianceResult(
                 is_compliant=True,
                 details={
@@ -1373,27 +1385,29 @@ class ComplianceChecker:
             return 0.0
 
     def _get_overlap(self, fund: Fund) -> pd.DataFrame:
-        overlap = getattr(fund.data.current, "index", pd.DataFrame())
+        overlap = getattr(fund.data.current, "overlap", pd.DataFrame())
         if not isinstance(overlap, pd.DataFrame) or overlap.empty:
             return pd.DataFrame(columns=["security_ticker", "security_weight"])
 
         overlap = overlap.copy()
-        ticker_column = self._resolve_column(
-            overlap,
-            ["security_ticker", "ticker", "symbol", "equity_ticker"],
-        )
-        if ticker_column and ticker_column != "security_ticker":
-            overlap["security_ticker"] = overlap[ticker_column]
+        if "security_ticker" not in overlap.columns:
+            ticker_column = self._resolve_column(
+                overlap,
+                ["security_ticker", "ticker", "symbol", "equity_ticker"],
+            )
+            if ticker_column:
+                overlap["security_ticker"] = overlap[ticker_column]
 
-        weight_column = self._resolve_column(
-            overlap,
-            ["security_weight", "weight", "index_weight", "wgt"],
-        )
-        if weight_column and weight_column != "security_weight":
-            overlap["security_weight"] = overlap[weight_column]
+        if "security_weight" not in overlap.columns:
+            weight_column = self._resolve_column(
+                overlap,
+                ["security_weight", "weight", "index_weight", "wgt"],
+            )
+            if weight_column:
+                overlap["security_weight"] = overlap[weight_column]
 
         overlap["security_weight"] = pd.to_numeric(
-            overlap["security_weight"], errors="coerce"
+            overlap.get("security_weight", pd.Series(dtype=float)), errors="coerce"
         ).fillna(0.0)
         return overlap[["security_ticker", "security_weight"]]
 
