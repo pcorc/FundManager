@@ -127,6 +127,42 @@ class BulkDataLoader:
                     )
                     continue
 
+                for fund in funds:
+                    fund_name = fund.name
+                    fund_data = self._filter_by_fund(
+                        all_data, fund_name, fund.mapping_data
+                    )
+
+                    date_column = self._find_date_column(
+                        fund_data,
+                        'date',
+                        'process_date',
+                        'trade_date',
+                        'effective_date',
+                    )
+
+                    current, previous = self._split_current_previous(
+                        fund_data,
+                        date_column,
+                        target_date,
+                        previous_date,
+                    )
+
+                    self._store_fund_data(
+                        data_store,
+                        fund_name,
+                        payload_key,
+                        current,
+                    )
+
+                    if previous_date is not None:
+                        self._store_fund_data(
+                            data_store,
+                            fund_name,
+                            payload_key_t1,
+                            previous,
+                        )
+
     def _normalise_loaded_holdings(self, data_store: BulkDataStore) -> None:
         """
         For each fund in data_store, normalise OMS and custodian holdings for T and T-1,
@@ -364,7 +400,12 @@ class BulkDataLoader:
                 query, date_column, target_date, previous_date
             )
 
-        fund_column = getattr(table, 'fund')
+        fund_column = self._get_table_column(
+            table,
+            'fund',
+            'fund_ticker',
+            'account',
+        )
         fund_aliases = self._collect_fund_aliases(funds)
         if fund_column is not None and fund_aliases:
             query = query.filter(fund_column.in_(fund_aliases))
@@ -1468,10 +1509,17 @@ class BulkDataLoader:
             if date_column is not None:
                 query = self._apply_date_filter(query, date_column, target_date, previous_date)
 
-        fund_column = "fund"
+        fund_column = self._get_table_column(
+            table,
+            'fund',
+            'fund_ticker',
+            'account',
+        )
         fund_values = self._collect_fund_aliases(funds)
         if fund_values:
-            query = query.filter(fund_column.in_(fund_values))
+            query = query.filter(fund_column.in_([fund_values]))
+
+        x= pd.read_sql(query.statement, self.session.bind)
 
         return pd.read_sql(query.statement, self.session.bind)
 
@@ -1734,12 +1782,12 @@ class BulkDataLoader:
             return df
 
         lower_columns = {col.lower(): col for col in df.columns}
-        for candidate in ('fund', 'fund_ticker', 'ticker', 'portfolio', 'account_name', 'account'):
+        for candidate in ('fund', 'fund_ticker', 'ticker', 'account'):
             if candidate in lower_columns:
                 column = lower_columns[candidate]
                 value = fund_name
                 # Allow overrides from mapping when available
-                if candidate in ('portfolio', 'account', 'account_name'):
+                if candidate in ( 'account'):
                     value = mapping_data.get(candidate, fund_name)
                 filtered = df[df[column] == value].copy()
                 if not filtered.empty:
