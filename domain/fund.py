@@ -269,6 +269,13 @@ class Fund:
         return self.config.get("vehicle_wrapper")
 
     @property
+    def index_identifier(self) -> Optional[str]:
+        value = self.config.get("index_identifier")
+        if isinstance(value, str):
+            value = value.strip()
+        return value or None
+
+    @property
     def is_private_fund(self) -> bool:
         return (self.vehicle or "").lower() == "private_fund"
 
@@ -279,6 +286,41 @@ class Fund:
     @property
     def has_equity(self) -> bool:
         return bool(self.config.get("has_equity", True))
+
+    @property
+    def has_listed_option(self) -> bool:
+        return bool(self.config.get("has_listed_option", False))
+
+    @property
+    def listed_option_type(self) -> Optional[str]:
+        value = self.config.get("listed_option_type")
+        if isinstance(value, str):
+            value = value.strip()
+        return value or None
+
+    @property
+    def has_flex_option(self) -> bool:
+        return bool(self.config.get("has_flex_option", False))
+
+    @property
+    def flex_option_type(self) -> Optional[str]:
+        value = self.config.get("flex_option_type")
+        return value if isinstance(value, str) and value else None
+
+    @property
+    def has_otc(self) -> bool:
+        return bool(self.config.get("has_otc", False))
+
+    @property
+    def has_treasury(self) -> bool:
+        return bool(self.config.get("has_treasury", False))
+
+    @property
+    def diversification_status(self) -> Optional[str]:
+        value = self.config.get("diversification_status")
+        if isinstance(value, str):
+            value = value.strip()
+        return value or None
 
     @property
     def has_listed_option(self) -> bool:

@@ -227,10 +227,7 @@ class BulkDataLoader:
                             analysis_type,
                         )
                     else:
-                        date_column = self._get_table_column(
-                            table,
-                            'date',
-                        )
+                        date_column = getattr(table, 'date', None)
                         query = self.session.query(table)
                         if date_column is not None:
                             query = self._apply_date_filter(
@@ -302,11 +299,7 @@ class BulkDataLoader:
         )
 
         columns = [table]
-        ticker_column = self._get_table_column(
-            table,
-            'ticker',
-            'equity_ticker',
-        )
+        ticker_column = getattr(table, 'ticker', None)
 
         if bbg_equity_table is not None and ticker_column is not None:
             columns.extend(
@@ -365,22 +358,19 @@ class BulkDataLoader:
                 ),
             )
 
-        date_column = self._get_table_column(table, 'date')
+        date_column = getattr(table, 'date', None)
         if date_column is not None:
             query = self._apply_date_filter(
                 query, date_column, target_date, previous_date
             )
 
-        fund_column = self._get_table_column(
-            table,
-            'fund',
-        )
+        fund_column = getattr(table, 'fund')
         fund_aliases = self._collect_fund_aliases(funds)
         if fund_column is not None and fund_aliases:
             query = query.filter(fund_column.in_(fund_aliases))
 
         if analysis_type:
-            analysis_column = self._get_table_column(table, 'analysis_type')
+            analysis_column = getattr(table, 'analysis_type')
             if analysis_column is not None:
                 query = query.filter(
                     func.lower(func.trim(analysis_column))
@@ -388,7 +378,6 @@ class BulkDataLoader:
                 )
 
         df = pd.read_sql(query.statement, self.session.bind)
-        df = self._augment_equity_holdings(df, analysis_type=analysis_type)
 
         if analysis_type and 'analysis_type' in df.columns:
             mask = df['analysis_type'].astype(str).str.lower() == analysis_type.lower()
@@ -409,11 +398,7 @@ class BulkDataLoader:
         )
 
         columns = [table]
-        underlying_column = self._get_table_column(
-            table,
-            'equity_ticker',
-            'ticker',
-        )
+        underlying_column = getattr(table, 'equity_ticker', None)
 
         if bbg_equity_table is not None and underlying_column is not None:
             columns.extend(
@@ -433,22 +418,19 @@ class BulkDataLoader:
                 bbg_equity_table, underlying_column == bbg_equity_table.TICKER
             )
 
-        date_column = self._get_table_column(table, 'date')
+        date_column = getattr(table, 'date', None)
         if date_column is not None:
             query = self._apply_date_filter(
                 query, date_column, target_date, previous_date
             )
 
-        fund_column = self._get_table_column(
-            table,
-            'fund',
-        )
+        fund_column = getattr(table, 'fund', None)
         fund_aliases = self._collect_fund_aliases(funds)
         if fund_column is not None and fund_aliases:
             query = query.filter(fund_column.in_(fund_aliases))
 
         if analysis_type:
-            analysis_column = self._get_table_column(table, 'analysis_type')
+            analysis_column = getattr(table, 'analysis_type', None)
             if analysis_column is not None:
                 query = query.filter(
                     func.lower(func.trim(analysis_column))
@@ -456,7 +438,6 @@ class BulkDataLoader:
                 )
 
         df = pd.read_sql(query.statement, self.session.bind)
-        df = self._augment_option_holdings(df, analysis_type=analysis_type)
 
         if analysis_type and 'analysis_type' in df.columns:
             mask = df['analysis_type'].astype(str).str.lower() == analysis_type.lower()
@@ -474,7 +455,7 @@ class BulkDataLoader:
     ) -> pd.DataFrame:
         query = self.session.query(table)
 
-        date_column = self._get_table_column(table, 'date')
+        date_column = getattr(table, 'date', None)
         if date_column is not None:
             query = self._apply_date_filter(
                 query,
@@ -483,20 +464,13 @@ class BulkDataLoader:
                 previous_date,
             )
 
-        fund_column = self._get_table_column(
-            table,
-            'fund',
-            'fund_ticker',
-            'ticker',
-            'portfolio',
-            'account',
-        )
+        fund_column =  getattr(table, 'fund', None)
         fund_aliases = self._collect_fund_aliases(funds)
         if fund_column is not None and fund_aliases:
             query = query.filter(fund_column.in_(fund_aliases))
 
         if analysis_type:
-            analysis_column = self._get_table_column(table, 'analysis_type')
+            analysis_column = getattr(table, 'analysis_type')
             if analysis_column is not None:
                 query = query.filter(
                     func.lower(func.trim(analysis_column))
@@ -511,70 +485,6 @@ class BulkDataLoader:
             df = df.loc[mask].copy()
 
         return df
-
-
-    def _augment_equity_holdings(
-        self, df: pd.DataFrame, *, analysis_type: Optional[str] = None
-    ) -> pd.DataFrame:
-        if df.empty:
-            return df
-
-        result = df.copy()
-
-        quantity = self._resolve_shares_series(
-            result, analysis_type=analysis_type, candidates=("quantity",)
-        )
-        price, _ = self._get_numeric_series(
-            result, 'price', 'equity_price'
-        )
-
-        price = price.fillna(0.0)
-        result['quantity'] = quantity
-        result['equity_market_value'] = quantity * price
-
-        result = result.drop(columns=['row_num', 'BBG_SEC_ID'], errors='ignore')
-
-        return result
-
-    def _augment_option_holdings(
-        self, df: pd.DataFrame, *, analysis_type: Optional[str] = None
-    ) -> pd.DataFrame:
-        if df.empty:
-            return df
-
-        result = df.copy()
-
-        quantity = self._resolve_shares_series(
-            result, analysis_type=analysis_type, candidates=("quantity",)
-        )
-        price, _ = self._get_numeric_series(result, 'price')
-        equity_price, _ = self._get_numeric_series(
-            result, 'equity_underlying_price',
-        )
-        delta, _ = self._get_numeric_series(
-            result, 'delta',
-        )
-
-        price = price.fillna(0.0)
-        equity_price = equity_price.fillna(0.0)
-        delta = delta.fillna(0.0)
-
-        result['quantity'] = quantity
-        result['option_market_value'] = quantity * price * 100
-        result['option_notional_value'] = quantity * equity_price * 100
-        result['option_delta_adjusted_notional'] = quantity * equity_price * delta * 100
-        result['option_delta_adjusted_market_value'] = quantity * price * delta * 100
-
-        return result
-
-    def _get_numeric_series(
-        self, df: pd.DataFrame, *candidates: str
-    ) -> Tuple[pd.Series, bool]:
-        column = self._find_dataframe_column(df, *candidates)
-        if column is None:
-            return pd.Series(0.0, index=df.index, dtype=float), False
-        series = pd.to_numeric(df[column], errors='coerce')
-        return series, True
 
     def _resolve_shares_series(
         self,
@@ -606,35 +516,6 @@ class BulkDataLoader:
         if not found:
             return series
         return series.fillna(0.0)
-
-    def _augment_treasury_holdings(
-        self, df: pd.DataFrame, *, analysis_type: Optional[str] = None
-    ) -> pd.DataFrame:
-        if df.empty:
-            return df
-
-        result = df.copy()
-
-        quantity = self._resolve_shares_series(
-            result, analysis_type=analysis_type, candidates=("quantity",)
-        )
-        price, _ = self._get_numeric_series(result, 'price')
-
-        price = price.fillna(0.0)
-        result['quantity'] = quantity
-
-        result['treasury_market_value'] = quantity * price / 1000
-
-        return result
-
-    @staticmethod
-    def _find_dataframe_column(df: pd.DataFrame, *candidates: str) -> Optional[str]:
-        lower_map = {col.lower(): col for col in df.columns}
-        for candidate in candidates:
-            column = lower_map.get(candidate.lower())
-            if column:
-                return column
-        return None
 
 
     def _bulk_load_nav_data(
@@ -689,9 +570,7 @@ class BulkDataLoader:
                 table = getattr(self.base_cls.classes, table_name)
 
                 # Default handling for NAV tables with standard fund identifiers
-                date_column = self._get_table_column(
-                    table, 'date',
-                )
+                date_column = getattr(table, 'date')
                 query = self.session.query(table)
                 if date_column is not None:
                     query = self._apply_date_filter(
@@ -765,7 +644,7 @@ class BulkDataLoader:
                     continue
 
                 table = getattr(self.base_cls.classes, table_name)
-                date_column = self._get_table_column(table, 'date', 'business_date', 'nav_date')
+                date_column = self._get_table_column(table, 'date', 'business_date', 'nav_date', 'process_date')
                 query = self.session.query(table)
                 if date_column is not None:
                     query = self._apply_date_filter(
@@ -1246,9 +1125,9 @@ class BulkDataLoader:
         except AttributeError:
             return pd.DataFrame()
 
-        security_col = self._get_table_column(table, 'security_ticker', 'ticker')
-        weight_col = self._get_table_column(table, 'security_weight', 'weight')
-        date_col = self._get_table_column(table, 'date', 'valuation_date')
+        security_col = getattr(table, 'security_ticker')
+        weight_col = getattr(table, 'security_weight')
+        date_col = getattr(table, 'date')
         if not all([security_col, weight_col, date_col]):
             return pd.DataFrame()
 
@@ -1258,7 +1137,7 @@ class BulkDataLoader:
         ).filter(date_col == target_date)
 
         benchmark = mapping.get('overlap_benchmark_ticker')
-        benchmark_col = self._get_table_column(table, 'etf_ticker', 'fund_ticker')
+        benchmark_col = getattr(table, 'etf_ticker')
         if benchmark and benchmark_col is not None:
             query = query.filter(benchmark_col == benchmark)
 
@@ -1327,9 +1206,12 @@ class BulkDataLoader:
 
         # Generic fallback: query table and filter by fund when possible
         table = getattr(self.base_cls.classes, table_name)
-        date_column = self._get_table_column(
-            table, 'date', 'effective_date', 'business_date', 'trade_date'
-        )
+        date_column = getattr(table, 'date', None)
+        if date_column is None:
+            for candidate in ('effective_date', 'business_date', 'trade_date'):
+                date_column = getattr(table, candidate, None)
+                if date_column is not None:
+                    break
         query = self.session.query(table)
         if date_column is not None:
             query = self._apply_date_filter(query, date_column, target_date, previous_date)
@@ -1577,26 +1459,19 @@ class BulkDataLoader:
             )
         else:
             query = self.session.query(table)
+            date_column = self._get_table_column(
+                table,
+                'date',
+                'trade_date',
+                'process_date',
+                'effective_date',
+            )
+            if date_column is not None:
+                query = self._apply_date_filter(query, date_column, target_date, previous_date)
 
-        date_column = self._get_table_column(
-            table,
-            'date',
-            'trade_date',
-            'process_date',
-            'effective_date',
-        )
-        if date_column is not None:
-            query = self._apply_date_filter(query, date_column, target_date, previous_date)
-
-        fund_column = self._get_table_column(
-            table,
-            'fund',
-            'fund_ticker',
-            'fund_name',
-            'account_number',
-        )
+        fund_column = "fund"
         fund_values = self._collect_fund_aliases(funds)
-        if fund_column is not None and fund_values:
+        if fund_values:
             query = query.filter(fund_column.in_(fund_values))
 
         return pd.read_sql(query.statement, self.session.bind)
@@ -1673,125 +1548,59 @@ class BulkDataLoader:
     ):
         """Select the canonical columns for UMB custodian datasets."""
 
-        base_columns = [
-            self._column_or_literal(
-                table, 'date', 'process_date', 'date', 'business_date'
-            ),
-            self._column_or_literal(table, 'fund', 'fund'),
-        ]
-
-        category_column = getattr(table, 'security_catgry', None)
-
         if holdings_kind == 'equity':
-            columns = base_columns + [
-                self._label_upper(table, ('security_tkr', 'ticker'), 'equity_ticker'),
-                self._column_or_literal(table, 'shares_cust', 'mkt_qty', 'quantity'),
-                self._column_or_literal(table, 'quantity', 'mkt_qty', 'quantity'),
-                self._column_or_literal(table, 'price', 'eod_close', 'price'),
-                self._column_or_literal(table, 'market_value', 'mkt_mktval', 'market_value'),
-                self._column_or_literal(
-                    table,
-                    'category_description',
-                    'security_catgry',
-                    'category_description',
-                ),
-            ]
-            query = self.session.query(*columns)
-            if category_column is not None:
-                query = query.filter(category_column.in_(['COMMON', 'REIT']))
+            query = self.session.query(
+                table.process_date.label('date'),
+                table.fund.label('fund'),
+                table.security_tkr.label('equity_ticker'),
+                table.mkt_qty.label('shares_cust'),
+                table.eod_close.label('price'),
+                table.security_catgry.label('category_description'),
+                table.mkt_mktval.label('market_value'),
+            ).filter(
+                table.security_catgry.in_(['COMMON', 'REIT']),  # Common Stock, ETF, REIT
+            )
             return query
 
         if holdings_kind == 'option':
-            desc_column = getattr(table, 'security_desc', None)
-            if desc_column is not None:
-                first_space = func.instr(desc_column, ' ')
-                optticker_expr = func.concat(
-                    func.substr(desc_column, 1, first_space),
-                    literal('US'),
-                    func.substr(desc_column, first_space),
-                )
-                optticker_expr = func.upper(func.trim(optticker_expr)).label('optticker')
-            else:
-                optticker_expr = literal(None).label('optticker')
-
-            columns = base_columns + [
-                optticker_expr,
-                self._label_upper(table, ('security_tkr', 'ticker'), 'equity_ticker'),
-                self._column_or_literal(table, 'shares_cust', 'mkt_qty', 'quantity'),
-                self._column_or_literal(table, 'quantity', 'mkt_qty', 'quantity'),
-                self._column_or_literal(table, 'price', 'eod_close', 'price'),
-                self._column_or_literal(table, 'market_value', 'mkt_mktval', 'market_value'),
-                self._column_or_literal(
-                    table,
-                    'category_description',
-                    'security_catgry',
-                    'category_description',
-                ),
-                self._column_or_literal(table, 'occ_symbol', 'occ_id', 'occ_symbol'),
-            ]
-            query = self.session.query(*columns)
-            if category_column is not None:
-                query = query.filter(category_column.like('OPT%'))
+            query = self.session.query(
+                table.process_date.label('date'),
+                table.fund.label('fund'),
+                # Add " US" after first space in security_desc
+                func.concat(
+                    func.substr(table.security_desc, 1, func.instr(table.security_desc, ' ')),
+                    'US',
+                    func.substr(table.security_desc, func.instr(table.security_desc, ' '))
+                ).label('optticker'),
+                table.mkt_qty.label('shares_cust'),
+                table.eod_close.label('price'),
+                table.security_catgry.label('category_description'),
+                table.mkt_mktval.label('market_value'),
+            ).filter(
+                table.security_catgry.like('OPT%'),
+            )
             return query
 
         if holdings_kind == 'treasury':
-            columns = base_columns + [
-                self._label_upper(
-                    table,
-                    (
-                        'security_tkr',
-                        'ticker',
-                        'legal1',
-                    ),
-                    'ticker',
-                ),
-                self._column_or_literal(table, 'shares_cust', 'qty', 'quantity'),
-                self._column_or_literal(table, 'quantity', 'qty', 'quantity'),
-                self._column_or_literal(table, 'price', 'price', default=None),
-                self._column_or_literal(
-                    table,
-                    'market_value',
-                    'mkt_mktval',
-                    'market_value',
-                    default=None,
-                ),
-                self._column_or_literal(
-                    table,
-                    'category_description',
-                    'security_catgry',
-                    'category_description',
-                    default=None,
-                ),
-                self._column_or_literal(table, 'occ_symbol', 'occ_id', 'occ_symbol', default=None),
-            ]
-            return self.session.query(*columns)
+            query = self.session.query(
+                table.process_date.label('date'),
+                table.fund.label('fund'),
+                # Add " US" after first space in security_desc
+                func.concat(
+                    func.substr(table.security_desc, 1, func.instr(table.security_desc, ' ')),
+                    'US',
+                    func.substr(table.security_desc, func.instr(table.security_desc, ' '))
+                ).label('optticker'),
+                table.mkt_qty.label('shares_cust'),
+                table.eod_close.label('price'),
+                table.security_catgry.label('category_description'),
+                table.mkt_mktval.label('market_value'),
+            ).filter(
+                table.security_catgry.like('TSY%'),
+            )
+            return query
 
         return self.session.query(table)
-
-    def _column_or_literal(
-        self,
-        table,
-        alias: str,
-        *candidates: str,
-        default=None,
-    ):
-        for name in candidates:
-            column = getattr(table, name, None)
-            if column is not None:
-                return column.label(alias)
-        return literal(default).label(alias)
-
-    def _label_upper(
-        self,
-        table,
-        candidates: Tuple[str, ...],
-        alias: str,
-    ):
-        for name in candidates:
-            column = getattr(table, name, None)
-            if column is not None:
-                return func.upper(func.trim(column)).label(alias)
-        return literal(None).label(alias)
 
     def _get_mapping_value(self, mapping: Dict, *keys: str) -> Optional[str]:
         for key in keys:

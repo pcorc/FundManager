@@ -390,6 +390,7 @@ class ComplianceChecker:
             holdings_df["net_market_value"] = (
                 holdings_df["equity_market_value"] + holdings_df["flex_market_value"]
             )
+
             if total_assets:
                 holdings_df["weight"] = holdings_df["net_market_value"] / total_assets
             else:

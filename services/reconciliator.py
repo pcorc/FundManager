@@ -34,7 +34,7 @@ class Reconciliator:
         self._detailed_calculations: Dict[str, Dict] = {}
         self.logger = logging.getLogger(f"Reconciliator_{fund.name}")
         self.is_etf = not fund.is_private_fund and not fund.is_closed_end_fund
-        self.has_sg_equity = bool(fund.config.get("sg_custodian_holdings"))
+        self.has_sg_equity = fund.is_private_fund
 
     # ------------------------------------------------------------------
     # Snapshot helpers
