@@ -359,7 +359,7 @@ class ComplianceReport:
                 issuer_limited = calculations.get("issuer_limited_securities", []) or []
                 if issuer_limited:
                     issuer_limited_str = ", ".join(
-                        f"({sec.get('equity_ticker')}, {sec.get('nav_shares')}, {sec.get('net_market_value', 0):,.2f})"
+                        f"({sec.get('ticker')}, {sec.get('nav_shares')}, {sec.get('net_market_value', 0):,.2f})"
                         for sec in issuer_limited
                     )
                 else:
@@ -371,8 +371,8 @@ class ComplianceReport:
                 remaining_details = calculations.get("remaining_stocks_details", []) or []
                 if remaining_details:
                     remaining_str = ", ".join(
-                        "({ticker}, {shares:,.0f}, {vest_weight:.2%}, {ownership:.2%})".format(
-                            ticker=entry.get('equity_ticker'),
+                        "({ticker}, {shares:,.0f}, {vest_weight:.2%}, {ownership:.7%})".format(
+                            ticker=entry.get('ticker'),
                             shares=entry.get('nav_shares', 0) or 0,
                             vest_weight=float(entry.get('vest_weight', 0.0) or 0.0),
                             ownership=float(entry.get('vest_ownership_of_float', 0.0) or 0.0),
