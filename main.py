@@ -338,6 +338,7 @@ def _iter_business_days_inclusive(start: date, end: date) -> Iterable[date]:
             yield current
         current += timedelta(days=1)
 
+
 def _coerce_date(value: object, field_name: str) -> date:
     if isinstance(value, date):
         return value
@@ -382,29 +383,29 @@ if __name__ == "__main__":
     # 'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727',
     # 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2', 'FTCSH'
 
-    RUNTIME_OVERRIDES = {
-        "analysis_type": "eod",
-        "as_of_date": "2025-07-30",
-        "funds": ['P21026',], # 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'
-        "previous_date": "2025-07-29",
-        "eod_reports": ["compliance"],
-        "compliance_tests": [
-            # "gics_compliance",
-            # "prospectus_80pct_policy",
-            "diversification_40act_check",
-            "diversification_IRS_check",
-            # "diversification_IRC_check",
-            # "max_15pct_illiquid_sai",
-            # "real_estate_check",
-            # "commodities_check",
-            # "twelve_d1a_other_inv_cos",
-            # "twelve_d2_insurance_cos",
-            # "twelve_d3_sec_biz",
-        ],
-        "create_pdf": True,
-        "output_dir": "./outputs",
-    }
-    raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
+    # RUNTIME_OVERRIDES = {
+    #     "analysis_type": "eod",
+    #     "as_of_date": "2025-07-30",
+    #     "funds": ['P21026',], # 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'
+    #     "previous_date": "2025-07-29",
+    #     "eod_reports": ["compliance"],
+    #     "compliance_tests": [
+    #         # "gics_compliance",
+    #         # "prospectus_80pct_policy",
+    #         "diversification_40act_check",
+    #         "diversification_IRS_check",
+    #         # "diversification_IRC_check",
+    #         # "max_15pct_illiquid_sai",
+    #         # "real_estate_check",
+    #         # "commodities_check",
+    #         # "twelve_d1a_other_inv_cos",
+    #         # "twelve_d2_insurance_cos",
+    #         # "twelve_d3_sec_biz",
+    #     ],
+    #     "create_pdf": True,
+    #     "output_dir": "./outputs",
+    # }
+    # raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
 
     # Example: run the same configuration for a list of explicit business dates.
     # MULTI_DAY_OVERRIDES = {
@@ -424,19 +425,18 @@ if __name__ == "__main__":
     # }
     # raise SystemExit(main(overrides=RANGE_OVERRIDES))
 
-    # TIME_SERIES_OVERRIDES = {
-    #     "analysis_type": "eod",
-    #     "funds": [    'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727',
-    # 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'],
-    #     "eod_reports": ["compliance",],
-    #     "compliance_tests": [
-    #         "diversification_40act_check",
-    #         "diversification_IRS_check",
-    #     ],
-    #     "start_date": "2025-06-30",
-    #     "end_date": "2025-09-30",
-    #     "create_pdf": True,
-    #     "output_dir": "./outputs",
-    #     "generate_daily_reports": False,
-    # }
-    # raise SystemExit(run_time_series(overrides=TIME_SERIES_OVERRIDES))
+    TIME_SERIES_OVERRIDES = {
+        "analysis_type": "eod",
+        "funds": [    'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'],
+        "eod_reports": ["compliance"],
+        "compliance_tests": [
+            "diversification_40act_check",
+            "diversification_IRS_check",
+        ],
+        "start_date": "2025-07-29",
+        "end_date": "2025-07-30",
+        "create_pdf": False,
+        "output_dir": "./outputs",
+        "generate_daily_reports": False,
+    }
+    raise SystemExit(run_time_series(overrides=TIME_SERIES_OVERRIDES))
