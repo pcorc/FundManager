@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -13,6 +13,7 @@ from config.fund_definitions import FUND_DEFINITIONS
 from reporting.base_report_pdf import BaseReportPDF
 from reporting.holdings_recon_renderer import HoldingsReconciliationRenderer
 from reporting.report_utils import normalize_reconciliation_payload, normalize_report_date
+from utilities.reconciliation_utils import split_flex_price_frames
 
 
 @dataclass
@@ -21,6 +22,80 @@ class GeneratedReconciliationReport:
 
     excel_path: Optional[str]
     pdf_path: Optional[str]
+
+@dataclass(frozen=True)
+class ReconDescriptor:
+    """Declarative definition of how to flatten reconciliation payloads."""
+
+    holdings_key: str | None = None
+    holdings_ticker: str | None = None
+    holdings_builder: str | None = None
+    require_holdings: bool = True
+    price_keys: Tuple[str | None, str | None] = ("price_discrepancies_T", "price_discrepancies_T1")
+    price_ticker: str | None = None
+    price_cust_col: str = "price_cust"
+    price_transform: str | None = None
+    extra_callbacks: Sequence[str] = ()
+
+
+RECON_DESCRIPTOR_REGISTRY: Dict[str, ReconDescriptor] = {
+    "custodian_equity": ReconDescriptor(
+        holdings_key="final_recon",
+        holdings_ticker="equity_ticker",
+        price_ticker="equity_ticker",
+    ),
+    "custodian_equity_t1": ReconDescriptor(
+        holdings_key="final_recon",
+        holdings_ticker="equity_ticker",
+        price_keys=(None, None),
+    ),
+    "custodian_option": ReconDescriptor(
+        holdings_key="final_recon",
+        holdings_ticker="optticker",
+        price_ticker="optticker",
+        price_transform="_select_standard_option_prices",
+        extra_callbacks=("_append_option_breakdowns",),
+    ),
+    "custodian_option_t1": ReconDescriptor(
+        holdings_key="final_recon",
+        holdings_ticker="optticker",
+        price_keys=(None, None),
+        extra_callbacks=("_append_option_t1_breakdowns",),
+    ),
+    "index_equity": ReconDescriptor(
+        holdings_key="holdings_discrepancies",
+        holdings_ticker="equity_ticker",
+        holdings_builder="_prepare_index_holdings_df",
+        price_ticker="equity_ticker",
+        price_cust_col="price_index",
+    ),
+    "sg_option": ReconDescriptor(
+        holdings_key="final_recon",
+        holdings_ticker="optticker",
+        price_keys=("price_discrepancies", None),
+        price_ticker="optticker",
+    ),
+    "sg_equity": ReconDescriptor(
+        holdings_key="final_recon",
+        holdings_ticker="equity_ticker",
+        price_keys=("price_discrepancies", None),
+        price_ticker="equity_ticker",
+    ),
+    "custodian_treasury": ReconDescriptor(
+        holdings_key="final_recon",
+        holdings_ticker="cusip",
+        price_keys=("price_discrepancies_T", None),
+        price_ticker="cusip",
+        require_holdings=False,
+    ),
+    "custodian_treasury_t1": ReconDescriptor(
+        holdings_key="final_recon",
+        holdings_ticker="cusip",
+        price_keys=(None, "price_discrepancies_T1"),
+        price_ticker="cusip",
+        require_holdings=False,
+    ),
+}
 
 
 class ReconResult:
@@ -80,21 +155,31 @@ class ReconciliationReport:
         self._export_to_excel()
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     def _filter_and_flatten_results(self) -> Dict[Tuple[str, str, str], pd.DataFrame]:
         flat: Dict[Tuple[str, str, str], pd.DataFrame] = {}
 
         for date_str, fund_data in self.reconciliation_results.items():
             for fund, recon_dict in (fund_data or {}).items():
                 for recon_type, subresults in (recon_dict or {}).items():
-                    handler = self._get_handler(recon_type)
-                    if handler:
-                        result = handler(fund, date_str, recon_type, subresults)
-                        if result and result.has_data():
-                            flat.update(result.to_flat_dict())
-                    if recon_type == "custodian_option":
-                        self._append_option_breakdowns(flat, fund, date_str, subresults)
-                    if recon_type == "custodian_option_t1":
-                        self._append_option_t1_breakdowns(flat, fund, date_str, subresults)
+                    descriptor = RECON_DESCRIPTOR_REGISTRY.get(recon_type)
+                    if not descriptor:
+                        continue
+
+                    result = self._process_from_descriptor(
+                        descriptor,
+                        fund,
+                        date_str,
+                        recon_type,
+                        subresults or {},
+                    )
+                    if result and result.has_data():
+                        flat.update(result.to_flat_dict())
+
+                    for callback_name in descriptor.extra_callbacks:
+                        callback = getattr(self, callback_name, None)
+                        if callback:
+                            callback(flat, fund, date_str, subresults or {})
         return flat
 
     def _append_option_breakdowns(
@@ -116,30 +201,28 @@ class ReconciliationReport:
             flat[(fund, date_str, "custodian_option_flex_holdings")] = prepared
 
         price_t_df = self._ensure_dataframe(subresults.get("price_discrepancies_T"))
-        if not price_t_df.empty and "is_flex" in price_t_df.columns:
-            flex_price_t = price_t_df[price_t_df["is_flex"] == True].copy()  # noqa: E712
-            if not flex_price_t.empty:
-                prepared = self._prepare_price_df(
-                    flex_price_t,
-                    fund,
-                    date_str,
-                    "custodian_option_flex_price_T",
-                    "optticker",
-                )
-                flat[(fund, date_str, "custodian_option_flex_price_T")] = prepared
+        flex_price_t, _ = split_flex_price_frames(price_t_df)
+        if not flex_price_t.empty:
+            prepared = self._prepare_price_df(
+                flex_price_t,
+                fund,
+                date_str,
+                "custodian_option_flex_price_T",
+                "optticker",
+            )
+            flat[(fund, date_str, "custodian_option_flex_price_T")] = prepared
 
         price_t1_df = self._ensure_dataframe(subresults.get("price_discrepancies_T1"))
-        if not price_t1_df.empty and "is_flex" in price_t1_df.columns:
-            flex_price_t1 = price_t1_df[price_t1_df["is_flex"] == True].copy()  # noqa: E712
-            if not flex_price_t1.empty:
-                prepared = self._prepare_price_df(
-                    flex_price_t1,
-                    fund,
-                    date_str,
-                    "custodian_option_flex_price_T-1",
-                    "optticker",
-                )
-                flat[(fund, date_str, "custodian_option_flex_price_T-1")] = prepared
+        flex_price_t1, _ = split_flex_price_frames(price_t1_df)
+        if not flex_price_t1.empty:
+            prepared = self._prepare_price_df(
+                flex_price_t1,
+                fund,
+                date_str,
+                "custodian_option_flex_price_T-1",
+                "optticker",
+            )
+            flat[(fund, date_str, "custodian_option_flex_price_T-1")] = prepared
 
     def _append_option_t1_breakdowns(
         self,
@@ -159,114 +242,100 @@ class ReconciliationReport:
             )
             flat[(fund, date_str, "custodian_option_flex_holdings_t1")] = prepared
 
-    # ------------------------------------------------------------------
-    def _get_handler(self, recon_type: str):
-        handlers = {
-            "custodian_equity": self._process_custodian_equity,
-            "custodian_equity_t1": self._process_custodian_equity_t1,
-            "custodian_option": self._process_custodian_option,
-            "custodian_option_t1": self._process_custodian_option_t1,
-            "index_equity": self._process_index_equity,
-            "sg_option": self._process_sg_option,
-            "sg_equity": self._process_sg_equity,
-        }
-        return handlers.get(recon_type)
-
-    def _process_custodian_equity(
+    def _build_holdings_from_descriptor(
         self,
+        descriptor: ReconDescriptor,
+        df: pd.DataFrame,
         fund: str,
         date_str: str,
         recon_type: str,
-        subresults: Mapping[str, Any],
-    ) -> ReconResult | None:
-        final_df = self._ensure_dataframe(subresults.get("final_recon"))
-        if final_df.empty:
+    ) -> pd.DataFrame | None:
+        builder_name = descriptor.holdings_builder or "_prepare_holdings_df"
+        builder: Callable[..., pd.DataFrame | None] | None = getattr(self, builder_name, None)
+        if builder is None:
             return None
 
-        holdings_df = self._prepare_holdings_df(final_df, fund, date_str, recon_type, "equity_ticker")
-        price_t, price_t1 = self._process_price_discrepancies(
-            subresults,
-            fund,
-            date_str,
-            recon_type,
-            "equity_ticker",
+        ticker_col = descriptor.holdings_ticker or descriptor.price_ticker
+        if not ticker_col:
+            return builder(df, fund, date_str, recon_type, "TICKER")
+        return builder(df, fund, date_str, recon_type, ticker_col)
+
+    def _build_price_dfs(
+        self,
+        descriptor: ReconDescriptor,
+        subresults: Mapping[str, Any],
+        fund: str,
+        date_str: str,
+        recon_type: str,
+    ) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+        ticker_col = descriptor.price_ticker or descriptor.holdings_ticker
+        if not ticker_col:
+            return None, None
+
+        price_t: pd.DataFrame | None = None
+        price_t1: pd.DataFrame | None = None
+        price_t_key, price_t1_key = descriptor.price_keys
+
+        if price_t_key:
+            price_t_raw = self._ensure_dataframe(subresults.get(price_t_key))
+            price_t_raw = self._apply_price_transform(price_t_raw, descriptor)
+            if not price_t_raw.empty:
+                price_t = self._prepare_price_df(
+                    price_t_raw,
+                    fund,
+                    date_str,
+                    recon_type,
+                    ticker_col,
+                    descriptor.price_cust_col,
+                )
+
+        if price_t1_key:
+            price_t1_raw = self._ensure_dataframe(subresults.get(price_t1_key))
+            price_t1_raw = self._apply_price_transform(price_t1_raw, descriptor)
+            if not price_t1_raw.empty:
+                price_t1 = self._prepare_price_df(
+                    price_t1_raw,
+                    fund,
+                    date_str,
+                    recon_type,
+                    ticker_col,
+                    descriptor.price_cust_col,
+                )
+
+        return price_t, price_t1
+
+    def _apply_price_transform(
+        self, df: pd.DataFrame, descriptor: ReconDescriptor
+    ) -> pd.DataFrame:
+        if df.empty or not descriptor.price_transform:
+            return df
+
+        transform: Callable[[pd.DataFrame], pd.DataFrame] | None = getattr(
+            self, descriptor.price_transform, None
         )
-        return ReconResult(fund, date_str, recon_type, holdings_df, price_t, price_t1)
+        if transform is None:
+            return df
+        transformed = transform(df)
+        return transformed if isinstance(transformed, pd.DataFrame) else df
 
-    def _process_custodian_equity_t1(
+    def _select_standard_option_prices(self, df: pd.DataFrame) -> pd.DataFrame:
+        _flex, standard = split_flex_price_frames(df)
+        return standard
+
+    def _prepare_index_holdings_df(
         self,
+        df: pd.DataFrame,
         fund: str,
         date_str: str,
         recon_type: str,
-        subresults: Mapping[str, Any],
-    ) -> ReconResult | None:
-        final_df = self._ensure_dataframe(subresults.get("final_recon"))
-        if final_df.empty:
-            return None
-        holdings_df = self._prepare_holdings_df(final_df, fund, date_str, recon_type, "equity_ticker")
-        return ReconResult(fund, date_str, recon_type, holdings_df)
-
-    def _process_custodian_option(
-        self,
-        fund: str,
-        date_str: str,
-        recon_type: str,
-        subresults: Mapping[str, Any],
-    ) -> ReconResult | None:
-        final_df = self._ensure_dataframe(subresults.get("final_recon"))
-        if final_df.empty:
-            return None
-
-        holdings_df = self._prepare_holdings_df(final_df, fund, date_str, recon_type, "optticker")
-        price_t_raw = self._ensure_dataframe(subresults.get("price_discrepancies_T"))
-        price_t1_raw = self._ensure_dataframe(subresults.get("price_discrepancies_T1"))
-
-        if not price_t_raw.empty and "is_flex" in price_t_raw.columns:
-            price_t_raw = price_t_raw[price_t_raw["is_flex"] == False]  # noqa: E712
-        if not price_t1_raw.empty and "is_flex" in price_t1_raw.columns:
-            price_t1_raw = price_t1_raw[price_t1_raw["is_flex"] == False]  # noqa: E712
-
-        price_t = (
-            self._prepare_price_df(price_t_raw, fund, date_str, recon_type, "optticker")
-            if not price_t_raw.empty
-            else None
-        )
-        price_t1 = (
-            self._prepare_price_df(price_t1_raw, fund, date_str, recon_type, "optticker")
-            if not price_t1_raw.empty
-            else None
-        )
-        return ReconResult(fund, date_str, recon_type, holdings_df, price_t, price_t1)
-
-    def _process_custodian_option_t1(
-        self,
-        fund: str,
-        date_str: str,
-        recon_type: str,
-        subresults: Mapping[str, Any],
-    ) -> ReconResult | None:
-        final_df = self._ensure_dataframe(subresults.get("final_recon"))
-        if final_df.empty:
-            return None
-        holdings_df = self._prepare_holdings_df(final_df, fund, date_str, recon_type, "optticker")
-        return ReconResult(fund, date_str, recon_type, holdings_df)
-
-    def _process_index_equity(
-        self,
-        fund: str,
-        date_str: str,
-        recon_type: str,
-        subresults: Mapping[str, Any],
-    ) -> ReconResult | None:
-        holdings_df = self._ensure_dataframe(subresults.get("holdings_discrepancies"))
-        if holdings_df.empty:
-            return None
-
-        holdings_df = holdings_df.copy()
-        holdings_df["FUND"] = fund
-        holdings_df["RECON_TYPE"] = recon_type
-        holdings_df["DATE"] = date_str
-        holdings_df["discrepancy_type"] = "Holdings Mismatch"
+        ticker_col: str,
+    ) -> pd.DataFrame:
+        df = df.copy()
+        df["FUND"] = fund
+        df["RECON_TYPE"] = recon_type
+        df["DATE"] = date_str
+        if "discrepancy_type" not in df.columns:
+            df["discrepancy_type"] = "Holdings Mismatch"
 
         cols_to_keep = [
             col
@@ -274,62 +343,14 @@ class ReconciliationReport:
                 "FUND",
                 "RECON_TYPE",
                 "DATE",
-                "equity_ticker",
+                ticker_col,
                 "discrepancy_type",
                 "in_vest",
                 "in_index",
             ]
-            if col in holdings_df.columns
+            if col in df.columns
         ]
-        holdings_df = holdings_df[cols_to_keep] if cols_to_keep else holdings_df
-
-        price_t, price_t1 = self._process_price_discrepancies(
-            subresults,
-            fund,
-            date_str,
-            recon_type,
-            "equity_ticker",
-            price_cust_col="price_index",
-        )
-        return ReconResult(fund, date_str, recon_type, holdings_df, price_t, price_t1)
-
-    def _process_sg_option(
-        self,
-        fund: str,
-        date_str: str,
-        recon_type: str,
-        subresults: Mapping[str, Any],
-    ) -> ReconResult | None:
-        final_df = self._ensure_dataframe(subresults.get("final_recon"))
-        if final_df.empty:
-            return None
-        holdings_df = self._prepare_holdings_df(final_df, fund, date_str, "sg_option", "optticker")
-        price_df = self._ensure_dataframe(subresults.get("price_discrepancies"))
-        price_t = (
-            self._prepare_price_df(price_df, fund, date_str, recon_type, "optticker")
-            if not price_df.empty
-            else None
-        )
-        return ReconResult(fund, date_str, "sg_option", holdings_df, price_t)
-
-    def _process_sg_equity(
-        self,
-        fund: str,
-        date_str: str,
-        recon_type: str,
-        subresults: Mapping[str, Any],
-    ) -> ReconResult | None:
-        final_df = self._ensure_dataframe(subresults.get("final_recon"))
-        if final_df.empty:
-            return None
-        holdings_df = self._prepare_holdings_df(final_df, fund, date_str, recon_type, "equity_ticker")
-        price_df = self._ensure_dataframe(subresults.get("price_discrepancies"))
-        price_t = (
-            self._prepare_price_df(price_df, fund, date_str, recon_type, "equity_ticker")
-            if not price_df.empty
-            else None
-        )
-        return ReconResult(fund, date_str, recon_type, holdings_df, price_t)
+        return df[cols_to_keep] if cols_to_keep else df
 
     # ------------------------------------------------------------------
     def _prepare_holdings_df(
@@ -354,33 +375,13 @@ class ReconciliationReport:
             "in_vest",
             "in_cust",
             "in_index",
+            "quantity_diff",
+            "breakdown",
         ]
         cols_to_keep = [col for col in base_cols + optional_cols if col in df.columns]
         return df[cols_to_keep] if cols_to_keep else df
 
-    def _process_price_discrepancies(
-        self,
-        subresults: Mapping[str, Any],
-        fund: str,
-        date_str: str,
-        recon_type: str,
-        ticker_col: str,
-        price_cust_col: str = "price_cust",
-    ) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
-        price_t = self._ensure_dataframe(subresults.get("price_discrepancies_T"))
-        price_t1 = self._ensure_dataframe(subresults.get("price_discrepancies_T1"))
 
-        price_t_df = (
-            self._prepare_price_df(price_t, fund, date_str, recon_type, ticker_col, price_cust_col)
-            if not price_t.empty
-            else None
-        )
-        price_t1_df = (
-            self._prepare_price_df(price_t1, fund, date_str, recon_type, ticker_col, price_cust_col)
-            if not price_t1.empty
-            else None
-        )
-        return price_t_df, price_t1_df
 
     def _prepare_price_df(
         self,
@@ -493,6 +494,10 @@ class ReconciliationReport:
             "flex_option_holdings_breaks_T_1",
             "flex_option_price_breaks_T",
             "flex_option_price_breaks_T_1",
+            "custodian_treasury_holdings_breaks_T",
+            "custodian_treasury_holdings_breaks_T_1",
+            "custodian_treasury_price_breaks_T",
+            "custodian_treasury_price_breaks_T_1",
             "index_equity_holdings_breaks",
             "index_equity_price_breaks_T",
             "index_equity_price_breaks_T_1",
@@ -526,6 +531,10 @@ class ReconciliationReport:
             "custodian_option_flex_holdings_t1": "flex_option_holdings_breaks_T_1",
             "custodian_option_flex_price_T": "flex_option_price_breaks_T",
             "custodian_option_flex_price_T-1": "flex_option_price_breaks_T_1",
+            "custodian_treasury": "custodian_treasury_holdings_breaks_T",
+            "custodian_treasury_t1": "custodian_treasury_holdings_breaks_T_1",
+            "custodian_treasury_price_T": "custodian_treasury_price_breaks_T",
+            "custodian_treasury_price_T-1": "custodian_treasury_price_breaks_T_1",
             "index_equity": "index_equity_holdings_breaks",
             "index_equity_price_T": "index_equity_price_breaks_T",
             "index_equity_price_T-1": "index_equity_price_breaks_T_1",
@@ -576,10 +585,14 @@ class ReconciliationReport:
         recon_lower = recon_type.lower()
         if "flex" in recon_lower:
             return "FLEX"
+        if "treasury" in recon_lower:
+            return "Treasury"
         if "equity" in recon_lower:
             return "Equity"
         if "option" in recon_lower:
             return "Option"
+        if "cusip" in df.columns:
+            return "Treasury"
         if "equity_ticker" in df.columns or "eqyticker" in df.columns:
             return "Equity"
         if "optticker" in df.columns or "occ_symbol" in df.columns:
@@ -619,10 +632,14 @@ class ReconciliationReport:
                 recon_name = price_row.get("RECON_TYPE", "")
                 fund_price = price_row.get("price_vest")
                 price_diff = price_row.get("price_diff")
+                lower_source = str(source).lower()
+                lower_recon = str(recon_name).lower()
                 if row["Asset Type"] == "Unknown":
-                    if "equity" in str(source) or "equity" in str(recon_name):
+                    if "treasury" in lower_source or "treasury" in lower_recon:
+                        row["Asset Type"] = "Treasury"
+                    elif "equity" in lower_source or "equity" in lower_recon:
                         row["Asset Type"] = "Equity"
-                    elif "option" in str(source) or "option" in str(recon_name):
+                    elif "option" in lower_source or "option" in lower_recon:
                         row["Asset Type"] = "Option"
                 if "custodian" in str(source):
                     row["Fund_Price"] = fund_price
@@ -673,11 +690,14 @@ class ReconciliationReport:
         return df
 
     def _extract_source_from_recon_type(self, recon_type: str) -> str:
-        if "custodian_equity" in recon_type:
+        recon_lower = recon_type.lower()
+        if "custodian_equity" in recon_lower:
             return "custodian_equity"
-        if "custodian_option" in recon_type:
+        if "custodian_option" in recon_lower:
             return "custodian_option"
-        if "index_equity" in recon_type:
+        if "custodian_treasury" in recon_lower:
+            return "custodian_treasury"
+        if "index_equity" in recon_lower:
             return "index_equity"
         return "unknown"
 
@@ -809,6 +829,9 @@ class ReconciliationReportPDF(BaseReportPDF, HoldingsReconciliationRenderer):
             ("Cust Opt\nHold Brk", 18),
             ("Cust Opt\nPrice T", 18),
             ("Cust Opt\nPrice T-1", 18),
+            ("Cust Tsy\nHold Brk", 18),
+            ("Cust Tsy\nPrice T", 18),
+            ("Cust Tsy\nPrice T-1", 18),
         ]
 
         self.pdf.set_font("Arial", "B", 6)
@@ -843,6 +866,9 @@ class ReconciliationReportPDF(BaseReportPDF, HoldingsReconciliationRenderer):
                 summary.get("custodian_option", {}).get("final_recon", 0),
                 summary.get("custodian_option", {}).get("price_discrepancies_T", 0),
                 summary.get("custodian_option", {}).get("price_discrepancies_T1", 0),
+                summary.get("custodian_treasury", {}).get("final_recon", 0),
+                summary.get("custodian_treasury", {}).get("price_discrepancies_T", 0),
+                summary.get("custodian_treasury", {}).get("price_discrepancies_T1", 0),
             ]
 
             self.pdf.set_font("Arial", size=7)

@@ -83,6 +83,13 @@ class HoldingsReconciliationRenderer:
             )
             return
 
+        if recon_type == "custodian_treasury":
+            self._print_custodian_treasury_section(recon_data)
+            return
+        if recon_type == "custodian_treasury_t1":
+            self._print_custodian_treasury_section(recon_data, is_t1=True)
+            return
+
         df = recon_data.get("final_recon", pd.DataFrame())
         if not isinstance(df, pd.DataFrame) or df.empty:
             self._draw_two_column_table([("Status", "No reconciliation data available")])
@@ -163,7 +170,7 @@ class HoldingsReconciliationRenderer:
         ticker_col = next(
             (
                 col
-                for col in ["equity_ticker", "optticker", "occ_symbol", "norm_ticker", "ticker"]
+                for col in ["equity_ticker", "optticker", "occ_symbol", "norm_ticker", "ticker", "cusip"]
                 if col in df.columns
             ),
             None,
@@ -256,6 +263,24 @@ class HoldingsReconciliationRenderer:
 
         if isinstance(final_df, pd.DataFrame) and not final_df.empty:
             self._print_discrepancy_table(final_df, "Option Discrepancies")
+
+        price_t = recon_data.get("price_discrepancies_T")
+        price_t1 = recon_data.get("price_discrepancies_T1")
+        self._print_price_discrepancies(price_t, price_t1, price_label="Custodian")
+
+    def _print_custodian_treasury_section(
+        self,
+        recon_data: Mapping[str, Any],
+        *,
+        is_t1: bool = False,
+    ) -> None:
+        final_df = recon_data.get("final_recon")
+        holdings_label = "Holdings Breaks T-1" if is_t1 else "Holdings Breaks"
+        if isinstance(final_df, pd.DataFrame) and not final_df.empty:
+            self._draw_two_column_table([(holdings_label, len(final_df))])
+            self._print_discrepancy_table(final_df, "Treasury Discrepancies")
+        else:
+            self._draw_two_column_table([(holdings_label, 0)])
 
         price_t = recon_data.get("price_discrepancies_T")
         price_t1 = recon_data.get("price_discrepancies_T1")

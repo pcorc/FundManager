@@ -507,7 +507,6 @@ class NAVReconciliationPDF(BaseReportPDF):
             self._add_component_sections(payload.get("details", {}))
 
         self.output()
-        self.output()
 
 
     # ------------------------------------------------------------------

@@ -268,6 +268,7 @@ def _log_generated_paths(logger: logging.Logger, paths: Mapping[str, str]) -> No
     for label, path in sorted(paths.items()):
         logger.info("Generated %s -> %s", label, path)
 
+
 def _extract_override_dates(payload: dict[str, object]) -> list[date]:
     if not payload:
         return []
