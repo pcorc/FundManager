@@ -300,9 +300,9 @@ if __name__ == "__main__":
 
     RUNTIME_OVERRIDES = {
         "analysis_type": "eod",
-        "as_of_date": "2025-07-01",
-        "funds": ['HE3B1',], # 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'
-        "previous_date": "2025-06-30",
+        "as_of_date": "2025-07-02",
+        "funds": ['HE3B1','P21026',], # 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'
+        "previous_date": "2025-07-01",
         "eod_reports": ["compliance"],
         "compliance_tests": [
             # "gics_compliance",
