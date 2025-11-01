@@ -212,6 +212,8 @@ class TradingComplianceAnalyzer:
         initial_shares: Dict[str, float] = {}
         net_trades: Dict[str, Dict[str, float]] = {}
         notional_changes: Dict[str, float] = {}
+        ex_ante_market_values: Dict[str, float] = {}
+        ex_post_market_values: Dict[str, float] = {}
         trade_activity: Dict[str, Dict[str, Any]] = {}
         asset_trade_totals: Dict[str, float] = {}
         total_traded = 0.0
@@ -252,9 +254,20 @@ class TradingComplianceAnalyzer:
             notional_delta = post_notional - ante_notional
             notional_changes[key] = notional_delta
 
+            ex_ante_market_values[key] = ante_notional
+            ex_post_market_values[key] = post_notional
+
             activity_details = self._calculate_trade_activity(post_df, asset_type=key)
             if activity_details["buys"] or activity_details["sells"]:
                 trade_activity[key] = activity_details
+            else:
+                net_payload = activity_details.get("net", {}) if activity_details else {}
+                net_values = [
+                    float(net_payload.get(field, 0.0) or 0.0)
+                    for field in ("buy_quantity", "sell_quantity", "buy_value", "sell_value")
+                ]
+                if any(net_values):
+                    trade_activity[key] = activity_details
 
             buy_value = activity_details["net"].get("buy_value", 0.0)
             sell_value = activity_details["net"].get("sell_value", 0.0)
@@ -273,6 +286,40 @@ class TradingComplianceAnalyzer:
             total_traded += trade_total
 
         # Provide convenience aliases for downstream reporting
+        ante_metrics = self._extract_summary_metrics_payload(
+            ante_results.get("summary_metrics")
+        )
+        post_metrics = self._extract_summary_metrics_payload(
+            post_results.get("summary_metrics")
+        )
+
+        total_net_assets = float(
+            post_metrics.get("total_net_assets")
+            or ante_metrics.get("total_net_assets")
+            or 0.0
+        )
+        total_assets = float(
+            post_metrics.get("total_assets") or ante_metrics.get("total_assets") or 0.0
+        )
+
+        asset_trade_summary: Dict[str, Dict[str, float]] = {}
+
+        for asset_key, trade_total in asset_trade_totals.items():
+            ante_notional = ex_ante_market_values.get(asset_key, 0.0)
+            post_notional = ex_post_market_values.get(asset_key, 0.0)
+
+            asset_trade_summary[asset_key] = {
+                "trade_value": trade_total,
+                "pct_of_tna": self._safe_percent(trade_total, total_net_assets),
+                "pct_of_total_assets": self._safe_percent(trade_total, total_assets),
+                "ex_ante_market_value": ante_notional,
+                "ex_post_market_value": post_notional,
+                "market_value_delta": post_notional - ante_notional,
+                "trade_vs_ex_ante_pct": self._safe_percent(trade_total, ante_notional),
+                "ex_post_vs_ex_ante_pct": self._safe_percent(post_notional, ante_notional),
+            }
+
+        # Provide convenience aliases for downstream reporting
         trade_summary: Dict[str, Any] = {
             "final_shares": final_shares,
             "initial_shares": initial_shares,
@@ -280,9 +327,13 @@ class TradingComplianceAnalyzer:
             "total_traded": total_traded,
             "trade_activity": trade_activity,
             "notional_changes": notional_changes,
+            "asset_trade_totals": asset_trade_totals,
+            "asset_trade_summary": asset_trade_summary,
+            "ex_ante_market_values": ex_ante_market_values,
+            "ex_post_market_values": ex_post_market_values,
+            "total_net_assets": total_net_assets,
+            "total_assets": total_assets,
         }
-
-        trade_summary.update(asset_trade_totals)
 
         return trade_summary
 
@@ -509,3 +560,12 @@ class TradingComplianceAnalyzer:
         if isinstance(value, Mapping):
             return dict(value)
         return {}
+
+    @staticmethod
+    def _safe_percent(value: float, denominator: float) -> float:
+        try:
+            if denominator in (0, 0.0, None):
+                return 0.0
+            return float(value) / float(denominator)
+        except (TypeError, ValueError, ZeroDivisionError):
+            return 0.0
