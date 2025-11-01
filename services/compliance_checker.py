@@ -73,6 +73,7 @@ class ComplianceChecker:
 
         available_tests: Dict[str, Callable[[Fund], ComplianceResult]] = {
             "summary_metrics": self.calculate_summary_metrics,
+            "gics_compliance": self.gics_compliance,
             "prospectus_80pct_policy": self.prospectus_80pct_policy,
             "diversification_IRS_check": self.diversification_IRS_check,
             "diversification_40act_check": self.diversification_40act_check,
@@ -83,7 +84,6 @@ class ComplianceChecker:
             "twelve_d1a_other_inv_cos": self.twelve_d1a_other_inv_cos,
             "twelve_d2_insurance_cos": self.twelve_d2_insurance_cos,
             "twelve_d3_sec_biz": self.twelve_d3_sec_biz,
-            "gics_compliance": self.gics_compliance,
         }
 
         # Example configurations for including/excluding tests on a per-ticker basis.
@@ -328,16 +328,6 @@ class ComplianceChecker:
             else:
                 holdings_df["tna_wgt"] = 0.0
 
-            holdings_df["shares_held"] = 0.0
-            for column in ("nav_shares", "quantity", "shares", "units"):
-                if column in holdings_df.columns:
-                    values = pd.to_numeric(holdings_df[column], errors="coerce").fillna(0.0)
-                    holdings_df["shares_held"] = np.where(
-                        holdings_df["shares_held"] == 0.0,
-                        values,
-                        holdings_df["shares_held"],
-                    )
-
             holdings_df = holdings_df.sort_values("tna_wgt", ascending=False).reset_index(drop=True)
             largest_holding = holdings_df.iloc[0].to_dict() if len(holdings_df) >= 1 else {}
 
@@ -388,7 +378,7 @@ class ComplianceChecker:
                 bottom_50_df["EQY_SH_OUT_million"] = 1.0
             denom = bottom_50_df["EQY_SH_OUT_million"].replace(0, 1)
             share_series = pd.to_numeric(
-                bottom_50_df.get("shares_held", 0.0), errors="coerce"
+                bottom_50_df.get("nav_shares", 0.0), errors="coerce"
             ).fillna(0.0)
             bottom_50_df["exceeds_10_percent"] = (
                 share_series / denom
@@ -484,9 +474,6 @@ class ComplianceChecker:
 
             if fund.has_listed_option and fund.listed_option_type == "index":
                 holdings_df = vest_eqy_holdings.copy()
-                holdings_df["equity_market_value"] = pd.to_numeric(
-                    holdings_df.get("equity_market_value", 0.0), errors="coerce"
-                ).fillna(0.0)
                 holdings_df["option_market_value"] = 0.0
                 holdings_df["net_market_value"] = holdings_df["equity_market_value"]
             else:
@@ -505,14 +492,16 @@ class ComplianceChecker:
                     holdings_df["option_market_value"] = pd.to_numeric(
                         holdings_df["option_market_value"], errors="coerce"
                     ).fillna(0.0)
+                    holdings_df = holdings_df[~holdings_df["optticker"].str.startswith(("4SPX", "4XSP", "SPX", "XSP"), na=False)]
                 else:
                     holdings_df["option_market_value"] = 0.0
+                    holdings_df = holdings_df[~holdings_df["optticker"].str.startswith(("4SPX", "4XSP", "SPX", "XSP"), na=False)]
+
                 holdings_df["net_market_value"] = (
                     holdings_df["equity_market_value"] + holdings_df["option_market_value"]
                 )
 
             holdings_df = self._fill_numeric_defaults(holdings_df)
-            holdings_df = holdings_df[~holdings_df["optticker"].str.startswith(("4SPX", "4XSP", "SPX", "XSP"), na=False)]
 
             non_qualifying_assets = 0.0
             condition_1_met = (
@@ -586,7 +575,7 @@ class ComplianceChecker:
                 col
                 for col in [
                     "ticker",
-                    "shares_held",
+                    "nav_shares",
                     "net_market_value",
                     "vest_weight",
                     "vest_ownership_of_float",
@@ -995,12 +984,10 @@ class ComplianceChecker:
 
             if "EQY_SH_OUT_million" not in insurance_holdings.columns:
                 insurance_holdings["EQY_SH_OUT_million"] = 0.0
-            if "quantity" not in insurance_holdings.columns:
-                insurance_holdings["quantity"] = 0.0
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 insurance_holdings["ownership_pct"] = np.divide(
-                    insurance_holdings["quantity"],
+                    insurance_holdings["nav_shares"],
                     insurance_holdings["EQY_SH_OUT_million"].replace(0, np.nan),
                 ).fillna(0.0)
 
@@ -1067,9 +1054,8 @@ class ComplianceChecker:
             sec_related_businesses["EQY_SH_OUT_million"] = sec_related_businesses[
                 "EQY_SH_OUT_million"
             ].replace(0, np.nan)
-            sec_related_businesses["quantity"] = sec_related_businesses.get("quantity", 0.0)
             sec_related_businesses["ownership_pct"] = (
-                sec_related_businesses["quantity"] / sec_related_businesses["EQY_SH_OUT_million"]
+                sec_related_businesses["nav_shares"] / sec_related_businesses["EQY_SH_OUT_million"]
             ).fillna(0.0)
 
             rule_1_pass = (sec_related_businesses["ownership_pct"] <= RULE_12D3_EQUITY_LIMIT).all()
@@ -1088,7 +1074,7 @@ class ComplianceChecker:
                 sec_related_businesses,
                 vest_opt_holdings,
                 how="left",
-                left_on="equity_ticker",
+                left_on="ticker",
                 right_on="equity_ticker",
                 suffixes=("", "_option"),
             )
@@ -1108,21 +1094,21 @@ class ComplianceChecker:
             max_weight = float(combined_holdings["vest_weight"].max()) if not combined_holdings.empty else 0.0
             rule_3_pass = max_weight <= RULE_12D3_ASSET_LIMIT
 
-            related_tickers = sec_related_businesses["equity_ticker"].unique()
+            related_tickers = sec_related_businesses["ticker"].unique()
             ticker_mask = vest_opt_holdings["equity_ticker"].isin(related_tickers)
-            occ_exposure = vest_opt_holdings[ticker_mask].copy()
-            occ_weight_mkt_val = float(occ_exposure["option_market_value"].sum())
-            occ_weight = occ_weight_mkt_val / total_assets if total_assets else 0.0
-            rule_3_pass_occ = occ_weight <= 0.05
+            # occ_exposure = vest_opt_holdings[ticker_mask].copy()
+            # occ_weight_mkt_val = float(occ_exposure["option_market_value"].sum())
+            # occ_weight = occ_weight_mkt_val / total_assets if total_assets else 0.0
+            # rule_3_pass_occ = occ_weight <= 0.05
 
-            is_compliant = all([rule_1_pass, rule_2_pass, rule_3_pass, rule_3_pass_occ])
+            is_compliant = all([rule_1_pass, rule_2_pass, rule_3_pass])
 
             calculations = {
                 "total_assets": total_assets,
                 "sec_related_businesses": sec_related_businesses.to_dict("records"),
                 "combined_holdings": combined_holdings.to_dict("records"),
-                "occ_weight_mkt_val": occ_weight_mkt_val,
-                "occ_weight": occ_weight,
+                # "occ_weight_mkt_val": occ_weight_mkt_val,
+                # "occ_weight": occ_weight,
                 "max_ownership_pct": float(sec_related_businesses["ownership_pct"].max()),
                 "max_weight": max_weight,
             }
@@ -1135,7 +1121,7 @@ class ComplianceChecker:
                     "rule_1_pass": rule_1_pass,
                     "rule_2_pass": rule_2_pass,
                     "rule_3_pass": rule_3_pass,
-                    "rule_3_pass_occ": rule_3_pass_occ,
+                    # "rule_3_pass_occ": rule_3_pass_occ,
                 },
                 calculations=calculations,
             )
@@ -1167,13 +1153,12 @@ class ComplianceChecker:
                 vest_eqy_holdings.loc[illiquid_mask, "equity_market_value"].sum()
             )
 
-            required_cols = {"price", "quantity"}
-            if required_cols.issubset(vest_opt_holdings.columns):
+            if vest_opt_holdings.columns:
                 opt_illiquid_mask = vest_opt_holdings["is_illiquid"] == True
                 illiquid_opt_value = float(
                     (
                         vest_opt_holdings.loc[opt_illiquid_mask, "price"]
-                        * vest_opt_holdings.loc[opt_illiquid_mask, "quantity"]
+                        * vest_opt_holdings.loc[opt_illiquid_mask, "nav_shares"]
                         * 100
                     ).sum()
                 )
@@ -1296,6 +1281,7 @@ class ComplianceChecker:
                 calculations={},
                 error=str(exc),
             )
+
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1517,33 +1503,6 @@ class ComplianceChecker:
             overlap.get("security_weight", pd.Series(dtype=float)), errors="coerce"
         ).fillna(0.0)
         return overlap[["security_ticker", "security_weight"]]
-
-    def _determine_weight_series(self, equity_df: pd.DataFrame):
-        weight_columns = [
-            "start_wgt",
-            "weight",
-            "fund_weight",
-            "portfolio_weight",
-            "weight_fund",
-        ]
-
-        for column in weight_columns:
-            if column in equity_df.columns:
-                series = pd.to_numeric(equity_df[column], errors="coerce").fillna(0.0)
-                return series, column
-
-        if {"price", "quantity"}.issubset(equity_df.columns):
-            market_values = (
-                pd.to_numeric(equity_df["price"], errors="coerce").fillna(0.0)
-                * pd.to_numeric(equity_df["quantity"], errors="coerce").fillna(0.0)
-            )
-            return market_values, "price*quantity"
-
-        if "market_value" in equity_df.columns:
-            market_values = pd.to_numeric(equity_df["market_value"], errors="coerce").fillna(0.0)
-            return market_values, "market_value"
-
-        return None, None
 
     def _resolve_gics_sector_column(self, equity_df: pd.DataFrame) -> Optional[str]:
         for column in [

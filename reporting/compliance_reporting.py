@@ -480,7 +480,7 @@ class ComplianceReport:
                 large_securities = calculations.get("large_securities", []) or []
                 if large_securities:
                     large_securities_str = ", ".join(
-                        f"({sec.get('equity_ticker', '')}, {float(sec.get('tna_wgt', 0) or 0):.2%})"
+                        f"({sec.get('ticker', '')}, {float(sec.get('tna_wgt', 0) or 0):.2%})"
                         for sec in large_securities
                     )
                 else:
@@ -659,7 +659,7 @@ class ComplianceReport:
                 holdings = calculations.get("investment_companies", []) or []
                 if holdings:
                     holdings_str = ", ".join(
-                        f"{holding.get('equity_ticker') or holding.get('ticker')} ({(holding.get('ownership_pct') or 0):.2%})"
+                        f"{holding.get('ticker')} ({(holding.get('ownership_pct') or 0):.2%})"
                         for holding in holdings
                     )
                 else:
@@ -751,7 +751,7 @@ class ComplianceReport:
                 sec_related = calculations.get("sec_related_businesses", []) or []
                 if sec_related:
                     sec_related_str = ", ".join(
-                        f"{biz.get('equity_ticker') or biz.get('ticker')} ({(biz.get('ownership_pct') or 0)*100:.5f}%)"
+                        f"{biz.get('ticker')} ({(biz.get('ownership_pct') or 0)*100:.5f}%)"
                         for biz in sec_related
                     )
                 else:
@@ -760,7 +760,7 @@ class ComplianceReport:
                 combined = calculations.get("combined_holdings", []) or []
                 if combined:
                     combined_str = ", ".join(
-                        f"{holding.get('equity_ticker') or holding.get('ticker')} ({(holding.get('vest_weight') or 0)*100:.2f}%)"
+                        f"{holding.get('ticker')} ({(holding.get('vest_weight') or 0)*100:.2f}%)"
                         for holding in combined
                     )
                 else:
@@ -782,10 +782,10 @@ class ComplianceReport:
                             "Rule 3 (<=5% total assets)",
                             f'=IF(L{excel_row}<=0.05,"PASS","FAIL")',
                         ),
-                        (
-                            "Rule 3 OCC (<=5% TNA)",
-                            f'=IF(N{excel_row}<=0.05,"PASS","FAIL")',
-                        ),
+                        # (
+                        #     "Rule 3 OCC (<=5% TNA)",
+                        #     f'=IF(N{excel_row}<=0.05,"PASS","FAIL")',
+                        # ),
                         (
                             "12d3 Sec Biz Compliant",
                             f'=IF(AND(C{excel_row}="PASS",D{excel_row}="PASS",E{excel_row}="PASS",F{excel_row}="PASS"),"PASS","FAIL")',
@@ -795,11 +795,11 @@ class ComplianceReport:
                         ("Total Assets", float(calculations.get("total_assets", 0.0) or 0.0)),
                         ("Max Ownership %", float(calculations.get("max_ownership_pct", 0.0) or 0.0)),
                         ("Max Weight", float(calculations.get("max_weight", 0.0) or 0.0)),
-                        (
-                            "OCC Market Value",
-                            float(calculations.get("occ_weight_mkt_val", 0.0) or 0.0),
-                        ),
-                        ("OCC Weight", float(calculations.get("occ_weight", 0.0) or 0.0)),
+                        # (
+                        #     "OCC Market Value",
+                        #     float(calculations.get("occ_weight_mkt_val", 0.0) or 0.0),
+                        # ),
+                        # ("OCC Weight", float(calculations.get("occ_weight", 0.0) or 0.0)),
                     ]
                 )
 
