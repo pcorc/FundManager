@@ -239,7 +239,7 @@ def run_eod_range_mode(
                 day_results,
                 report_date=trade_date,
                 output_dir=str(output_dir),
-                test_functions=params.compliance_tests or None,
+                test_functions=compliance_tests or None,
                 create_pdf=create_pdf,
             )
 
@@ -260,7 +260,7 @@ def run_eod_range_mode(
         stacked_report = build_compliance_reports_for_range(
             results_by_date.items(),
             output_dir=str(output_dir),
-            test_functions=params.compliance_tests or None,
+            test_functions=compliance_tests or None,
             create_pdf=create_pdf,
         )
 

@@ -541,7 +541,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_equity": True,
         "has_listed_option": True,
         "has_flex_option": True,
-        "flex_option_type": "single_stock",
+        "flex_option_type": "index",
         "has_otc": False,
         "has_treasury": False,
         "overlap_table": "overlap_test",

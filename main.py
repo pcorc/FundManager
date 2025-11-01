@@ -386,7 +386,7 @@ if __name__ == "__main__":
     # RUNTIME_OVERRIDES = {
     #     "analysis_type": "eod",
     #     "as_of_date": "2025-07-30",
-    #     "funds": ['P21026',], # 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'
+    #     "funds": ['R21126',], # 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'
     #     "previous_date": "2025-07-29",
     #     "eod_reports": ["compliance"],
     #     "compliance_tests": [
@@ -427,14 +427,14 @@ if __name__ == "__main__":
 
     TIME_SERIES_OVERRIDES = {
         "analysis_type": "eod",
-        "funds": [    'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'],
+        "funds": ['P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'],
         "eod_reports": ["compliance"],
         "compliance_tests": [
             "diversification_40act_check",
             "diversification_IRS_check",
         ],
-        "start_date": "2025-07-29",
-        "end_date": "2025-07-30",
+        "start_date": "2025-06-30",
+        "end_date": "2025-09-30",
         "create_pdf": False,
         "output_dir": "./outputs",
         "generate_daily_reports": False,
