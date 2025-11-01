@@ -1256,21 +1256,6 @@ class BulkDataLoader:
             return current
         return current, previous
 
-    def _resolve_index_identifier(self, fund) -> str:
-        """Determine which identifier to use when filtering provider data."""
-        mapping = fund.mapping_data
-        for key in (
-            'index_identifier',
-            'index_fund_code',
-            'index_ticker',
-            'index_name',
-            'account_number_index',
-        ):
-            value = mapping.get(key)
-            if value and value != 'NULL':
-                return value
-        return fund.index_identifier or fund.name
-
     def _get_nasdaq_holdings(
         self,
         target_date: date,
@@ -1283,7 +1268,7 @@ class BulkDataLoader:
 
         bbg = getattr(self.base_cls.classes, 'bbg_equity_flds_blotter', None)
         columns = [
-            nasdaq.date.label('date'),
+            nasdaq.file_date.label('date'),
             nasdaq.fund.label('fund'),
             nasdaq.ticker.label('equity_ticker'),
             nasdaq.index_weight.label('weight_index'),
@@ -1301,9 +1286,9 @@ class BulkDataLoader:
         query = self.session.query(*columns)
         if bbg is not None:
             query = query.join(bbg, nasdaq.ticker == bbg.TICKER)
-        filters = [nasdaq.time_of_day == 'EOD', nasdaq.fund == self._resolve_index_identifier(fund)]
+        filters = [nasdaq.fund == fund.index_ticker_join]
         if previous_date is not None:
-            query = query.filter(nasdaq.date.in_([target_date, previous_date]), *filters)
+            query = query.filter(nasdaq.file_date.in_([target_date, previous_date]), *filters)
         else:
             query = query.filter(nasdaq.date == target_date, *filters)
         query = query.group_by(nasdaq.ticker)
@@ -1349,7 +1334,7 @@ class BulkDataLoader:
         query = self.session.query(*columns)
         if bbg is not None:
             query = query.join(bbg, sp.TICKER == bbg.TICKER)
-        query = query.filter(sp.INDEX_CODE == self._resolve_index_identifier(fund))
+        query = query.filter(sp.INDEX_CODE == fund.index_ticker_join)
         if previous_date is not None:
             query = query.filter(sp.EFFECTIVE_DATE.in_([target_date, previous_date]))
         else:
@@ -1377,7 +1362,7 @@ class BulkDataLoader:
             raise AttributeError('cboe_holdings table is not reflected')
 
         bbg = getattr(self.base_cls.classes, 'bbg_equity_flds_blotter', None)
-        identifier = self._resolve_index_identifier(fund) or 'SPATI'
+        identifier = fund.index_ticker_join
         columns = [
             cboe.date.label('date'),
             cboe.index_name.label('fund'),

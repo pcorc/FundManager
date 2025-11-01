@@ -29,16 +29,8 @@ class FundClass:
         return self.config.get("vehicle_wrapper")
 
     @property
-    def index_identifier(self) -> Optional[str]:
-        value = self.config.get("index_identifier")
-        if isinstance(value, str):
-            trimmed = value.strip()
-            if not trimmed or trimmed.upper() == "NULL":
-                return None
-            return trimmed
-        if value is not None:
-            return str(value).strip() or None
-        return None
+    def index_ticker_join(self) -> Optional[str]:
+        return self.config.get("index_ticker_join")
 
     @property
     def custodian_type(self) -> Optional[str]:
