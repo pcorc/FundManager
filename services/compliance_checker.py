@@ -63,11 +63,15 @@ class ComplianceChecker:
         funds: Optional[Dict[str, Fund]] = None,
         date=None,
         base_cls=None,
+        *,
+        analysis_type: Optional[str] = None,
     ) -> None:
         self.session = session
         self.funds: Dict[str, Fund] = funds or {}
         self.date = date
         self.base_cls = base_cls
+        analysis = (analysis_type or "eod").strip().lower()
+        self.analysis_type = analysis if analysis in {"eod", "ex_ante", "ex_post"} else "eod"
 
     # ------------------------------------------------------------------
     # Public API
@@ -381,9 +385,8 @@ class ComplianceChecker:
             if "EQY_SH_OUT_million" not in bottom_50_df.columns:
                 bottom_50_df["EQY_SH_OUT_million"] = 1.0
             denom = bottom_50_df["EQY_SH_OUT_million"].replace(0, 1)
-            share_series = pd.to_numeric(
-                bottom_50_df.get("nav_shares", 0.0), errors="coerce"
-            ).fillna(0.0)
+            share_col, share_series = self._resolve_share_series(bottom_50_df)
+            bottom_50_df[share_col] = share_series
             bottom_50_df["exceeds_10_percent"] = (
                 share_series / denom
             ) > IRS_OWNERSHIP_LIMIT
@@ -551,12 +554,11 @@ class ComplianceChecker:
                 pd.to_numeric(remaining_securities["EQY_SH_OUT_million"], errors="coerce").replace(0, 1)
             )
 
-            remaining_securities["nav_shares"] = pd.to_numeric(
-                remaining_securities["nav_shares"], errors="coerce"
-            ).fillna(0.0)
+            share_col, share_series = self._resolve_share_series(remaining_securities)
+            remaining_securities[share_col] = share_series
 
             remaining_securities["vest_ownership_of_float"] = (
-                remaining_securities["nav_shares"] / remaining_securities["EQY_SH_OUT_million"]
+                share_series / remaining_securities["EQY_SH_OUT_million"]
             ).fillna(0.0)
             issuer_compliance_2b = remaining_securities["vest_ownership_of_float"] <= ACT_40_OWNERSHIP_LIMIT
             condition_2b_met = bool(issuer_compliance_2b.all())
@@ -579,7 +581,7 @@ class ComplianceChecker:
                 col
                 for col in [
                     "ticker",
-                    "nav_shares",
+                    share_col,
                     "net_market_value",
                     "vest_weight",
                     "vest_ownership_of_float",
@@ -627,6 +629,7 @@ class ComplianceChecker:
                 "cumulative_weight_excluded": cumulative_weight_excluded,
                 "cumulative_weight_remaining": cumulative_weight_remaining,
                 "remaining_stocks_details": remaining_stocks_details,
+                "share_column_used": share_col,
                 "max_ownership_float": max_ownership_float,
                 "condition_2a_occ_met": condition_2a_occ_met,
                 "occ_market_value": occ_weight_mkt_val,
@@ -989,9 +992,12 @@ class ComplianceChecker:
             if "EQY_SH_OUT_million" not in insurance_holdings.columns:
                 insurance_holdings["EQY_SH_OUT_million"] = 0.0
 
+            share_col, share_series = self._resolve_share_series(insurance_holdings)
+            insurance_holdings[share_col] = share_series
+
             with np.errstate(divide="ignore", invalid="ignore"):
                 insurance_holdings["ownership_pct"] = np.divide(
-                    insurance_holdings["nav_shares"],
+                    share_series,
                     insurance_holdings["EQY_SH_OUT_million"].replace(0, np.nan),
                 ).fillna(0.0)
 
@@ -1058,8 +1064,10 @@ class ComplianceChecker:
             sec_related_businesses["EQY_SH_OUT_million"] = sec_related_businesses[
                 "EQY_SH_OUT_million"
             ].replace(0, np.nan)
+            share_col, share_series = self._resolve_share_series(sec_related_businesses)
+            sec_related_businesses[share_col] = share_series
             sec_related_businesses["ownership_pct"] = (
-                sec_related_businesses["nav_shares"] / sec_related_businesses["EQY_SH_OUT_million"]
+                share_series / sec_related_businesses["EQY_SH_OUT_million"]
             ).fillna(0.0)
 
             rule_1_pass = (sec_related_businesses["ownership_pct"] <= RULE_12D3_EQUITY_LIMIT).all()
@@ -1159,10 +1167,12 @@ class ComplianceChecker:
 
             if vest_opt_holdings.columns:
                 opt_illiquid_mask = vest_opt_holdings["is_illiquid"] == True
+                share_col, option_shares = self._resolve_share_series(vest_opt_holdings)
+                vest_opt_holdings[share_col] = option_shares
                 illiquid_opt_value = float(
                     (
                         vest_opt_holdings.loc[opt_illiquid_mask, "price"]
-                        * vest_opt_holdings.loc[opt_illiquid_mask, "nav_shares"]
+                        * option_shares.loc[opt_illiquid_mask]
                         * 100
                     ).sum()
                 )
@@ -1503,7 +1513,8 @@ class ComplianceChecker:
             df.get("equity_market_value", 0.0), errors="coerce"
         ).fillna(0.0)
 
-        df["nav_shares"] = pd.to_numeric(df["nav_shares"], errors="coerce").fillna(0.0)
+        share_col, share_series = self._resolve_share_series(df)
+        df[share_col] = share_series
         df["ticker"] = df["ticker"].astype(str)
 
         google_mask = df["ticker"].isin(["GOOG", "GOOGL"])
@@ -1646,6 +1657,41 @@ class ComplianceChecker:
         merged = merged.drop(columns=["security_weight", "overlap_market_value"], errors="ignore")
 
         return merged, overlap_details.reindex(columns=overlap_columns).reset_index(drop=True)
+
+    @property
+    def share_column(self) -> str:
+        """Preferred share column name for the active analysis type."""
+
+        return "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
+
+    def _resolve_share_series(
+        self,
+        df: pd.DataFrame,
+        *,
+        preferred: Optional[str] = None,
+    ) -> Tuple[str, pd.Series]:
+        """Return the share column name to use and the numeric series for calculations."""
+
+        if not isinstance(df, pd.DataFrame):
+            share_col = preferred or self.share_column
+            return share_col, pd.Series(dtype=float)
+
+        if df.empty:
+            share_col = preferred or self.share_column
+            return share_col, pd.Series(0.0, index=df.index, dtype=float)
+
+        share_col = preferred or self.share_column
+        candidates: list[str] = [share_col]
+        for fallback in ("nav_shares", "iiv_shares", "shares", "quantity", "units"):
+            if fallback not in candidates:
+                candidates.append(fallback)
+
+        for column in candidates:
+            if column in df.columns:
+                series = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
+                return column, series
+
+        return share_col, pd.Series(0.0, index=df.index, dtype=float)
 
     @staticmethod
     def _fill_numeric_defaults(df: pd.DataFrame) -> pd.DataFrame:

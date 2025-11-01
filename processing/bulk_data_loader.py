@@ -1217,7 +1217,7 @@ class BulkDataLoader:
     ) -> pd.DataFrame | Tuple[pd.DataFrame, pd.DataFrame]:
         """Dispatch to the appropriate index provider query."""
         provider_map = {
-            'nasdaq_holdings': self._get_nasdaq_holdings,
+            'nasdaq_pro': self._get_nasdaq_holdings,
             'sp_holdings': self._get_sp_holdings,
             'cboe_holdings': self._get_cboe_holdings,
             'dogg_index': self._get_dogg_index,
@@ -1277,7 +1277,7 @@ class BulkDataLoader:
         fund,
         previous_date: Optional[date],
     ) -> pd.DataFrame | Tuple[pd.DataFrame, pd.DataFrame]:
-        nasdaq = getattr(self.base_cls.classes, 'nasdaq_holdings', None)
+        nasdaq = getattr(self.base_cls.classes, 'nasdaq_pro', None)
         if nasdaq is None:
             raise AttributeError('nasdaq_holdings table is not reflected')
 

@@ -288,7 +288,8 @@ class FundManager:
                 session=None,
                 funds={fund.name: fund},
                 date=self.data_store.date,
-                base_cls=None
+                base_cls=None,
+                analysis_type=self.analysis_type,
             )
             requested = list(tests) if tests else None
             results = compliance_checker.run_compliance_tests(requested)

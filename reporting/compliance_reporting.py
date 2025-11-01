@@ -108,6 +108,34 @@ class ComplianceReport:
 
     # ------------------------------------------------------------------
     @staticmethod
+    def _format_share_label(column: Optional[str]) -> str:
+        if not column:
+            return "Shares"
+        label = str(column).strip()
+        if not label:
+            return "Shares"
+        title = label.replace("_", " ").title()
+        return (
+            title.replace("Nav", "NAV")
+            .replace("Iiv", "IIV")
+            .replace("Dan", "DAN")
+        )
+
+    @staticmethod
+    def _extract_share_value(entry: Mapping[str, Any]) -> float:
+        if not isinstance(entry, Mapping):
+            return 0.0
+        for key in ("nav_shares", "iiv_shares", "shares", "quantity", "units"):
+            if key in entry:
+                try:
+                    value = entry.get(key)
+                    return float(value or 0.0)
+                except (TypeError, ValueError):
+                    continue
+        return 0.0
+
+    # ------------------------------------------------------------------
+    @staticmethod
     def _looks_like_date_mapping(payload: Mapping[object, Any]) -> bool:
         if not payload:
             return False
@@ -468,10 +496,17 @@ class ComplianceReport:
 
                 calculations = forty_act.get("calculations", {}) or {}
 
+                share_column = calculations.get("share_column_used")
+                share_label = self._format_share_label(share_column)
+
                 issuer_limited = calculations.get("issuer_limited_securities", []) or []
                 if issuer_limited:
                     issuer_limited_str = ", ".join(
-                        f"({sec.get('ticker')}, {sec.get('nav_shares')}, {sec.get('net_market_value', 0):,.2f})"
+                        "({ticker}, {shares:,.0f}, {value:,.2f})".format(
+                            ticker=sec.get("ticker"),
+                            shares=self._extract_share_value(sec),
+                            value=float(sec.get("net_market_value", 0.0) or 0.0),
+                        )
                         for sec in issuer_limited
                     )
                 else:
@@ -485,7 +520,7 @@ class ComplianceReport:
                     remaining_str = ", ".join(
                         "({ticker}, {shares:,.0f}, {vest_weight:.2%}, {ownership:.7%})".format(
                             ticker=entry.get('ticker'),
-                            shares=entry.get('nav_shares', 0) or 0,
+                            shares=self._extract_share_value(entry),
                             vest_weight=float(entry.get('vest_weight', 0.0) or 0.0),
                             ownership=float(entry.get('vest_ownership_of_float', 0.0) or 0.0),
                         )
@@ -493,6 +528,13 @@ class ComplianceReport:
                     )
                 else:
                     remaining_str = "None"
+
+                remaining_label = (
+                    f"Remaining Securities (Ticker, {share_label}, Vest Weight, Vest Ownership of Float)"
+                )
+                issuer_label = (
+                    f"Issuer Limited Assets (Condition 2a) (Ticker, {share_label}, Mkt Value)"
+                )
 
                 max_ownership_raw = calculations.get("max_ownership_float", 0.0)
                 try:
@@ -516,21 +558,26 @@ class ComplianceReport:
                         ("Date", report_date),
                         ("Fund", fund_name),
                         ("Fund Registration", calculations.get("fund_registration")),
+                        ("Fund Status Today", calculations.get("fund_status_today")),
+                        (
+                            "Registration Match",
+                            f'=IF(C{excel_row}=D{excel_row},"PASS","FAIL")',
+                        ),
                         (
                             "Condition 40 Act 1",
-                            f'=IF(J{excel_row}/H{excel_row}>=0.75,"PASS","FAIL")',
+                            f'=IF(L{excel_row}/J{excel_row}>=0.75,"PASS","FAIL")',
                         ),
                         (
                             "Condition 40 Act 2a",
-                            f'=IF(L{excel_row}=0,"PASS","FAIL")',
+                            f'=IF(O{excel_row}="None","PASS","FAIL")',
                         ),
                         (
                             "Condition 40 Act 2b",
-                            f'=IF(R{excel_row}="","",IF(R{excel_row}<=0.1,"PASS","FAIL"))',
+                            f'=IF(T{excel_row}="","",IF(T{excel_row}<=0.1,"PASS","FAIL"))',
                         ),
                         (
                             "Condition 2a OCC",
-                            f'=IF(S{excel_row}=0,"PASS",IF(S{excel_row}<=0.05*J{excel_row},"PASS","FAIL"))',
+                            f'=IF(U{excel_row}=0,"PASS",IF(U{excel_row}<=0.05*L{excel_row},"PASS","FAIL"))',
                         ),
                         ("Total Assets", float(calculations.get("total_assets", 0.0) or 0.0)),
                         (
@@ -544,7 +591,7 @@ class ComplianceReport:
                             float(calculations.get("issuer_limited_sum", 0.0) or 0.0),
                         ),
                         (
-                            "Issuer Limited Assets (Condition 2a) (Ticker, Shares, Mkt Value)",
+                            issuer_label,
                             issuer_limited_str,
                         ),
                         ("Excluded Securities (25% Bucket)", excluded_str),
@@ -557,7 +604,7 @@ class ComplianceReport:
                             float(calculations.get("cumulative_weight_remaining", 0.0) or 0.0),
                         ),
                         (
-                            "Remaining Securities (Ticker, Shares Held, Vest Weight, Vest Ownership of Float)",
+                            remaining_label,
                             remaining_str,
                         ),
                         ("Max Ownership % of Float in 75% bucket", max_ownership_float),
@@ -996,13 +1043,18 @@ class ComplianceReport:
                         keyword in header_text
                         for keyword in ("percent", "pct", "weight", "ownership")
                     )
+                    is_formula_percent = header_text in {"formula", "formula (mv)"}
                     for cell in column_cells:
                         try:
                             value = cell.value
                             if value is not None:
                                 max_length = max(max_length, len(str(value)))
                                 if cell.row > 1 and cell.data_type in {"n", "f"}:
-                                    cell.number_format = "0.0000%" if is_percent else "#,##0.00"
+                                    if is_percent or is_formula_percent:
+                                        format_string = "0.00%" if is_formula_percent else "0.0000%"
+                                        cell.number_format = format_string
+                                    else:
+                                        cell.number_format = "#,##0.00"
                         except Exception:  # pragma: no cover - defensive
                             continue
                     ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
@@ -1020,65 +1072,366 @@ class ComplianceReportPDF(BaseReportPDF):
 
     # ------------------------------------------------------------------
     def generate_pdf(self) -> None:
-        summary_data: list[list[object]] = []
-        sorted_results = sorted(
-            self.results.items(),
-            key=lambda item: (item[0][1], item[0][0]),
-        )
+        grouped_results = self._group_results_by_fund()
+        if not grouped_results:
+            self.pdf.add_page()
+            self._add_header("Compliance Overview")
+            self.pdf.set_font("Arial", "", 9)
+            self.pdf.cell(0, 6, "No compliance results available.", ln=True)
+            self.output()
+            return
 
-        for (fund_name, date_str), fund_data in sorted_results:
-            cash = self._extract_numeric(fund_data.get("cash_data"))
-            treasury = (
-                fund_data.get("prospectus_80pct_policy", {})
-                .get("calculations", {})
-                .get("total_tbill_value", 0)
-            )
-            equity = (
-                fund_data.get("prospectus_80pct_policy", {})
-                .get("calculations", {})
-                .get("total_equity_market_value", 0)
-            )
-            std_option_dan = (
-                fund_data.get("prospectus_80pct_policy", {})
-                .get("calculations", {})
-                .get("total_opt_delta_notional_value", 0)
-            )
-            std_option_mv = (
-                fund_data.get("prospectus_80pct_policy", {})
-                .get("calculations", {})
-                .get("total_opt_market_value", 0)
-            )
-
-            summary_data.append(
-                [
-                    fund_name,
-                    f"{cash:,.0f}",
-                    f"{treasury:,.0f}",
-                    f"{equity:,.0f}",
-                    f"{std_option_dan:,.0f}",
-                    f"{std_option_mv:,.0f}",
-                ]
-            )
+        self.grouped_results = grouped_results
+        self.fund_order = sorted(grouped_results)
 
         self.pdf.add_page()
-        self._add_header("Compliance Summary")
-        self._draw_table(
-            [
-                "Fund",
-                "Cash",
-                "Treasury",
-                "Equity",
-                "Std Option (DAN)",
-                "Std Option (MV)",
-            ],
-            summary_data,
-        )
-        self.pdf.ln(6)
+        self._add_header("Compliance Overview")
 
-        self._add_header("Detailed Compliance Report")
-        for (fund_name, date_str), fund_data in sorted_results:
-            report_date = self._parse_date(date_str)
-            self._add_fund_section(fund_name, report_date, fund_data)
+        summary_metrics = [
+            ("Cash", lambda data: self._format_currency(self._get_summary_value(data, "cash_value"))),
+            ("Treasury", lambda data: self._format_currency(self._get_summary_value(data, "treasury"))),
+            ("Equity", lambda data: self._format_currency(self._get_summary_value(data, "equity_market_value"))),
+            ("Option DAN", lambda data: self._format_currency(self._get_summary_value(data, "option_delta_adjusted_notional"))),
+            ("Option MV", lambda data: self._format_currency(self._get_summary_value(data, "option_market_value"))),
+            ("Total Assets", lambda data: self._format_currency(self._get_summary_value(data, "total_assets"))),
+            ("Total Net Assets", lambda data: self._format_currency(self._get_summary_value(data, "total_net_assets"))),
+        ]
+
+        prospectus_metrics = [
+            ("Status", lambda data: self._status_text(self._get_test_payload(data, "prospectus_80pct_policy").get("is_compliant"))),
+            (
+                "Result (DAN)",
+                lambda data: self._format_percent(
+                    self._get_calculation(self._get_test_payload(data, "prospectus_80pct_policy"), "names_test")
+                ),
+            ),
+            (
+                "Result (MV)",
+                lambda data: self._format_percent(
+                    self._get_calculation(self._get_test_payload(data, "prospectus_80pct_policy"), "names_test_mv")
+                ),
+            ),
+            (
+                "Options In Scope",
+                lambda data: self._yes_no(
+                    self._get_calculation(self._get_test_payload(data, "prospectus_80pct_policy"), "options_in_scope")
+                ),
+            ),
+            (
+                "Option Contribution",
+                lambda data: self._format_currency(
+                    self._get_calculation(self._get_test_payload(data, "prospectus_80pct_policy"), "option_contribution")
+                ),
+            ),
+        ]
+
+        forty_act_metrics = [
+            (
+                "Overall Status",
+                lambda data: self._status_text(
+                    self._get_test_payload(data, "diversification_40act_check").get("is_compliant")
+                ),
+            ),
+            (
+                "Registered Status",
+                lambda data: self._title_case(
+                    self._get_calculation(
+                        self._get_test_payload(data, "diversification_40act_check"), "fund_registration"
+                    )
+                ),
+            ),
+            (
+                "Status Today",
+                lambda data: self._title_case(
+                    self._get_calculation(
+                        self._get_test_payload(data, "diversification_40act_check"), "fund_status_today"
+                    )
+                ),
+            ),
+            (
+                "Registration Match",
+                lambda data: self._status_text(
+                    self._registrations_match(
+                        self._get_test_payload(data, "diversification_40act_check")
+                    )
+                ),
+            ),
+            (
+                "Condition 1",
+                lambda data: self._status_text(
+                    self._get_detail(
+                        self._get_test_payload(data, "diversification_40act_check"),
+                        "condition_40act_1",
+                    )
+                ),
+            ),
+            (
+                "Condition 2a",
+                lambda data: self._status_text(
+                    self._get_detail(
+                        self._get_test_payload(data, "diversification_40act_check"),
+                        "condition_40act_2a",
+                    )
+                ),
+            ),
+            (
+                "Condition 2b",
+                lambda data: self._status_text(
+                    self._get_detail(
+                        self._get_test_payload(data, "diversification_40act_check"),
+                        "condition_40act_2b",
+                    )
+                ),
+            ),
+            (
+                "Condition 2a OCC",
+                lambda data: self._status_text(
+                    self._get_detail(
+                        self._get_test_payload(data, "diversification_40act_check"),
+                        "condition_40act_2a_occ",
+                    )
+                ),
+            ),
+            (
+                "Max Ownership %",
+                lambda data: self._format_percent(
+                    self._get_calculation(
+                        self._get_test_payload(data, "diversification_40act_check"),
+                        "max_ownership_float",
+                    )
+                ),
+            ),
+        ]
+
+        irs_metrics = [
+            (
+                "Overall Status",
+                lambda data: self._status_text(
+                    self._get_test_payload(data, "diversification_IRS_check").get("is_compliant")
+                ),
+            ),
+            (
+                "Condition 1",
+                lambda data: self._status_text(
+                    self._get_detail(self._get_test_payload(data, "diversification_IRS_check"), "condition_IRS_1")
+                ),
+            ),
+            (
+                "Condition 2a 50%",
+                lambda data: self._status_text(
+                    self._get_detail(self._get_test_payload(data, "diversification_IRS_check"), "condition_IRS_2_a_50")
+                ),
+            ),
+            (
+                "Condition 2a 5%",
+                lambda data: self._status_text(
+                    self._get_detail(self._get_test_payload(data, "diversification_IRS_check"), "condition_IRS_2_a_5")
+                ),
+            ),
+            (
+                "Condition 2a 10%",
+                lambda data: self._status_text(
+                    self._get_detail(self._get_test_payload(data, "diversification_IRS_check"), "condition_IRS_2_a_10")
+                ),
+            ),
+            (
+                "Condition 2b",
+                lambda data: self._status_text(
+                    self._get_detail(self._get_test_payload(data, "diversification_IRS_check"), "condition_IRS_2_b")
+                ),
+            ),
+            (
+                "Sum Large Securities %",
+                lambda data: self._format_percent(
+                    self._get_calculation(
+                        self._get_test_payload(data, "diversification_IRS_check"),
+                        "sum_large_securities_weights",
+                    )
+                ),
+            ),
+            (
+                "Large Securities Count",
+                lambda data: self._format_integer(
+                    self._get_calculation(
+                        self._get_test_payload(data, "diversification_IRS_check"),
+                        "large_securities_count",
+                    )
+                ),
+            ),
+        ]
+
+        irc_metrics = [
+            (
+                "Overall Status",
+                lambda data: self._status_text(
+                    self._get_test_payload(data, "diversification_IRC_check").get("is_compliant")
+                ),
+            ),
+            (
+                "Condition 55",
+                lambda data: self._status_text(
+                    self._get_detail(self._get_test_payload(data, "diversification_IRC_check"), "condition_IRC_55")
+                ),
+            ),
+            (
+                "Condition 70",
+                lambda data: self._status_text(
+                    self._get_detail(self._get_test_payload(data, "diversification_IRC_check"), "condition_IRC_70")
+                ),
+            ),
+            (
+                "Condition 80",
+                lambda data: self._status_text(
+                    self._get_detail(self._get_test_payload(data, "diversification_IRC_check"), "condition_IRC_80")
+                ),
+            ),
+            (
+                "Condition 90",
+                lambda data: self._status_text(
+                    self._get_detail(self._get_test_payload(data, "diversification_IRC_check"), "condition_IRC_90")
+                ),
+            ),
+            (
+                "Top 1 Exposure",
+                lambda data: self._format_percent(
+                    self._get_calculation(self._get_test_payload(data, "diversification_IRC_check"), "top_1")
+                ),
+            ),
+            (
+                "Top 4 Exposure",
+                lambda data: self._format_percent(
+                    self._get_calculation(self._get_test_payload(data, "diversification_IRC_check"), "top_4")
+                ),
+            ),
+        ]
+
+        illiquid_metrics = [
+            (
+                "Status",
+                lambda data: self._status_text(
+                    self._get_test_payload(data, "max_15pct_illiquid_sai").get("is_compliant")
+                ),
+            ),
+            (
+                "Illiquid Exposure %",
+                lambda data: self._format_percent(
+                    self._get_calculation(self._get_test_payload(data, "max_15pct_illiquid_sai"), "illiquid_percentage")
+                ),
+            ),
+            (
+                "Total Illiquid Value",
+                lambda data: self._format_currency(
+                    self._get_calculation(self._get_test_payload(data, "max_15pct_illiquid_sai"), "total_illiquid_value")
+                ),
+            ),
+        ]
+
+        real_estate_metrics = [
+            (
+                "Real Estate Exposure",
+                lambda data: self._format_percent(
+                    self._get_calculation(self._get_test_payload(data, "real_estate_check"), "real_estate_percentage")
+                ),
+            ),
+        ]
+
+        commodities_metrics = [
+            (
+                "Commodities Exposure",
+                lambda data: self._format_percent(
+                    self._first_not_none(
+                        self._get_calculation(
+                            self._get_test_payload(data, "commodities_check"),
+                            "commodities_percentage",
+                        ),
+                        self._get_calculation(
+                            self._get_test_payload(data, "commodities_check"),
+                            "commodities_exposure",
+                        ),
+                    )
+                ),
+            ),
+        ]
+
+        rule_12d1_metrics = [
+            (
+                "Status",
+                lambda data: self._status_text(
+                    self._get_test_payload(data, "twelve_d1a_other_inv_cos").get("is_compliant")
+                ),
+            ),
+            (
+                "Test 1",
+                lambda data: self._status_text(
+                    self._get_detail(self._get_test_payload(data, "twelve_d1a_other_inv_cos"), "test_1_pass")
+                ),
+            ),
+            (
+                "Test 2",
+                lambda data: self._status_text(
+                    self._get_detail(self._get_test_payload(data, "twelve_d1a_other_inv_cos"), "test_2_pass")
+                ),
+            ),
+            (
+                "Test 3",
+                lambda data: self._status_text(
+                    self._get_detail(self._get_test_payload(data, "twelve_d1a_other_inv_cos"), "test_3_pass")
+                ),
+            ),
+        ]
+
+        rule_12d2_metrics = [
+            (
+                "Status",
+                lambda data: self._status_text(
+                    self._get_test_payload(data, "twelve_d2_insurance_cos").get("is_compliant")
+                ),
+            ),
+            (
+                "Max Ownership",
+                lambda data: self._format_percent(
+                    self._get_calculation(self._get_test_payload(data, "twelve_d2_insurance_cos"), "max_ownership_pct")
+                ),
+            ),
+        ]
+
+        rule_12d3_metrics = [
+            (
+                "Status",
+                lambda data: self._status_text(
+                    self._get_test_payload(data, "twelve_d3_sec_biz").get("is_compliant")
+                ),
+            ),
+            (
+                "Rule 1",
+                lambda data: self._status_text(
+                    self._get_detail(self._get_test_payload(data, "twelve_d3_sec_biz"), "rule_1_pass")
+                ),
+            ),
+            (
+                "Rule 2",
+                lambda data: self._status_text(
+                    self._get_detail(self._get_test_payload(data, "twelve_d3_sec_biz"), "rule_2_pass")
+                ),
+            ),
+        ]
+
+        sections = [
+            ("Summary Metrics", summary_metrics, None),
+            ("Prospectus 80% Policy", prospectus_metrics, "prospectus_80pct"),
+            ("40 Act Diversification", forty_act_metrics, "40act"),
+            ("IRS Diversification", irs_metrics, "irs"),
+            ("IRC Diversification", irc_metrics, "irc"),
+            ("15% Illiquid Assets", illiquid_metrics, "illiquid"),
+            ("Real Estate", real_estate_metrics, "real_estate"),
+            ("Commodities", commodities_metrics, "commodities"),
+            ("Rule 12d1-1", rule_12d1_metrics, "12d1"),
+            ("Rule 12d2", rule_12d2_metrics, "12d2"),
+            ("Rule 12d3", rule_12d3_metrics, "12d3"),
+        ]
+
+        for title, metrics, footnote in sections:
+            self._render_metric_section(title, metrics, footnote_key=footnote)
 
         self.output()
 
@@ -1089,6 +1442,54 @@ class ComplianceReportPDF(BaseReportPDF):
             return datetime.fromisoformat(value).date()
         except Exception:  # pragma: no cover - fallback
             return value
+
+    def _group_results_by_fund(self) -> Dict[str, Dict[str, Any]]:
+        grouped: Dict[str, Dict[str, Any]] = {}
+        for (fund_name, date_str), payload in sorted(
+            self.results.items(), key=lambda item: (item[0][0], item[0][1])
+        ):
+            grouped[fund_name] = payload
+        return grouped
+
+    def _render_metric_section(
+        self,
+        title: str,
+        metrics: Iterable[Tuple[str, Any]],
+        *,
+        footnote_key: Optional[str] = None,
+    ) -> None:
+        metrics = list(metrics)
+        if not metrics:
+            return
+
+        rows: list[list[str]] = []
+        for label, extractor in metrics:
+            row: list[str] = [self._sanitize_text(label)]
+            for fund in self.fund_order:
+                fund_payload = self.grouped_results.get(fund, {})
+                try:
+                    value = extractor(fund_payload)
+                except Exception:
+                    value = ""
+                row.append(self._sanitize_text(str(value or "")))
+            rows.append(row)
+
+        estimated_height = self._estimate_table_height(len(rows))
+        if self.pdf.get_y() + estimated_height > self.pdf.h - self.pdf.b_margin:
+            self.pdf.add_page()
+
+        self._print_test_header(title)
+        headers = ["Metric", *self.fund_order]
+        self._draw_metric_table(headers, rows)
+        if footnote_key:
+            self._draw_footnotes_section(footnote_key)
+        self.pdf.ln(2)
+
+    def _estimate_table_height(self, row_count: int) -> float:
+        header_height = 5.0
+        row_height = 4.2
+        return header_height + (row_height * max(row_count, 0)) + 6
+
 
     @staticmethod
     def _extract_numeric(value: object) -> float:
@@ -1186,6 +1587,157 @@ class ComplianceReportPDF(BaseReportPDF):
         self.pdf.set_font("Arial", "B", 10)
         self.pdf.cell(0, 6, self._sanitize_text(title), ln=True)
         self.pdf.set_font("Arial", "", 9)
+
+
+    def _draw_metric_table(self, headers: Iterable[str], rows: Iterable[Iterable[str]]) -> None:
+        headers = list(headers)
+        rows = [list(row) for row in rows]
+        if not headers or not rows:
+            return
+
+        usable_width = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
+        metric_width = min(45.0, usable_width * 0.3)
+        value_cols = max(len(headers) - 1, 1)
+        value_width = (usable_width - metric_width) / value_cols if value_cols else usable_width
+        widths = [metric_width] + [value_width] * (len(headers) - 1)
+
+        header_height = 5.0
+        row_height = 4.2
+
+        self.pdf.set_font("Arial", "B", 7)
+        self.pdf.set_fill_color(230, 230, 230)
+        for width, header in zip(widths, headers):
+            self.pdf.cell(width, header_height, self._sanitize_text(header), border=1, align="C", fill=True)
+        self.pdf.ln(header_height)
+
+        self.pdf.set_font("Arial", "", 6)
+        for row in rows:
+            for idx, value in enumerate(row):
+                text = self._sanitize_text(value).replace("\n", " /")
+                width = widths[idx]
+                if text.upper() == "FAIL":
+                    self.pdf.set_fill_color(255, 200, 200)
+                    self.pdf.set_text_color(139, 0, 0)
+                    self.pdf.cell(width, row_height, text, border=1, align="C", fill=True)
+                    self.pdf.set_text_color(0, 0, 0)
+                else:
+                    self.pdf.set_fill_color(255, 255, 255)
+                    align = "L" if idx == 0 else ("R" if self._looks_like_number(text) else "L")
+                    self.pdf.cell(width, row_height, text, border=1, align=align)
+            self.pdf.ln(row_height)
+
+    @staticmethod
+    def _looks_like_number(value: str) -> bool:
+        stripped = value.replace(",", "").replace("%", "").strip()
+        if not stripped:
+            return False
+        try:
+            float(stripped)
+            return True
+        except ValueError:
+            return False
+
+    def _get_summary_value(self, fund_data: Mapping[str, Any], key: str) -> object:
+        if not isinstance(fund_data, Mapping):
+            return 0.0
+        totals = fund_data.get("fund_current_totals")
+        if isinstance(totals, Mapping) and key in totals:
+            return totals.get(key)
+        summary = fund_data.get("summary_metrics")
+        if isinstance(summary, Mapping) and key in summary:
+            return summary.get(key)
+        return 0.0
+
+    def _get_test_payload(self, fund_data: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+        if not isinstance(fund_data, Mapping):
+            return {}
+        payload = fund_data.get(key, {})
+        return payload if isinstance(payload, Mapping) else {}
+
+    def _get_calculation(self, payload: Mapping[str, Any], key: str) -> object:
+        return self._get_nested(payload, "calculations", key)
+
+    def _get_detail(self, payload: Mapping[str, Any], key: str) -> object:
+        return self._get_nested(payload, "details", key)
+
+    @staticmethod
+    def _get_nested(payload: Mapping[str, Any], *keys: str) -> object:
+        current: object = payload
+        for key in keys:
+            if not isinstance(current, Mapping):
+                return None
+            current = current.get(key)
+        return current
+
+    @staticmethod
+    def _title_case(value: object) -> str:
+        if value is None:
+            return ""
+        text = str(value).strip()
+        if not text:
+            return ""
+        return text.replace("_", " ").title()
+
+    def _registrations_match(self, payload: Mapping[str, Any]) -> Optional[bool]:
+        if not isinstance(payload, Mapping):
+            return None
+        calculations = payload.get("calculations", {})
+        if not isinstance(calculations, Mapping):
+            return None
+        expected = calculations.get("fund_registration")
+        actual = calculations.get("fund_status_today")
+        if expected is None or actual is None:
+            return None
+        return str(expected).strip().lower() == str(actual).strip().lower()
+
+    @staticmethod
+    def _status_text(value: object) -> str:
+        if isinstance(value, bool):
+            return "PASS" if value else "FAIL"
+        if isinstance(value, str):
+            upper = value.strip().upper()
+            if upper in {"PASS", "FAIL"}:
+                return upper
+        return ""
+
+    @staticmethod
+    def _yes_no(value: object) -> str:
+        if isinstance(value, bool):
+            return "Yes" if value else "No"
+        return ""
+
+    def _format_currency(self, value: object) -> str:
+        try:
+            number = float(value or 0.0)
+        except (TypeError, ValueError):
+            return ""
+        if pd.isna(number):
+            return ""
+        return f"{number:,.0f}"
+
+    def _format_percent(self, value: object) -> str:
+        try:
+            number = float(value or 0.0)
+        except (TypeError, ValueError):
+            return ""
+        if pd.isna(number):
+            return ""
+        return f"{number:.2%}"
+
+    def _format_integer(self, value: object) -> str:
+        try:
+            number = int(float(value or 0.0))
+        except (TypeError, ValueError):
+            return ""
+        return f"{number:d}"
+
+    @staticmethod
+    def _first_not_none(*values: object) -> object:
+        for value in values:
+            if value is not None:
+                return value
+        return None
+
 
     # ------------------------------------------------------------------
     def _draw_table(

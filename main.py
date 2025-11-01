@@ -390,7 +390,7 @@ if __name__ == "__main__":
         "previous_date": "2025-10-23",
         "eod_reports": ["compliance"],
         "compliance_tests": [
-            # "gics_compliance",
+            "gics_compliance",
             # "prospectus_80pct_policy",
             # "diversification_40act_check",
             # "diversification_IRS_check",
@@ -399,7 +399,7 @@ if __name__ == "__main__":
             # "real_estate_check",
             # "commodities_check",
             # "twelve_d1a_other_inv_cos",
-            "twelve_d2_insurance_cos",
+            # "twelve_d2_insurance_cos",
             # "twelve_d3_sec_biz",
         ],
         "create_pdf": True,
