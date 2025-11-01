@@ -1255,6 +1255,8 @@ class ComplianceChecker:
                     error="GICS sector information is not available",
                 )
 
+            sector_column_new = ["GICS_SECTOR_NAME", "gics_sector", "sector", "sector_name"]
+
             normalized_weights = weight_series / weight_series.sum()
             exposures = (
                 equity_df.assign(_weight=normalized_weights)
@@ -1313,74 +1315,63 @@ class ComplianceChecker:
     ) -> pd.DataFrame:
         """Aggregate holdings exposure by issuer without conditional adjustments."""
 
+        if holdings_df.empty:
+            return holdings_df.copy()
+
         df = holdings_df.copy()
         df["equity_market_value"] = pd.to_numeric(
             df.get("equity_market_value", 0.0), errors="coerce"
         ).fillna(0.0)
-        if "option_market_value" in df.columns:
-            df["option_market_value"] = pd.to_numeric(
-                df["option_market_value"], errors="coerce"
-            ).fillna(0.0)
-        else:
-            df["option_market_value"] = 0.0
+        df["option_market_value"] = pd.to_numeric(
+            df.get("option_market_value", 0.0), errors="coerce"
+        ).fillna(0.0)
 
         for column in ("nav_shares", "quantity", "shares", "units"):
             if column in df.columns:
                 df[column] = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
 
-        if "long_box_market_value_overlap" not in df.columns:
-            df["long_box_market_value_overlap"] = 0.0
-        if "call_overwrite_market_value" not in df.columns:
-            df["call_overwrite_market_value"] = 0.0
+        if "ticker" not in df.columns:
+            df["ticker"] = df.get("equity_ticker", "")
 
-        is_private_or_closed_end = fund.is_private_fund or fund.is_closed_end_fund
-        if is_private_or_closed_end and {"equity_ticker", "ticker"}.issubset(df.columns):
-            mask_google = df["ticker"].isin(["GOOG", "GOOGL"])
-            if mask_google.any():
-                tmp = df.copy()
-                tmp["ticker"] = np.where(
-                    tmp["ticker"].isin(["GOOG", "GOOGL"]), "GOOGLE", tmp["ticker"]
-                )
-                num_cols = tmp.select_dtypes(include=[np.number]).columns.tolist()
-                df = (
-                    tmp.groupby("ticker", as_index=False)
-                    .agg(
-                        {
-                            **{
-                                c: "first"
-                                for c in tmp.columns
-                                if c not in num_cols and c != "ticker"
-                            },
-                            **{c: "sum" for c in num_cols},
-                        }
-                    )
-                    .copy()
-                )
-                if "equity_ticker" in df.columns:
-                    df["equity_ticker"] = np.where(
-                        df["ticker"] == "GOOGLE", "GOOGLE", df["equity_ticker"]
-                    )
+        df["ticker"] = df["ticker"].astype(str)
+        if "equity_ticker" in df.columns:
+            df["equity_ticker"] = df["equity_ticker"].astype(str)
 
-        df["long_box_market_value_overlap"] = pd.to_numeric(
-            df["long_box_market_value_overlap"], errors="coerce"
-        ).fillna(0.0)
+        google_mask = df["ticker"].isin(["GOOG", "GOOGL"])
+        if google_mask.any():
+            df.loc[google_mask, "ticker"] = "GOOGLE"
+            if "equity_ticker" in df.columns:
+                df.loc[google_mask, "equity_ticker"] = "GOOGLE"
 
-        df["call_overwrite_market_value"] = 0.0
-        if fund.has_listed_option and fund.listed_option_type == "single_stock":
-            option_mv = pd.to_numeric(df["option_market_value"], errors="coerce").fillna(0.0)
-            df["call_overwrite_market_value"] = option_mv.where(option_mv < 0, 0.0).abs()
+        numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
+        aggregation = {
+            **{
+                column: "sum"
+                for column in numeric_columns
+            },
+            **{
+                column: "first"
+                for column in df.columns
+                if column not in numeric_columns + ["ticker"]
+            },
+        }
 
-        df["call_overwrite_market_value"] = pd.to_numeric(
-            df["call_overwrite_market_value"], errors="coerce"
-        ).fillna(0.0)
-
-        df["net_market_value"] = (
-            df["equity_market_value"]
-            + df["long_box_market_value_overlap"]
-            - df["call_overwrite_market_value"]
+        consolidated = (
+            df.groupby("ticker", as_index=False)
+            .agg(aggregation)
+            .copy()
         )
 
-        return df
+        consolidated["net_market_value"] = (
+            pd.to_numeric(
+                consolidated.get("equity_market_value", 0.0), errors="coerce"
+            ).fillna(0.0)
+            + pd.to_numeric(
+                consolidated.get("option_market_value", 0.0), errors="coerce"
+            ).fillna(0.0)
+        )
+
+        return consolidated
 
     def _calculate_index_overlap_adjustments(
         self,
