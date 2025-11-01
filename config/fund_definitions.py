@@ -163,7 +163,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_otc": False,
         "has_treasury": False,
         "overlap_table": "overlap_test",
-        "overlap_benchmark_ticker": "SPX",
+        "overlap_benchmark_ticker": "SPY",
     },
     "HE3B2": {
         "custodian_equity_holdings": "umb_cef_px",
@@ -191,7 +191,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_otc": False,
         "has_treasury": False,
         "overlap_table": "overlap_test",
-        "overlap_benchmark_ticker": "SPX",
+        "overlap_benchmark_ticker": "SPY",
     },
     "HE3B3": {
         "custodian_equity_holdings": "umb_cef_px",
@@ -219,7 +219,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_otc": False,
         "has_treasury": False,
         "overlap_table": "overlap_test",
-        "overlap_benchmark_ticker": "SPX",
+        "overlap_benchmark_ticker": "SPY",
     },
     "KNG": {
         "custodian_equity_holdings": "bny_us_holdings_v2",
@@ -299,7 +299,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_otc": False,
         "has_treasury": False,
         "overlap_table": "overlap_test",
-        "overlap_benchmark_ticker": "SPX",
+        "overlap_benchmark_ticker": "SPY",
     },
     "P21026": {
         "custodian_equity_holdings": "umb_cef_px",
@@ -327,7 +327,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_otc": False,
         "has_treasury": False,
         "overlap_table": "overlap_test",
-        "overlap_benchmark_ticker": "SPX",
+        "overlap_benchmark_ticker": "SPY",
     },
     "P2726": {
         "custodian_equity_holdings": "umb_cef_px",
@@ -355,7 +355,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_otc": False,
         "has_treasury": False,
         "overlap_table": "overlap_test",
-        "overlap_benchmark_ticker": "SPX",
+        "overlap_benchmark_ticker": "SPY",
     },
     "P30128": {
         "custodian_equity_holdings": "umb_cef_px",
@@ -383,7 +383,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_otc": False,
         "has_treasury": False,
         "overlap_table": "overlap_test",
-        "overlap_benchmark_ticker": "SPX",
+        "overlap_benchmark_ticker": "SPY",
     },
     "P31027": {
         "custodian_equity_holdings": "umb_cef_px",
@@ -411,7 +411,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_otc": False,
         "has_treasury": False,
         "overlap_table": "overlap_test",
-        "overlap_benchmark_ticker": "SPX",
+        "overlap_benchmark_ticker": "SPY",
     },
     "P3727": {
         "custodian_equity_holdings": "umb_cef_px",
@@ -439,7 +439,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_otc": False,
         "has_treasury": False,
         "overlap_table": "overlap_test",
-        "overlap_benchmark_ticker": "SPX",
+        "overlap_benchmark_ticker": "SPY",
     },
     "PD227": {
         "custodian_equity_holdings": None,
@@ -545,7 +545,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_otc": False,
         "has_treasury": False,
         "overlap_table": "overlap_test",
-        "overlap_benchmark_ticker": "SPX",
+        "overlap_benchmark_ticker": "SPY",
     },
     "RDVI": {
         "custodian_equity_holdings": "bny_us_holdings_v2",
@@ -651,7 +651,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_otc": False,
         "has_treasury": False,
         "overlap_table": "overlap_test",
-        "overlap_benchmark_ticker": "SPX",
+        "overlap_benchmark_ticker": "SPY",
     },
     "TR2B2": {
         "custodian_equity_holdings": "umb_cef_px",
@@ -679,7 +679,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_otc": False,
         "has_treasury": False,
         "overlap_table": "overlap_test",
-        "overlap_benchmark_ticker": "SPX",
+        "overlap_benchmark_ticker": "SPY",
     },
     "TR2B3": {
         "custodian_equity_holdings": "umb_cef_px",
@@ -707,7 +707,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_otc": False,
         "has_treasury": False,
         "overlap_table": "overlap_test",
-        "overlap_benchmark_ticker": "SPX",
+        "overlap_benchmark_ticker": "SPY",
     },
 }
 

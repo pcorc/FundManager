@@ -1150,7 +1150,7 @@ class BulkDataLoader:
                 self._store_fund_data(data_store, fund_name, 'overlap_t1', previous)
 
     def _query_overlap_table(self, fund, target_date: Optional[date]) -> pd.DataFrame:
-        if target_date is None:
+        if not target_date:
             return pd.DataFrame()
 
         mapping = getattr(fund, 'mapping_data', {}) or {}
@@ -1160,35 +1160,20 @@ class BulkDataLoader:
 
         try:
             table = getattr(self.base_cls.classes, table_name)
-        except AttributeError:
-            return pd.DataFrame()
+            query = self.session.query(
+                table.security_ticker.label('security_ticker'),
+                table.security_weight.label('security_weight'),
+            ).filter(table.date == target_date)
 
-        security_col = getattr(table, 'security_ticker')
-        weight_col = getattr(table, 'security_weight')
-        date_col = getattr(table, 'date')
-        if not all([security_col, weight_col, date_col]):
-            return pd.DataFrame()
+            if benchmark := mapping.get('overlap_benchmark_ticker'):
+                query = query.filter(table.etf_ticker == benchmark)
 
-        query = self.session.query(
-            security_col.label('security_ticker'),
-            weight_col.label('security_weight'),
-        ).filter(date_col == target_date)
-
-        benchmark = mapping.get('overlap_benchmark_ticker')
-        benchmark_col = getattr(table, 'etf_ticker')
-        if benchmark and benchmark_col is not None:
-            query = query.filter(benchmark_col == benchmark)
-
-        try:
             df = pd.read_sql(query.statement, self.session.bind)
+            if not df.empty:
+                df['security_weight'] = pd.to_numeric(df['security_weight'], errors='coerce').fillna(0) / 100
+            return df
         except Exception:
             return pd.DataFrame()
-
-        if 'security_weight' in df.columns:
-            df['security_weight'] = (
-                pd.to_numeric(df['security_weight'], errors='coerce').fillna(0.0) / 100.0
-            )
-        return df
 
     def _bulk_load_index_data(
         self,
