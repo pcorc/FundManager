@@ -1625,3 +1625,11 @@ AttributeError: 'ComplianceChecker' object has no attribute 'fund_results'
 2025-10-31 18:46:44,245 - compliance_checker - INFO - Running compliance tests for P3727
 2025-10-31 18:49:28,086 - compliance_checker - INFO - Running compliance tests for HE3B1
 2025-10-31 18:49:28,123 - compliance_checker - ERROR - Error in IRS diversification check for HE3B1: 'net_market_value'
+2025-11-01 09:08:15,552 - compliance_checker - INFO - Running compliance tests for P21026
+2025-11-01 09:08:15,559 - compliance_checker - ERROR - Error in IRS diversification check for P21026: 'net_market_value'
+2025-11-01 09:08:15,602 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-11-01 09:08:15,608 - compliance_checker - ERROR - Error in IRS diversification check for HE3B1: 'net_market_value'
+2025-11-01 09:11:15,179 - compliance_checker - INFO - Running compliance tests for P21026
+2025-11-01 09:11:15,293 - compliance_checker - INFO - Running compliance tests for HE3B1
+2025-11-01 09:39:05,503 - compliance_checker - INFO - Running compliance tests for P21026
+2025-11-01 09:39:05,604 - compliance_checker - INFO - Running compliance tests for HE3B1

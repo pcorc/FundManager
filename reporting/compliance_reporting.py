@@ -382,7 +382,13 @@ class ComplianceReport:
                 else:
                     remaining_str = "None"
 
-                max_ownership_float = float(calculations.get("max_ownership_float", 0.0) or 0.0)
+                max_ownership_raw = calculations.get("max_ownership_float", 0.0)
+                try:
+                    max_ownership_float = float(max_ownership_raw if max_ownership_raw is not None else 0.0)
+                except (TypeError, ValueError):
+                    max_ownership_float = 0.0
+                if pd.isna(max_ownership_float):
+                    max_ownership_float = 0.0
                 occ_market_value = float(calculations.get("occ_market_value", 0.0) or 0.0)
 
                 notes = ""
@@ -481,13 +487,22 @@ class ComplianceReport:
                     large_securities_str = "None"
 
                 overlap_records = calculations.get("overlap", []) or []
+                overlap_weight_total = float(calculations.get("overlap_weight_sum", 0.0) or 0.0)
+
                 if overlap_records:
                     overlap_summary = ", ".join(
                         f"{item.get('security_ticker', '')}: {float(item.get('security_weight', 0) or 0):.2%}"
                         for item in overlap_records
                     )
+                    if not overlap_weight_total:
+                        overlap_weight_total = sum(
+                            float(item.get("security_weight", 0.0) or 0.0)
+                            for item in overlap_records
+                        )
                 else:
                     overlap_summary = "None"
+                if pd.isna(overlap_weight_total):
+                    overlap_weight_total = 0.0
 
                 largest = calculations.get("bottom_50_largest", {}) or {}
                 second = calculations.get("bottom_50_second_largest", {}) or {}
@@ -526,10 +541,7 @@ class ComplianceReport:
                             int(calculations.get("large_securities_count", 0) or 0),
                         ),
                         ("large_securities", large_securities_str),
-                        (
-                            "overlap_weight",
-                            float(calculations.get("overlap_weight_sum", 0.0) or 0.0),
-                        ),
+                        ("overlap_weight", float(overlap_weight_total)),
                         ("overlap_constituents", overlap_summary),
                         (
                             "bottom_50_largest_holding",
@@ -878,7 +890,7 @@ class ComplianceReport:
                             if value is not None:
                                 max_length = max(max_length, len(str(value)))
                                 if cell.row > 1 and cell.data_type in {"n", "f"}:
-                                    cell.number_format = "0.00%" if is_percent else "#,##0.00"
+                                    cell.number_format = "0.0000%" if is_percent else "#,##0.00"
                         except Exception:  # pragma: no cover - defensive
                             continue
                     ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
