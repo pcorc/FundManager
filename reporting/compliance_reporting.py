@@ -51,7 +51,7 @@ class ComplianceReport:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.file_path = self.output_dir / f"{file_name_prefix}_{self.report_date}.xlsx"
 
-        self.gics_mapping = gics_mapping
+        self.gics_mapping = gics_mapping.copy() if isinstance(gics_mapping, pd.DataFrame) else pd.DataFrame()
         self.test_functions = set(test_functions) if test_functions else None
         self.sheet_data: Dict[str, pd.DataFrame] = {}
 
@@ -208,57 +208,169 @@ class ComplianceReport:
 
     # ------------------------------------------------------------------
     def process_gics_compliance(self) -> None:
-        summary_rows = []
-        detail_rows = []
+        gics_results: list[Dict[str, object]] = []
+        gics_calculations: list[Dict[str, object]] = []
+        mapping_df = self.gics_mapping if isinstance(self.gics_mapping, pd.DataFrame) else pd.DataFrame()
+        summary_columns = [
+            "Date",
+            "Fund",
+            "Overall GICS Compliance",
+            "Industry Exceeds 25%",
+            "Industry Group Exceeds 25%",
+            "Index Industry Exceeds 25%?",
+            "Index Industry Group Exceeds 25%?",
+            "Can Fund exceed 25% if Index does?",
+            "Exceptions to Conc Policy",
+        ]
+        detail_value_columns = [
+            "Date",
+            "Fund",
+            "GICS_Class",
+            "GICS_Class Value",
+            "GICS_SECTOR_NAME",
+            "Fund_Weight_Value",
+            "Index_Weight_Value",
+            "Exceeding_Fund_25%?",
+            "Exceeding_Index_25%?",
+        ]
 
         for date_str, funds in self.results.items():
             report_date = pd.to_datetime(date_str).date()
-            for fund_name, fund_data in funds.items():
-                gics = fund_data.get("gics_compliance")
-                if not gics:
+            for fund_name, compliance_dict in funds.items():
+                gics_data = compliance_dict.get("gics_compliance", {})
+                if fund_name == "DOGG" or not gics_data:
+                    continue
+                if not isinstance(gics_data, Mapping):
                     continue
 
-                calculations = gics.get("calculations", {})
-                exposures = calculations.get("sector_exposure", {})
-                breaches = gics.get("breaches", {})
-                limits = gics.get("limits", {})
+                can_exceed = "Yes" if fund_name in {"KNG", "FDND"} else "No"
+                exceptions = "Information Technology Sector" if fund_name == "TDVI" else ""
 
-                summary_rows.append(
+                exceeding_index = gics_data.get("exceeding_index_gics", {}) or {}
+                gics_results.append(
                     {
                         "Date": report_date,
                         "Fund": fund_name,
-                        "Overall Compliance": "PASS" if gics.get("is_compliant") else "FAIL",
-                        "Breached Sectors": ", ".join(
-                            f"{sector} ({exposures.get(sector, 0):.2%})" for sector in breaches
+                        "Overall GICS Compliance": gics_data.get(
+                            "overall_gics_compliance", "FAIL"
+                        ),
+                        "Industry Exceeds 25%": not bool(
+                            gics_data.get("industry_exceeds_25", True)
+                        ),
+                        "Industry Group Exceeds 25%": not bool(
+                            gics_data.get("industry_group_exceeds_25", True)
+                        ),
+                        "Index Industry Exceeds 25%?": len(
+                            (exceeding_index.get("GICS_INDUSTRY_NAME") or {})
                         )
-                        or "None",
-                        "Max Sector Exposure": max(exposures.values()) if exposures else 0.0,
-                        "Weight Source": gics.get("weight_source", ""),
+                        > 0,
+                        "Index Industry Group Exceeds 25%?": len(
+                            (exceeding_index.get("GICS_INDUSTRY_GROUP_NAME") or {})
+                        )
+                        > 0,
+                        "Can Fund exceed 25% if Index does?": can_exceed,
+                        "Exceptions to Conc Policy": exceptions,
                     }
                 )
 
-                for sector, weight in exposures.items():
-                    detail_rows.append(
-                        {
-                            "Date": report_date,
-                            "Fund": fund_name,
-                            "Sector": sector,
-                            "Weight": weight,
-                            "Limit": limits.get(sector, limits.get("_default")),
-                            "Breached": sector in breaches,
-                        }
-                    )
+                calculations = gics_data.get("calculations", {}) or {}
+                for gics_class, calc in calculations.items():
+                    if gics_class not in {"GICS_INDUSTRY_GROUP_NAME", "GICS_INDUSTRY_NAME"}:
+                        continue
+                    calc = calc or {}
+                    fund_weights = calc.get("fund_weights", {}) or {}
+                    index_weights = calc.get("index_weights", {}) or {}
+                    exceeding_fund = calc.get("exceeding_fund", {}) or {}
+                    exceeding_index_vals = calc.get("exceeding_index", {}) or {}
 
-        if summary_rows:
-            summary_df = pd.DataFrame(summary_rows)
-            summary_df.sort_values(["Fund", "Date"], inplace=True)
-            fn_df = pd.DataFrame({"Note": [f"* {note}" for note in FOOTNOTES.get("gics", [])]})
-            self.sheet_data["GICS_Compliance"] = pd.concat([summary_df, fn_df], ignore_index=True)
+                    for category, fund_wt in fund_weights.items():
+                        try:
+                            fund_weight_value = float(fund_wt)
+                        except (TypeError, ValueError):
+                            fund_weight_value = 0.0
+                        try:
+                            index_weight_value = float(index_weights.get(category, 0.0) or 0.0)
+                        except (TypeError, ValueError):
+                            index_weight_value = 0.0
 
-        if detail_rows:
-            details_df = pd.DataFrame(detail_rows)
-            details_df.sort_values(["Fund", "Weight"], ascending=[True, False], inplace=True)
-            self.sheet_data["GICS_Details"] = details_df
+                        sector_name = "N/A"
+                        if (
+                            not mapping_df.empty
+                            and gics_class in mapping_df.columns
+                            and "GICS_SECTOR_NAME" in mapping_df.columns
+                        ):
+                            matches = mapping_df.loc[
+                                mapping_df[gics_class] == category,
+                                "GICS_SECTOR_NAME",
+                            ]
+                            if matches.empty and isinstance(category, str):
+                                matches = mapping_df.loc[
+                                    mapping_df[gics_class]
+                                    .astype(str)
+                                    .str.strip()
+                                    .eq(category),
+                                    "GICS_SECTOR_NAME",
+                                ]
+                            if not matches.empty:
+                                sector_name = matches.iloc[0]
+
+                        gics_calculations.append(
+                            {
+                                "Date": report_date,
+                                "Fund": fund_name,
+                                "GICS_Class": gics_class,
+                                "GICS_Class Value": category,
+                                "GICS_SECTOR_NAME": sector_name,
+                                "Fund_Weight_Value": fund_weight_value,
+                                "Index_Weight_Value": index_weight_value,
+                                "Exceeding_Fund_25%?": True if category in exceeding_fund else None,
+                                "Exceeding_Index_25%?": True if category in exceeding_index_vals else None,
+                            }
+                        )
+
+        df_summary = pd.DataFrame(gics_results, columns=summary_columns)
+        if not df_summary.empty:
+            df_summary.sort_values(by=["Fund"], inplace=True)
+            footnotes = [
+                {"Date": f"* {note}"}
+                for note in FOOTNOTES.get("gics", [])
+            ]
+            if footnotes:
+                fn_df = pd.DataFrame(footnotes)
+                df_summary = pd.concat([df_summary, fn_df], ignore_index=True)
+        else:
+            df_summary = pd.DataFrame(columns=summary_columns)
+
+        df_details = pd.DataFrame(gics_calculations, columns=detail_value_columns)
+        if not df_details.empty:
+            df_details.sort_values(
+                by=["Fund", "Fund_Weight_Value"], ascending=[True, False], inplace=True
+            )
+            df_details["Fund_Weight"] = df_details["Fund_Weight_Value"].apply(
+                lambda value: f"{value:.2%}"
+            )
+            df_details["Index_Weight"] = df_details["Index_Weight_Value"].apply(
+                lambda value: f"{value:.2%}"
+            )
+            df_details.drop(columns=["Fund_Weight_Value", "Index_Weight_Value"], inplace=True)
+        else:
+            df_details = pd.DataFrame(
+                columns=[
+                    "Date",
+                    "Fund",
+                    "GICS_Class",
+                    "GICS_Class Value",
+                    "GICS_SECTOR_NAME",
+                    "Fund_Weight",
+                    "Index_Weight",
+                    "Exceeding_Fund_25%?",
+                    "Exceeding_Index_25%?",
+                ]
+            )
+
+        self.sheet_data["GICS_Compliance"] = df_summary
+        self.sheet_data["GICS_Calculations"] = df_details
+
 
     # ------------------------------------------------------------------
     # ------------------------------------------------------------------
@@ -1227,12 +1339,14 @@ class ComplianceReportPDF(BaseReportPDF):
         self.pdf.ln(4)
 
     def print_gics_compliance(self, data: Mapping[str, object]) -> None:
+        industry_within_limit = bool(data.get("industry_exceeds_25", True))
+        industry_group_within_limit = bool(data.get("industry_group_exceeds_25", True))
         rows = [
             ("Overall Gics Compliance", data.get("overall_gics_compliance", "N/A")),
-            ("Industry Exceeds 25%", "YES" if data.get("industry_exceeds_25") else "NO"),
+            ("Industry Exceeds 25%", "YES" if not industry_within_limit else "NO"),
             (
                 "Industry Group Exceeds 25%",
-                "YES" if data.get("industry_group_exceeds_25") else "NO",
+                "YES" if not industry_group_within_limit else "NO",
             ),
         ]
         self._draw_two_column_table(rows)

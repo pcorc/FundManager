@@ -35,6 +35,13 @@ from config.constants import (
 )
 from domain.fund import Fund
 
+GICS_CONCENTRATION_THRESHOLD = 0.25
+GICS_CLASS_COLUMNS: Tuple[str, ...] = (
+    "GICS_SECTOR_NAME",
+    "GICS_INDUSTRY_GROUP_NAME",
+    "GICS_INDUSTRY_NAME",
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,9 +57,6 @@ class ComplianceResult:
 
 class ComplianceChecker:
     """Runs compliance checks against :class:`Fund` domain objects."""
-
-    _DEFAULT_GICS_LIMIT = 0.25
-
     def __init__(
         self,
         session,
@@ -1203,84 +1207,275 @@ class ComplianceChecker:
     def gics_compliance(self, fund: Fund) -> ComplianceResult:
         try:
             equity_df = getattr(fund.data.current.vest, "equity", pd.DataFrame())
-
-            if equity_df.empty:
+            if not isinstance(equity_df, pd.DataFrame) or equity_df.empty:
                 return ComplianceResult(
                     is_compliant=False,
                     details={
                         "rule": "GICS Concentration",
                         "status": "no_equity_data",
+                        "fund": fund.name,
                     },
                     calculations={},
                     error="Equity holdings are unavailable for analysis",
                 )
 
-            weight_series, weight_source = self._determine_weight_series(equity_df)
-            if weight_series is None or weight_series.sum() == 0:
+            equity_df = equity_df.copy()
+            equity_values = pd.to_numeric(
+                equity_df.get("equity_market_value", 0.0), errors="coerce"
+            ).fillna(0.0)
+            total_equity_value = float(equity_values.sum())
+            if total_equity_value == 0.0:
                 return ComplianceResult(
                     is_compliant=False,
                     details={
                         "rule": "GICS Concentration",
-                        "status": "missing_weights",
+                        "status": "missing_equity_market_value",
+                        "fund": fund.name,
                     },
                     calculations={},
-                    error="Unable to determine constituent weights",
+                    error="Equity market values are unavailable for weight calculation",
                 )
 
-            sector_column = self._resolve_gics_sector_column(equity_df)
-            if sector_column is None:
+            fund_weights = equity_values / total_equity_value
+            fund_weights.index = equity_df.index
+
+            gics_summary_fund = self._summarize_gics_exposure(equity_df, fund_weights)
+            if not gics_summary_fund:
                 return ComplianceResult(
                     is_compliant=False,
                     details={
                         "rule": "GICS Concentration",
-                        "status": "missing_sector_data",
+                        "status": "missing_gics_data",
+                        "fund": fund.name,
                     },
                     calculations={},
-                    error="GICS sector information is not available",
+                    error="GICS classifications are not available on equity holdings",
                 )
 
-            sector_column_new = ["GICS_SECTOR_NAME", "gics_sector", "sector", "sector_name"]
+            index_df = getattr(fund.data.current, "index", pd.DataFrame())
+            gics_summary_index: Dict[str, Dict[str, float]] = {}
+            index_weight_basis: Optional[str] = None
+            if isinstance(index_df, pd.DataFrame) and not index_df.empty:
+                index_df = index_df.copy()
+                index_weights = pd.Series(dtype=float)
 
-            normalized_weights = weight_series / weight_series.sum()
-            exposures = (
-                equity_df.assign(_weight=normalized_weights)
-                .groupby(sector_column)["_weight"].sum()
-                .sort_values(ascending=False)
+                for column in ("weight_index", "index_weight", "benchmark_weight", "weight"):
+                    if column in index_df.columns:
+                        candidate = pd.to_numeric(index_df[column], errors="coerce").fillna(0.0)
+                        total = float(candidate.sum())
+                        if total != 0.0:
+                            index_weights = candidate / total
+                            index_weights.index = index_df.index
+                            index_weight_basis = column
+                            break
+
+                if index_weights.empty and "equity_market_value" in index_df.columns:
+                    candidate = pd.to_numeric(
+                        index_df["equity_market_value"], errors="coerce"
+                    ).fillna(0.0)
+                    total = float(candidate.sum())
+                    if total != 0.0:
+                        index_weights = candidate / total
+                        index_weights.index = index_df.index
+                        index_weight_basis = "equity_market_value"
+
+                if not index_weights.empty:
+                    gics_summary_index = self._summarize_gics_exposure(index_df, index_weights)
+
+            compliance_group = self._resolve_gics_compliance_group(fund.name)
+
+            exceeding_fund_gics, exceeding_index_gics, calculations = self._check_exposure(
+                gics_summary_fund,
+                gics_summary_index,
             )
 
-            exposures = exposures[exposures.index.notna()]
-            sector_exposure = exposures.round(6).to_dict()
+            sector_within_limit = len(exceeding_fund_gics.get("GICS_SECTOR_NAME", {})) == 0
+            industry_group_within_limit = len(
+                exceeding_fund_gics.get("GICS_INDUSTRY_GROUP_NAME", {})
+            ) == 0
+            industry_within_limit = len(exceeding_fund_gics.get("GICS_INDUSTRY_NAME", {})) == 0
 
-            gics_limits = {}
-            if isinstance(fund.config, dict):
-                gics_limits = fund.config.get("gics_limits", {}) or {}
+            if compliance_group == "dogg":
+                overall_status = (
+                    "PASS" if industry_within_limit and industry_group_within_limit else "FAIL"
+                )
+            elif compliance_group == "kng_fdnd":
+                fund_flags = {
+                    gics_class: bool(exceeding_fund_gics.get(gics_class))
+                    for gics_class in GICS_CLASS_COLUMNS
+                }
+                index_flags = {
+                    gics_class: bool(exceeding_index_gics.get(gics_class))
+                    for gics_class in GICS_CLASS_COLUMNS
+                }
+                compliance_match = all(
+                    fund_flags.get(gics_class, False)
+                    == index_flags.get(gics_class, False)
+                    for gics_class in GICS_CLASS_COLUMNS
+                )
+                overall_status = "PASS" if compliance_match else "FAIL"
+            elif compliance_group == "tdvi":
+                exceeds_counts = {
+                    gics_class: len(exceeding_fund_gics.get(gics_class, {}))
+                    for gics_class in GICS_CLASS_COLUMNS
+                }
+                all_exceeds_zero = all(count == 0 for count in exceeds_counts.values())
+                tech_series = pd.Series(gics_summary_fund.get("GICS_SECTOR_NAME", {}))
+                if tech_series.empty:
+                    non_tech_exceeds = pd.Series(dtype=float)
+                else:
+                    non_tech_exceeds = tech_series[
+                        (tech_series.index != "Information Technology")
+                        & (tech_series > GICS_CONCENTRATION_THRESHOLD)
+                    ]
+                tech_compliance = non_tech_exceeds.empty
+                overall_status = "PASS" if all_exceeds_zero or tech_compliance else "FAIL"
+            else:
+                overall_status = (
+                    "PASS"
+                    if sector_within_limit
+                    and industry_group_within_limit
+                    and industry_within_limit
+                    else "FAIL"
+                )
 
-            default_limit = gics_limits.get("_default", self._DEFAULT_GICS_LIMIT)
+            total_assets, total_net_assets = self._get_total_assets(fund)
 
-            breaches = {
-                sector: weight
-                for sector, weight in sector_exposure.items()
-                if weight > gics_limits.get(sector, default_limit) + 1e-9
+            calculations.setdefault("meta", {})
+            calculations["meta"].update(
+                {
+                    "total_assets": total_assets,
+                    "total_net_assets": total_net_assets,
+                    "fund_weight_basis": "equity_market_value",
+                    "index_weight_basis": index_weight_basis,
+                }
+            )
+            calculations.setdefault("fund_summary", gics_summary_fund)
+            calculations.setdefault("index_summary", gics_summary_index)
+
+            details: Dict[str, object] = {
+                "rule": "GICS Concentration",
+                "fund": fund.name,
+                "overall_gics_compliance": overall_status,
+                "sector_exceeds_25": sector_within_limit,
+                "industry_group_exceeds_25": industry_group_within_limit,
+                "industry_exceeds_25": industry_within_limit,
+                "exceeding_fund_gics": exceeding_fund_gics,
+                "exceeding_index_gics": exceeding_index_gics,
+                "fund_exposures": gics_summary_fund,
+                "compliance_group": compliance_group,
             }
+            details["fund_weight_basis"] = "equity_market_value"
+            if index_weight_basis:
+                details["index_weight_basis"] = index_weight_basis
 
             return ComplianceResult(
-                is_compliant=not breaches,
-                details={
-                    "rule": "GICS Concentration",
-                    "weight_source": weight_source,
-                    "limits": gics_limits or {"_default": default_limit},
-                    "breaches": breaches,
-                },
-                calculations={"sector_exposure": sector_exposure},
+                is_compliant=overall_status == "PASS",
+                details=details,
+                calculations=calculations,
             )
         except Exception as exc:  # pragma: no cover - defensive logging path
             logger.error("Error in GICS compliance check for %s: %s", fund.name, exc)
             return ComplianceResult(
                 is_compliant=False,
-                details={"rule": "GICS Concentration", "status": "error"},
+                details={"rule": "GICS Concentration", "status": "error", "fund": fund.name},
                 calculations={},
                 error=str(exc),
             )
+
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _resolve_gics_compliance_group(fund_name: str) -> str:
+        mapping = {
+            "DOGG": "dogg",
+            "KNG": "kng_fdnd",
+            "FDND": "kng_fdnd",
+            "TDVI": "tdvi",
+        }
+        if not isinstance(fund_name, str):
+            return "standard"
+        return mapping.get(fund_name.upper(), "standard")
+
+    def _summarize_gics_exposure(
+        self,
+        df: pd.DataFrame,
+        weight_series: pd.Series,
+    ) -> Dict[str, Dict[str, float]]:
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            return {}
+        if not isinstance(weight_series, pd.Series) or weight_series.empty:
+            return {}
+
+        weights = weight_series.reindex(df.index, fill_value=0.0)
+        working = df.copy()
+        working["_normalized_weight"] = weights
+
+        summary: Dict[str, Dict[str, float]] = {}
+        for column in GICS_CLASS_COLUMNS:
+            if column not in working.columns:
+                continue
+
+            categories = working[column]
+            if categories.dtype == object:
+                categories = categories.astype(str).str.strip()
+                categories = categories.replace({"": None})
+
+            mask = categories.notna()
+            if not mask.any():
+                summary[column] = {}
+                continue
+
+            grouped = (
+                working.loc[mask]
+                .groupby(categories[mask])["_normalized_weight"]
+                .sum()
+                .sort_values(ascending=False)
+            )
+            summary[column] = grouped.round(6).to_dict()
+
+        return summary
+
+    def _check_exposure(
+        self,
+        gics_summary_fund: Mapping[str, Mapping[str, float]],
+        gics_summary_index: Mapping[str, Mapping[str, float]],
+    ) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, float]], Dict[str, Dict[str, object]]]:
+        exceeding_fund_gics: Dict[str, Dict[str, float]] = {}
+        exceeding_index_gics: Dict[str, Dict[str, float]] = {}
+        calculations: Dict[str, Dict[str, object]] = {}
+
+        for gics_class in GICS_CLASS_COLUMNS:
+            fund_series = pd.Series(gics_summary_fund.get(gics_class, {}), dtype=float)
+            index_series = pd.Series(gics_summary_index.get(gics_class, {}), dtype=float)
+
+            if not fund_series.empty:
+                fund_series = fund_series.sort_values(ascending=False)
+            if not index_series.empty:
+                index_series = index_series.sort_values(ascending=False)
+
+            fund_mask = fund_series > GICS_CONCENTRATION_THRESHOLD
+            index_mask = index_series > GICS_CONCENTRATION_THRESHOLD
+
+            exceeding_fund = fund_series[fund_mask].round(6).to_dict()
+            exceeding_index = index_series[index_mask].round(6).to_dict()
+
+            exceeding_fund_gics[gics_class] = exceeding_fund
+            exceeding_index_gics[gics_class] = exceeding_index
+
+            calculations[gics_class] = {
+                "fund_weights": fund_series.round(6).to_dict(),
+                "index_weights": index_series.round(6).to_dict(),
+                "exceeding_fund": exceeding_fund,
+                "exceeding_index": exceeding_index,
+                "concentration_threshold": GICS_CONCENTRATION_THRESHOLD,
+                "fund_exceeding_count": int(fund_mask.sum()) if not fund_series.empty else 0,
+                "index_exceeding_count": int(index_mask.sum()) if not index_series.empty else 0,
+            }
+
+        return exceeding_fund_gics, exceeding_index_gics, calculations
 
 
     # ------------------------------------------------------------------
@@ -1504,13 +1699,3 @@ class ComplianceChecker:
         ).fillna(0.0)
         return overlap[["security_ticker", "security_weight"]]
 
-    def _resolve_gics_sector_column(self, equity_df: pd.DataFrame) -> Optional[str]:
-        for column in [
-            "GICS_SECTOR_NAME",
-            "gics_sector",
-            "sector",
-            "sector_name",
-        ]:
-            if column in equity_df.columns:
-                return column
-        return None
