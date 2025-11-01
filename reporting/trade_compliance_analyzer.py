@@ -357,37 +357,58 @@ class TradingComplianceAnalyzer:
     ) -> float:
         if not isinstance(df, pd.DataFrame) or df.empty:
             return 0.0
-            if "price" not in df.columns:
-                return 0.0
-            _, quantities = self._resolve_quantity_series(df, preferred=quantity_column)
-            if quantities.empty:
-                return 0.0
-            prices = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
-            multiplier = 100.0 if asset_type == "options" else 1.0
-            try:
-                return float((quantities * prices * multiplier).sum())
-            except (TypeError, ValueError):
-                return 0.0
+        if "price" not in df.columns:
+            return 0.0
+        _, quantities = self._resolve_quantity_series(df, preferred=quantity_column)
+        if quantities.empty:
+            return 0.0
+        prices = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
+        multiplier = 100.0 if asset_type == "options" else 1.0
+        try:
+            return float((quantities * prices * multiplier).sum())
+        except (TypeError, ValueError):
+            return 0.0
 
-        def _resolve_quantity_series(
-                self, df: pd.DataFrame, *, preferred: Optional[str] = None
-        ) -> Tuple[str, pd.Series]:
-            if not isinstance(df, pd.DataFrame) or df.empty:
-                column = preferred or "nav_shares"
-                return column, pd.Series(dtype=float)
-
+    def _resolve_quantity_series(
+            self, df: pd.DataFrame, *, preferred: Optional[str] = None
+    ) -> Tuple[str, pd.Series]:
+        if not isinstance(df, pd.DataFrame) or df.empty:
             column = preferred or "nav_shares"
-            candidates = [column]
-            for fallback in ("nav_shares", "iiv_shares", "shares", "quantity", "units"):
-                if fallback not in candidates:
-                    candidates.append(fallback)
+            return column, pd.Series(dtype=float)
 
-            for candidate in candidates:
-                if candidate in df.columns:
-                    series = pd.to_numeric(df[candidate], errors="coerce").fillna(0.0)
-                    return candidate, series
+        column = preferred or "nav_shares"
+        candidates = [column]
+        for fallback in ("nav_shares", "iiv_shares", "shares", "quantity", "units"):
+            if fallback not in candidates:
+                candidates.append(fallback)
 
-            return column, pd.Series(0.0, index=df.index, dtype=float)
+        for candidate in candidates:
+            if candidate in df.columns:
+                series = pd.to_numeric(df[candidate], errors="coerce").fillna(0.0)
+                return candidate, series
+
+        return column, pd.Series(0.0, index=df.index, dtype=float)
+
+
+    def _resolve_quantity_series(
+        self, df: pd.DataFrame, *, preferred: Optional[str] = None
+    ) -> Tuple[str, pd.Series]:
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            column = preferred or "nav_shares"
+            return column, pd.Series(dtype=float)
+
+        column = preferred or "nav_shares"
+        candidates = [column]
+        for fallback in ("nav_shares", "iiv_shares", "shares", "quantity", "units"):
+            if fallback not in candidates:
+                candidates.append(fallback)
+
+        for candidate in candidates:
+            if candidate in df.columns:
+                series = pd.to_numeric(df[candidate], errors="coerce").fillna(0.0)
+                return candidate, series
+
+        return column, pd.Series(0.0, index=df.index, dtype=float)
 
     # ------------------------------------------------------------------
     def _extract_summary_metrics_payload(self, result: Any) -> Dict[str, float]:
