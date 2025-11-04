@@ -53,101 +53,18 @@ def generate_trading_excel_report(comparison_data: Mapping[str, Any], output_pat
 
 
 def _create_summary_sheet(workbook: Workbook, data: Mapping[str, Any]) -> None:
-    """Create an executive summary sheet with key metrics."""
+    """Create a compliance overview sheet with key status changes."""
 
-    summary = data.get("summary", {})
+    summary = data.get("summary", {}) or {}
 
-    sheet = workbook.create_sheet("Executive Summary", 0)
-    sheet["A1"] = "Trading Compliance Analysis - Executive Summary"
+    sheet = workbook.create_sheet("Compliance Overview", 0)
+    sheet["A1"] = "Trading Compliance Analysis - Compliance Overview"
     sheet["A1"].font = Font(size=14, bold=True)
     sheet["A2"] = f"Date: {data.get('date', '')}"
 
-    metrics = [
-        ("Total Funds Analyzed", summary.get("total_funds_analyzed", 0)),
-        ("Total Funds Traded", summary.get("total_funds_traded", 0)),
-        ("", ""),
-        ("Funds Moving OUT of Compliance", summary.get("funds_out_of_compliance", 0)),
-        ("Funds Moving INTO Compliance", summary.get("funds_into_compliance", 0)),
-        ("Funds with Unchanged Status", summary.get("funds_unchanged", 0)),
-        ("Funds with Compliance Changes", summary.get("funds_with_compliance_changes", 0)),
-        ("", ""),
-        ("Total Violations (Ex-Ante)", summary.get("total_violations_before", 0)),
-        ("Total Violations (Ex-Post)", summary.get("total_violations_after", 0)),
-        (
-            "Net Change in Violations",
-            summary.get("total_violations_after", 0)
-            - summary.get("total_violations_before", 0),
-        ),
-    ]
-
     row = 4
-    for label, value in metrics:
-        sheet[f"A{row}"] = label
-        sheet[f"A{row}"].font = Font(bold=True)
-        sheet[f"B{row}"] = value
-
-        if label == "Funds Moving OUT of Compliance" and value:
-            sheet[f"B{row}"].fill = PatternFill(
-                start_color="FFCCCC", end_color="FFCCCC", fill_type="solid"
-            )
-        elif label == "Funds Moving INTO Compliance" and value:
-            sheet[f"B{row}"].fill = PatternFill(
-                start_color="CCFFCC", end_color="CCFFCC", fill_type="solid"
-            )
-
-        row += 1
-
-    sheet.column_dimensions["A"].width = 45
-    sheet.column_dimensions["B"].width = 25
-
-    aggregate_metrics = summary.get("summary_metrics_totals", {}) or {}
-    ex_ante_totals = aggregate_metrics.get("ex_ante", {}) or {}
-    ex_post_totals = aggregate_metrics.get("ex_post", {}) or {}
-
-    if ex_ante_totals or ex_post_totals:
-        row += 1
-        sheet[f"A{row}"] = "Aggregate Summary Metrics"
-        sheet[f"A{row}"].font = Font(size=12, bold=True)
-        row += 1
-
-        headers = ["Metric", "Ex-Ante", "Ex-Post", "Delta"]
-        for col, header in enumerate(headers, start=1):
-            cell = sheet.cell(row=row, column=col, value=header)
-            cell.font = Font(bold=True)
-            cell.fill = PatternFill(
-                start_color="DDDDDD", end_color="DDDDDD", fill_type="solid"
-            )
-            cell.alignment = Alignment(horizontal="center")
-        row += 1
-
-        metric_labels = {
-            "cash_value": "Cash Value",
-            "equity_market_value": "Equity Market Value",
-            "option_market_value": "Option Market Value",
-            "option_delta_adjusted_notional": "Option Delta Adjusted Notional",
-            "treasury": "Treasury Market Value",
-            "total_assets": "Total Assets",
-            "total_net_assets": "Total Net Assets",
-        }
-
-        for metric_key, label in metric_labels.items():
-            if metric_key not in ex_ante_totals and metric_key not in ex_post_totals:
-                continue
-            ante_value = float(ex_ante_totals.get(metric_key, 0.0) or 0.0)
-            post_value = float(ex_post_totals.get(metric_key, 0.0) or 0.0)
-            delta = post_value - ante_value
-
-            sheet.cell(row=row, column=1, value=label)
-            sheet.cell(row=row, column=2, value=ante_value)
-            sheet.cell(row=row, column=3, value=post_value)
-            sheet.cell(row=row, column=4, value=delta)
-            row += 1
-
-        sheet.column_dimensions["C"].width = 25
-        sheet.column_dimensions["D"].width = 25
-
-        row = _append_aggregate_summary_metrics(sheet, summary, start_row=row + 1)
-        _append_compliance_changes_table(sheet, data, start_row=row + 1)
+    row = _append_compliance_changes_table(sheet, data, summary, start_row=row)
+    _append_aggregate_summary_metrics(sheet, summary, start_row=row + 1)
 
 def _append_aggregate_summary_metrics(sheet, summary: Mapping[str, Any], *, start_row: int) -> int:
     aggregate_metrics = summary.get("summary_metrics_totals", {}) or {}
@@ -201,16 +118,28 @@ def _append_aggregate_summary_metrics(sheet, summary: Mapping[str, Any], *, star
 
 
 def _append_compliance_changes_table(
-    sheet, data: Mapping[str, Any], *, start_row: int
+    sheet, data: Mapping[str, Any], summary: Mapping[str, Any], *, start_row: int
 ) -> int:
     funds = data.get("funds", {}) or {}
-    if not funds:
-        return start_row
 
     row = start_row
-    sheet[f"A{row}"] = "Compliance Changes"
+    sheet[f"A{row}"] = "Compliance Status Changes"
     sheet[f"A{row}"].font = Font(size=12, bold=True)
     row += 1
+
+    sheet[f"A{row}"] = "Total Funds Analyzed"
+    sheet[f"A{row}"].font = Font(bold=True)
+    sheet[f"B{row}"] = summary.get("total_funds_analyzed", 0)
+    sheet[f"B{row}"].font = Font(bold=True)
+    sheet[f"B{row}"].alignment = Alignment(horizontal="center")
+    row += 1
+
+    sheet[f"A{row}"] = "Total Funds Traded"
+    sheet[f"A{row}"].font = Font(bold=True)
+    sheet[f"B{row}"] = summary.get("total_funds_traded", 0)
+    sheet[f"B{row}"].font = Font(bold=True)
+    sheet[f"B{row}"].alignment = Alignment(horizontal="center")
+    row += 2
 
     headers = [
         "Fund Name",
@@ -227,41 +156,68 @@ def _append_compliance_changes_table(
         cell.alignment = Alignment(horizontal="center")
     row += 1
 
+    total_before = 0
+    total_after = 0
+    total_net = 0
+
     for fund_name, fund_data in sorted(funds.items()):
         violations_before = int(fund_data.get("violations_before", 0) or 0)
         violations_after = int(fund_data.get("violations_after", 0) or 0)
         net_change = violations_after - violations_before
 
-        sheet.cell(row=row, column=1, value=fund_name)
-        status_cell = sheet.cell(row=row, column=2, value=fund_data.get("status_change", "UNCHANGED"))
-        sheet.cell(row=row, column=3, value=violations_before)
-        sheet.cell(row=row, column=4, value=violations_after)
-        sheet.cell(row=row, column=5, value=net_change)
+        total_before += violations_before
+        total_after += violations_after
+        total_net += net_change
 
-        if violations_after > 0:
-            fill = PatternFill(start_color="FF9999", end_color="FF9999", fill_type="solid")
+        sheet.cell(row=row, column=1, value=fund_name)
+        status_cell = sheet.cell(
+            row=row, column=2, value=fund_data.get("status_change", "UNCHANGED")
+        )
+        status_cell.alignment = Alignment(horizontal="center")
+        before_cell = sheet.cell(row=row, column=3, value=violations_before)
+        before_cell.alignment = Alignment(horizontal="center")
+        after_cell = sheet.cell(row=row, column=4, value=violations_after)
+        after_cell.alignment = Alignment(horizontal="center")
+        net_cell = sheet.cell(row=row, column=5, value=net_change)
+        net_cell.alignment = Alignment(horizontal="center")
+
+        status = (fund_data.get("status_change") or "UNCHANGED").upper()
+        fill_color: Optional[str]
+        if status == "INTO_COMPLIANCE":
+            fill_color = "CCFFCC"
+        elif status == "OUT_OF_COMPLIANCE":
+            fill_color = "FFE0B3"
+        elif status == "UNCHANGED" and violations_after > 0:
+            fill_color = "FF9999"
+        else:
+            fill_color = None
+
+        if fill_color:
+            fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type="solid")
             for col_idx in range(1, len(headers) + 1):
                 sheet.cell(row=row, column=col_idx).fill = fill
-        else:
-            status = fund_data.get("status_change")
-            if status == "OUT_OF_COMPLIANCE":
-                status_cell.fill = PatternFill(
-                    start_color="FFCCCC", end_color="FFCCCC", fill_type="solid"
-                )
-            elif status == "INTO_COMPLIANCE":
-                status_cell.fill = PatternFill(
-                    start_color="CCFFCC", end_color="CCFFCC", fill_type="solid"
-                )
 
         row += 1
+
+    totals_fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
+    totals_font = Font(bold=True)
+    labels = ["Totals", "", total_before, total_after, total_net]
+    for col_idx, value in enumerate(labels, start=1):
+        cell = sheet.cell(row=row, column=col_idx, value=value)
+        cell.font = totals_font
+        cell.fill = totals_fill
+        if col_idx >= 2:
+            cell.alignment = Alignment(horizontal="center")
+    row += 1
 
     for col in range(1, len(headers) + 1):
         column = get_column_letter(col)
         current_width = sheet.column_dimensions[column].width
-        if current_width is None or current_width < 20:
-            sheet.column_dimensions[column].width = 20
+        min_width = 28 if col == 1 else 22
+        if current_width is None or current_width < min_width:
+            sheet.column_dimensions[column].width = min_width
 
-    return row + 1
+    return row
 
 def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) -> None:
     """Tab describing detailed trading activity by fund and asset class."""
@@ -667,8 +623,6 @@ def _create_summary_metrics_sheet(workbook: Workbook, data: Mapping[str, Any]) -
             sheet.cell(row=row, column=5, value=delta)
             row += 1
 
-        row += 1
-
     for col in range(1, len(headers) + 1):
         sheet.column_dimensions[get_column_letter(col)].width = 24
 
@@ -749,13 +703,15 @@ def generate_trading_pdf_report(comparison_data: Mapping[str, Any], output_path:
     try:
         pdf = TradingCompliancePDF(date=str(comparison_data.get("date", "")))
         pdf.add_page()
+        _add_compliance_overview(pdf, comparison_data)
 
-        _add_executive_summary(pdf, comparison_data)
+        pdf.add_page(orientation="L")
+        _add_summary_metrics_section(pdf, comparison_data)
 
-        pdf.add_page()
+        pdf.add_page(orientation="P")
         _add_trade_activity(pdf, comparison_data)
 
-        pdf.add_page()
+        pdf.add_page(orientation="P")
         _add_detailed_comparison(pdf, comparison_data)
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -766,104 +722,132 @@ def generate_trading_pdf_report(comparison_data: Mapping[str, Any], output_path:
         raise
 
 
-def _add_executive_summary(pdf: FPDF, data: Mapping[str, Any]) -> None:
+def _add_compliance_overview(pdf: FPDF, data: Mapping[str, Any]) -> None:
+    summary = data.get("summary", {}) or {}
+
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 8, "Executive Summary", 0, 1, "L")
+    pdf.cell(0, 8, "Compliance Status Changes", 0, 1, "L")
     pdf.ln(1)
 
-    summary = data.get("summary", {})
+    pdf.set_font("Arial", "", 9)
+    pdf.cell(
+        0,
+        6,
+        f"Total Funds Analyzed: {summary.get('total_funds_analyzed', 0)}",
+        0,
+        1,
+        "L",
+    )
+    pdf.cell(
+        0,
+        6,
+        f"Total Funds Traded: {summary.get('total_funds_traded', 0)}",
+        0,
+        1,
+        "L",
+    )
+    pdf.ln(2)
 
-    pdf.set_font("Arial", "B", 8)
-    pdf.cell(95, 6, "Metric", 1, 0, "L")
-    pdf.cell(45, 6, "Value", 1, 1, "C")
-
-    pdf.set_font("Arial", "", 8)
-
-    metrics = [
-        ("Total Funds Analyzed", summary.get("total_funds_analyzed", 0)),
-        ("Total Funds Traded", summary.get("total_funds_traded", 0)),
-        ("", ""),
-        ("Funds Moving OUT of Compliance", summary.get("funds_out_of_compliance", 0)),
-        ("Funds Moving INTO Compliance", summary.get("funds_into_compliance", 0)),
-        ("Funds with Unchanged Status", summary.get("funds_unchanged", 0)),
-        ("Funds with Compliance Changes", summary.get("funds_with_compliance_changes", 0)),
-        ("", ""),
-        ("Total Violations (Ex-Ante)", summary.get("total_violations_before", 0)),
-        ("Total Violations (Ex-Post)", summary.get("total_violations_after", 0)),
-        (
-            "Net Change in Violations",
-            summary.get("total_violations_after", 0)
-            - summary.get("total_violations_before", 0),
-        ),
-    ]
-
-    for label, value in metrics:
-        if label == "":
-            pdf.cell(95, 6, "", 0, 0)
-            pdf.cell(45, 6, "", 0, 1)
-            continue
-
-        if label == "Funds Moving OUT of Compliance" and value:
-            pdf.set_fill_color(255, 204, 204)
-            fill = True
-        elif label == "Funds Moving INTO Compliance" and value:
-            pdf.set_fill_color(204, 255, 204)
-            fill = True
-        else:
-            fill = False
-
-        pdf.cell(95, 6, label, 1, 0, "L", fill)
-        pdf.cell(45, 6, str(value), 1, 1, "C", fill)
-
-    pdf.ln(3)
     _render_compliance_changes_table(pdf, data)
     pdf.ln(3)
-    _add_summary_metrics_section(pdf, data)
+    _render_aggregate_summary_metrics(pdf, summary)
 
-def _render_compliance_changes_table(pdf: FPDF, data: Mapping[str, Any]) -> None:
+def _render_aggregate_summary_metrics(pdf: FPDF, summary: Mapping[str, Any]) -> None:
+    aggregate_metrics = summary.get("summary_metrics_totals", {}) or {}
+    ex_ante_totals = aggregate_metrics.get("ex_ante", {}) or {}
+    ex_post_totals = aggregate_metrics.get("ex_post", {}) or {}
+
+    if not (ex_ante_totals or ex_post_totals):
+        return
+
+    if pdf.get_y() > 250:
+        pdf.add_page()
+
     pdf.set_font("Arial", "B", 10)
-    pdf.cell(0, 7, "Compliance Status Changes", 0, 1, "L")
+    pdf.cell(0, 7, "Aggregate Summary Metrics", 0, 1, "L")
     pdf.ln(1)
+
+    headers = ["Metric", "Ex-Ante", "Ex-Post", "Delta"]
+    col_widths = [60, 35, 35, 35]
 
     pdf.set_font("Arial", "B", 8)
     pdf.set_fill_color(200, 200, 200)
-
-    col_widths = [50, 35, 25, 25, 25]
-    headers = ["Fund", "Status Change", "Viol. Before", "Viol. After", "Net Change"]
-
     for width, header in zip(col_widths, headers):
         pdf.cell(width, 6, header, 1, 0, "C", True)
     pdf.ln()
 
     pdf.set_font("Arial", "", 8)
 
+    metric_labels = {
+        "cash_value": "Cash Value",
+        "equity_market_value": "Equity Market Value",
+        "option_market_value": "Option Market Value",
+        "option_delta_adjusted_notional": "Option Delta Adjusted Notional",
+        "treasury": "Treasury Market Value",
+        "total_assets": "Total Assets",
+        "total_net_assets": "Total Net Assets",
+    }
+
+    for metric_key, label in metric_labels.items():
+        if metric_key not in ex_ante_totals and metric_key not in ex_post_totals:
+            continue
+
+        ante_value = float(ex_ante_totals.get(metric_key, 0.0) or 0.0)
+        post_value = float(ex_post_totals.get(metric_key, 0.0) or 0.0)
+        delta = post_value - ante_value
+
+        pdf.cell(col_widths[0], 6, label, 1, 0, "L")
+        pdf.cell(col_widths[1], 6, format_number(ante_value, digits=2), 1, 0, "R")
+        pdf.cell(col_widths[2], 6, format_number(post_value, digits=2), 1, 0, "R")
+        pdf.cell(col_widths[3], 6, format_number(delta, digits=2), 1, 1, "R")
+
+
+def _render_compliance_changes_table(pdf: FPDF, data: Mapping[str, Any]) -> None:
+    col_widths = [55, 40, 25, 25, 25]
+    headers = ["Fund", "Status Change", "Viol. Before", "Viol. After", "Net Change"]
+
+    def _draw_header_row(title: Optional[str] = None) -> None:
+        if title:
+            pdf.set_font("Arial", "B", 12)
+            pdf.cell(0, 8, title, 0, 1, "L")
+            pdf.ln(1)
+        pdf.set_font("Arial", "B", 8)
+        pdf.set_fill_color(200, 200, 200)
+        for width, header in zip(col_widths, headers):
+            pdf.cell(width, 6, header, 1, 0, "C", True)
+        pdf.ln()
+        pdf.set_font("Arial", "", 8)
+
+    _draw_header_row()
+
+    total_before = 0
+    total_after = 0
+    total_net = 0
+
     for fund_name, fund_data in sorted(data.get("funds", {}).items()):
         if pdf.get_y() > 260:
             pdf.add_page()
-            pdf.set_font("Arial", "B", 10)
-            pdf.cell(0, 7, "Compliance Status Changes", 0, 1, "L")
-            pdf.ln(1)
-            pdf.set_font("Arial", "B", 8)
-            pdf.set_fill_color(200, 200, 200)
-            for width, header in zip(col_widths, headers):
-                pdf.cell(width, 6, header, 1, 0, "C", True)
-            pdf.ln()
-            pdf.set_font("Arial", "", 8)
+            _draw_header_row("Compliance Status Changes (cont.)")
 
-        display_name = fund_name if len(fund_name) <= 22 else f"{fund_name[:19]}..."
-        status_change = fund_data.get("status_change", "UNCHANGED")
+        display_name = fund_name if len(fund_name) <= 26 else f"{fund_name[:23]}..."
+        status_change = str(fund_data.get("status_change", "UNCHANGED"))
+        status_upper = status_change.upper()
         viol_before = int(fund_data.get("violations_before", 0) or 0)
         viol_after = int(fund_data.get("violations_after", 0) or 0)
         net_change = viol_after - viol_before
 
-        if viol_after > 0:
-            pdf.set_fill_color(255, 153, 153)
-            fill = True
-        elif status_change == "OUT_OF_COMPLIANCE":
-            pdf.set_fill_color(255, 204, 204)
-            fill = True
-        elif status_change == "INTO_COMPLIANCE":
+        total_before += viol_before
+        total_after += viol_after
+        total_net += net_change
+
+        if status_upper == "INTO_COMPLIANCE":
             pdf.set_fill_color(204, 255, 204)
+            fill = True
+        elif status_upper == "OUT_OF_COMPLIANCE":
+            pdf.set_fill_color(255, 204, 153)
+            fill = True
+        elif status_upper == "UNCHANGED" and viol_after > 0:
+            pdf.set_fill_color(255, 153, 153)
             fill = True
         else:
             fill = False
@@ -873,6 +857,19 @@ def _render_compliance_changes_table(pdf: FPDF, data: Mapping[str, Any]) -> None
         pdf.cell(col_widths[2], 6, str(viol_before), 1, 0, "C", fill)
         pdf.cell(col_widths[3], 6, str(viol_after), 1, 0, "C", fill)
         pdf.cell(col_widths[4], 6, str(net_change), 1, 1, "C", fill)
+
+    if pdf.get_y() > 260:
+        pdf.add_page()
+        _draw_header_row("Compliance Status Changes (cont.)")
+
+    pdf.set_font("Arial", "B", 8)
+    pdf.set_fill_color(220, 220, 220)
+    pdf.cell(col_widths[0], 6, "Totals", 1, 0, "L", True)
+    pdf.cell(col_widths[1], 6, "", 1, 0, "C", True)
+    pdf.cell(col_widths[2], 6, str(total_before), 1, 0, "C", True)
+    pdf.cell(col_widths[3], 6, str(total_after), 1, 0, "C", True)
+    pdf.cell(col_widths[4], 6, str(total_net), 1, 1, "C", True)
+    pdf.set_font("Arial", "", 8)
 
 
 def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
@@ -1077,10 +1074,6 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
 
 
 def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 8, "Fund Summary Metrics", 0, 1, "L")
-    pdf.ln(2)
-
     metric_labels = {
         "cash_value": "Cash Value",
         "equity_market_value": "Equity Market Value",
@@ -1091,6 +1084,23 @@ def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
         "total_net_assets": "Total Net Assets",
     }
 
+    column_widths = [55, 85, 45, 45, 45]
+    headers = ["Fund", "Metric", "Ex-Ante", "Ex-Post", "Delta"]
+    available_height = 190
+
+    def _draw_header(title: str) -> None:
+        pdf.set_font("Arial", "B", 12)
+        pdf.cell(0, 8, title, 0, 1, "L")
+        pdf.ln(2)
+        pdf.set_font("Arial", "B", 8)
+        pdf.set_fill_color(200, 200, 200)
+        for width, header in zip(column_widths, headers):
+            pdf.cell(width, 7, header, 1, 0, "C", True)
+        pdf.ln()
+        pdf.set_font("Arial", "", 8)
+
+    _draw_header("Fund Summary Metrics")
+
     for fund_name, fund_data in sorted(data.get("funds", {}).items()):
         summary_metrics = fund_data.get("summary_metrics", {}) or {}
         ex_ante = summary_metrics.get("ex_ante", {}) or {}
@@ -1099,45 +1109,31 @@ def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
         if not ex_ante and not ex_post:
             continue
 
-        if pdf.get_y() > 250:
-            pdf.add_page()
+        wrote_metrics = False
 
-        pdf.set_font("Arial", "B", 10)
-        pdf.cell(0, 7, fund_name, 0, 1, "L")
-        pdf.set_font("Arial", "B", 8)
-        pdf.set_fill_color(200, 200, 200)
-        col_widths = [60, 35, 35, 35]
-        headers = ["Metric", "Ex-Ante", "Ex-Post", "Delta"]
-        for width, header in zip(col_widths, headers):
-            pdf.cell(width, 6, header, 1, 0, "C", True)
-        pdf.ln()
-
-        pdf.set_font("Arial", "", 8)
         for metric_key, label in metric_labels.items():
             if metric_key not in ex_ante and metric_key not in ex_post:
                 continue
+
+            if pdf.get_y() > available_height:
+                pdf.add_page(orientation="L")
+                _draw_header("Fund Summary Metrics (cont.)")
+
             ante_value = float(ex_ante.get(metric_key, 0.0) or 0.0)
             post_value = float(ex_post.get(metric_key, 0.0) or 0.0)
             delta = post_value - ante_value
 
-            if pdf.get_y() > 265:
-                pdf.add_page()
-                pdf.set_font("Arial", "B", 10)
-                pdf.cell(0, 7, fund_name, 0, 1, "L")
-                pdf.set_font("Arial", "B", 8)
-                pdf.set_fill_color(200, 200, 200)
-                for width, header in zip(col_widths, headers):
-                    pdf.cell(width, 6, header, 1, 0, "C", True)
-                pdf.ln()
-                pdf.set_font("Arial", "", 8)
+            fund_label = fund_name if not wrote_metrics else ""
+            pdf.cell(column_widths[0], 6, fund_label, 1, 0, "L")
+            pdf.cell(column_widths[1], 6, label, 1, 0, "L")
+            pdf.cell(column_widths[2], 6, format_number(ante_value, digits=2), 1, 0, "R")
+            pdf.cell(column_widths[3], 6, format_number(post_value, digits=2), 1, 0, "R")
+            pdf.cell(column_widths[4], 6, format_number(delta, digits=2), 1, 1, "R")
 
-            pdf.cell(col_widths[0], 6, label, 1, 0, "L")
-            pdf.cell(col_widths[1], 6, format_number(ante_value, digits=2), 1, 0, "R")
-            pdf.cell(col_widths[2], 6, format_number(post_value, digits=2), 1, 0, "R")
-            pdf.cell(col_widths[3], 6, format_number(delta, digits=2), 1, 1, "R")
+            wrote_metrics = True
 
-        pdf.ln(3)
-
+        if wrote_metrics and pdf.get_y() <= available_height:
+            pdf.ln(1)
 
 def _add_detailed_comparison(pdf: FPDF, data: Mapping[str, Any]) -> None:
     pdf.set_font("Arial", "B", 14)

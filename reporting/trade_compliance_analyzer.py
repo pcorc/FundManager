@@ -115,8 +115,8 @@ class TradingComplianceAnalyzer:
 
     # ------------------------------------------------------------------
     def _compare_fund(self, fund_name: str) -> Dict[str, Any]:
-        ante_results = self._as_mapping(self.results_ex_ante.get(fund_name))
-        post_results = self._as_mapping(self.results_ex_post.get(fund_name))
+        ante_results = self.results_ex_ante.get(fund_name)
+        post_results = self.results_ex_post.get(fund_name)
         trade_info = self._build_trade_info(fund_name, ante_results, post_results)
 
         checks = {}
@@ -606,11 +606,6 @@ class TradingComplianceAnalyzer:
                 return upper
         return "UNKNOWN"
 
-    @staticmethod
-    def _as_mapping(value: Any) -> Dict[str, Any]:
-        if isinstance(value, Mapping):
-            return dict(value)
-        return {}
 
     @staticmethod
     def _safe_percent(value: float, denominator: float) -> float:
