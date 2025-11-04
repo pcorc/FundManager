@@ -229,10 +229,7 @@ class FundRegistry:
 
     @property
     def index_identifier(self) -> Optional[str]:
-        value = self.config.get("index_identifier")
-        if isinstance(value, str):
-            value = value.strip()
-        return value or None
+        return self.config.get("index_holdings")
 
     @property
     def listed_option_type(self) -> Optional[str]:
