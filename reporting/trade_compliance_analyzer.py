@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 import pandas as pd
+from domain.fund import Fund
 
 
 @dataclass
@@ -190,7 +191,14 @@ class TradingComplianceAnalyzer:
     ) -> Dict[str, Any]:
         base_info = dict(self.traded_funds_info.get(fund_name, {}))
 
-        computed_info = self._compute_trade_summary(ante_results, post_results)
+        fund = self._resolve_fund_object(base_info, ante_results, post_results)
+
+        computed_info = self._compute_trade_summary(
+            ante_results,
+            post_results,
+            fund=fund,
+            fallback_sources=(base_info,),
+        )
 
         for key, value in computed_info.items():
             if key not in base_info or base_info[key] in (None, ""):
@@ -202,6 +210,9 @@ class TradingComplianceAnalyzer:
         self,
         ante_results: Mapping[str, Any],
         post_results: Mapping[str, Any],
+            *,
+            fund: Optional[Fund] = None,
+            fallback_sources: Tuple[Mapping[str, Any], ...] = (),
     ) -> Dict[str, Any]:
 
         asset_mappings: Tuple[Tuple[str, str], ...] = (
@@ -221,8 +232,18 @@ class TradingComplianceAnalyzer:
         total_traded = 0.0
 
         for key, attr in asset_mappings:
-            post_df = self._get_holdings(post_results, attr)
-            ante_df = self._get_holdings(ante_results, attr)
+            post_df = self._get_holdings(
+                post_results,
+                attr,
+                fund=fund,
+                additional_sources=fallback_sources,
+            )
+            ante_df = self._get_holdings(
+                ante_results,
+                attr,
+                fund=fund,
+                additional_sources=fallback_sources,
+            )
 
             _, post_quantities = self._resolve_quantity_series(post_df, preferred="iiv_shares")
             _, ante_quantities = self._resolve_quantity_series(ante_df, preferred="nav_shares")
@@ -343,9 +364,19 @@ class TradingComplianceAnalyzer:
 
         return trade_summary
 
-    def _get_holdings(self, results: Mapping[str, Any], attribute: str) -> pd.DataFrame:
-        if not isinstance(results, Mapping):
-            return pd.DataFrame()
+    def _get_holdings(
+        self,
+        results: Mapping[str, Any],
+        attribute: str,
+        *,
+        fund: Optional[Fund] = None,
+        additional_sources: Tuple[Mapping[str, Any], ...] = (),
+    ) -> pd.DataFrame:
+        base_sources: Tuple[Mapping[str, Any], ...] = tuple(
+            source
+            for source in (results,) + additional_sources
+            if isinstance(source, Mapping)
+        )
 
         def _coerce_df(value: Any) -> Optional[pd.DataFrame]:
             if isinstance(value, pd.DataFrame):
@@ -360,23 +391,63 @@ class TradingComplianceAnalyzer:
                 return holder
             return None
 
-        candidate = _coerce_df(results.get(attribute))
-        if candidate is not None:
-            return candidate
-
-        for key in (
-            f"{attribute}_holdings",
-            f"{attribute}_positions",
-            f"{attribute}_data",
-            attribute.replace("_holdings", ""),
-        ):
-            if key not in results:
-                continue
-            candidate = _coerce_df(results.get(key))
+        for source in base_sources:
+            candidate = _coerce_df(source.get(attribute))
             if candidate is not None:
                 return candidate
 
+            for key in (
+                f"{attribute}_holdings",
+                f"{attribute}_positions",
+                f"{attribute}_data",
+                attribute.replace("_holdings", ""),
+            ):
+                if key not in source:
+                    continue
+                candidate = _coerce_df(source.get(key))
+                if candidate is not None:
+                    return candidate
+
+        if isinstance(fund, Fund):
+            fund_df = self._get_holdings_from_fund(fund, attribute)
+            if not fund_df.empty:
+                return fund_df
+
         return pd.DataFrame()
+
+    @staticmethod
+    def _get_holdings_from_fund(fund: Fund, attribute: str) -> pd.DataFrame:
+        snapshot = getattr(getattr(fund, "data", None), "current", None)
+        vest_holdings = getattr(snapshot, "vest", None)
+        if vest_holdings is None:
+            return pd.DataFrame()
+
+        holdings = getattr(vest_holdings, attribute, None)
+        if isinstance(holdings, pd.DataFrame):
+            return holdings
+
+        return pd.DataFrame()
+
+    def _resolve_fund_object(
+        self,
+        *sources: Mapping[str, Any],
+    ) -> Optional[Fund]:
+        for source in sources:
+            if not isinstance(source, Mapping):
+                continue
+
+            for key in ("fund", "fund_object"):
+                candidate = source.get(key)
+                if isinstance(candidate, Fund):
+                    return candidate
+
+            nested = source.get("fund_data")
+            if isinstance(nested, Mapping):
+                candidate = nested.get("fund") or nested.get("fund_object")
+                if isinstance(candidate, Fund):
+                    return candidate
+
+        return None
 
     def _extract_trade_series(self, df: pd.DataFrame) -> pd.Series:
         if not isinstance(df, pd.DataFrame) or df.empty:
