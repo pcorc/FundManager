@@ -201,7 +201,7 @@ class TradingComplianceAnalyzer:
         )
 
         for key, value in computed_info.items():
-            if key not in base_info or base_info[key] in (None, ""):
+            if key not in base_info or base_info[key] in (None, "", {}, [], ()):  # type: ignore[arg-type]
                 base_info[key] = value
 
         return base_info

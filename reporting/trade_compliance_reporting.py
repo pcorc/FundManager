@@ -286,17 +286,30 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
         trade_info = fund_data.get("trade_info", {}) or {}
         asset_summary = trade_info.get("asset_trade_summary", {}) or {}
         net_trades = trade_info.get("net_trades", {}) or {}
+        activity_info = trade_info.get("trade_activity", {}) or {}
+
 
         total_net_assets = float(trade_info.get("total_net_assets", 0.0) or 0.0)
         total_assets = float(trade_info.get("total_assets", 0.0) or 0.0)
 
         for asset_key in ("equity", "options", "treasury"):
             summary = asset_summary.get(asset_key, {}) or {}
-            net_info = net_trades.get(asset_key, {}) or {}
+            activity_details = activity_info.get(asset_key, {}) or {}
+
+            activity_net: Dict[str, Any]
+            if isinstance(activity_details, Mapping):
+                activity_net = dict(activity_details.get("net", {}) or {})
+            else:
+                activity_net = {}
+
+            raw_net = net_trades.get(asset_key, {}) or {}
+            if isinstance(raw_net, Mapping):
+                net_info = {**activity_net, **raw_net}
+            else:
+                net_info = activity_net
 
             trade_value = float(summary.get("trade_value", 0.0) or 0.0)
             market_delta = float(summary.get("market_value_delta", 0.0) or 0.0)
-            net_value = float(net_info.get("net_value", 0.0) or 0.0)
             pct_tna = float(summary.get("pct_of_tna", 0.0) or 0.0)
             pct_assets = float(summary.get("pct_of_total_assets", 0.0) or 0.0)
             ex_ante = float(summary.get("ex_ante_market_value", 0.0) or 0.0)
@@ -307,6 +320,14 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
             sell_qty = float(net_info.get("sell_quantity", net_info.get("sells", 0.0)) or 0.0)
             buy_val = float(net_info.get("buy_value", 0.0) or 0.0)
             sell_val = float(net_info.get("sell_value", 0.0) or 0.0)
+            raw_net_value = net_info.get("net_value")
+            if raw_net_value in (None, ""):
+                net_value = buy_val - sell_val
+            else:
+                try:
+                    net_value = float(raw_net_value)
+                except (TypeError, ValueError):
+                    net_value = buy_val - sell_val
 
             if not any(
                 abs(val) > 0.0
@@ -410,7 +431,7 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
 
     for fund_name, fund_data in sorted(data.get("funds", {}).items()):
         trade_info = fund_data.get("trade_info", {}) or {}
-        activity = trade_info.get("trade_activity", {}) or {}
+        activity = activity_info
 
         if not activity:
             continue
@@ -585,11 +606,11 @@ def generate_trading_pdf_report(comparison_data: Mapping[str, Any], output_path:
 
         _add_summary_metrics_section(pdf, comparison_data)
 
-        pdf.add_page(orientation="P")
-        _add_trade_activity(pdf, comparison_data)
+        pdf.add_page(orientation="L")
+        _add_detailed_comparison(pdf, comparison_data)
 
         pdf.add_page(orientation="P")
-        _add_detailed_comparison(pdf, comparison_data)
+        _add_trade_activity(pdf, comparison_data)
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         pdf.output(output_path)
@@ -954,88 +975,95 @@ def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
             pdf.ln(1)
 
 def _add_detailed_comparison(pdf: FPDF, data: Mapping[str, Any]) -> None:
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "Detailed Comparison by Compliance Check", 0, 1, "L")
-    pdf.ln(2)
+    column_gap = 10
+    column_widths = [26, 58, 17, 17, 15]
+    headers = ["Fund", "Compliance Check", "Before", "After", "Changed"]
+    table_width = sum(column_widths)
+    row_height = 6
+    header_height = 6
 
-    for fund_name, fund_data in sorted(data.get("funds", {}).items()):
-        pdf.set_font("Arial", "B", 11)
-        pdf.set_fill_color(230, 230, 230)
-        pdf.cell(0, 8, fund_name, 1, 1, "L", True)
+    def _render_heading() -> None:
+        pdf.set_font("Arial", "B", 14)
+        pdf.cell(0, 10, "Detailed Comparison by Compliance Check", 0, 1, "L")
+        pdf.ln(2)
+
+    def _reset_columns() -> tuple[list[float], list[float]]:
+        start_y = pdf.get_y()
+        positions = [
+            pdf.l_margin,
+            pdf.l_margin + table_width + column_gap,
+        ]
+        heights = [start_y, start_y]
+        return positions, heights
+
+    def _max_y() -> float:
+        return pdf.h - pdf.b_margin
+
+    _render_heading()
+    column_positions, column_heights = _reset_columns()
+    current_column = 0
+
+    def _ensure_space(required_height: float) -> None:
+        nonlocal current_column, column_positions, column_heights
+
+        while column_heights[current_column] + required_height > _max_y():
+            current_column += 1
+            if current_column >= len(column_positions):
+                pdf.add_page(orientation="L")
+                _render_heading()
+                column_positions, column_heights = _reset_columns()
+                current_column = 0
+                if column_heights[current_column] + required_height > _max_y():
+                    break
+
+    funds = sorted(data.get("funds", {}).items())
+    for fund_name, fund_data in funds:
+        checks = sorted(fund_data.get("checks", {}).items())
+        if not checks:
+            continue
+
+        table_height = header_height + len(checks) * row_height + 4
+        _ensure_space(table_height)
+
+        x_position = column_positions[current_column]
+        pdf.set_xy(x_position, column_heights[current_column])
 
         pdf.set_font("Arial", "B", 8)
         pdf.set_fill_color(200, 200, 200)
-
-        col_widths = [60, 25, 25, 20, 20, 15]
-        headers = [
-            "Compliance Check",
-            "Before",
-            "After",
-            "Viol. B",
-            "Viol. A",
-            "Changed",
-        ]
-
-        for width, header in zip(col_widths, headers):
-            pdf.cell(width, 7, header, 1, 0, "C", True)
+        for width, header in zip(column_widths, headers):
+            pdf.cell(width, header_height, header, 1, 0, "C", True)
         pdf.ln()
 
+        pdf.set_x(x_position)
         pdf.set_font("Arial", "", 7)
 
-        for check_name, check_data in sorted(fund_data.get("checks", {}).items()):
+        for index, (check_name, check_data) in enumerate(checks):
+            fund_label = fund_name if index == 0 else ""
+            fund_display = fund_label if len(fund_label) <= 22 else f"{fund_label[:19]}..."
             display_check = check_name if len(check_name) <= 30 else f"{check_name[:27]}..."
-            changed = bool(check_data.get("changed"))
+            before_status = str(check_data.get("status_before", "UNKNOWN"))
+            after_status = str(check_data.get("status_after", "UNKNOWN"))
+            after_upper = after_status.upper()
+            changed_flag = "YES" if bool(check_data.get("changed")) else "NO"
 
-            if changed:
-                pdf.set_fill_color(255, 255, 204)
-                fill = True
+            pdf.set_x(x_position)
+            pdf.cell(column_widths[0], row_height, fund_display, 1, 0, "L")
+
+            if after_upper == "FAIL":
+                pdf.set_fill_color(255, 204, 204)
+                pdf.cell(column_widths[1], row_height, display_check, 1, 0, "L", True)
+                pdf.set_fill_color(255, 255, 255)
             else:
-                fill = False
+                pdf.cell(column_widths[1], row_height, display_check, 1, 0, "L")
 
-            pdf.cell(col_widths[0], 6, display_check, 1, 0, "L", fill)
-            pdf.cell(
-                col_widths[1],
-                6,
-                check_data.get("status_before", "UNKNOWN"),
-                1,
-                0,
-                "C",
-                fill,
-            )
-            pdf.cell(
-                col_widths[2],
-                6,
-                check_data.get("status_after", "UNKNOWN"),
-                1,
-                0,
-                "C",
-                fill,
-            )
-            pdf.cell(
-                col_widths[3],
-                6,
-                str(check_data.get("violations_before", 0)),
-                1,
-                0,
-                "C",
-                fill,
-            )
-            pdf.cell(
-                col_widths[4],
-                6,
-                str(check_data.get("violations_after", 0)),
-                1,
-                0,
-                "C",
-                fill,
-            )
-            pdf.cell(col_widths[5], 6, "YES" if changed else "NO", 1, 1, "C", fill)
+            pdf.cell(column_widths[2], row_height, before_status, 1, 0, "C")
+            pdf.cell(column_widths[3], row_height, after_status, 1, 0, "C")
+            pdf.cell(column_widths[4], row_height, changed_flag, 1, 1, "C")
 
-            if pdf.get_y() > 250:
-                pdf.add_page()
+        column_heights[current_column] = pdf.get_y() + 4
 
-        pdf.ln(3)
-
+        if column_heights[current_column] > _max_y():
+            _ensure_space(0)
 
 def generate_trading_compliance_reports(
     comparison_data: Mapping[str, Any],

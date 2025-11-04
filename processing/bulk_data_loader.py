@@ -1264,7 +1264,7 @@ class BulkDataLoader:
     ) -> pd.DataFrame | Tuple[pd.DataFrame, pd.DataFrame]:
         nasdaq = getattr(self.base_cls.classes, 'nasdaq_pro', None)
         if nasdaq is None:
-            raise AttributeError('nasdaq_holdings table is not reflected')
+            raise AttributeError('nasdaq_pro table is not reflected')
 
         bbg = getattr(self.base_cls.classes, 'bbg_equity_flds_blotter', None)
         columns = [
