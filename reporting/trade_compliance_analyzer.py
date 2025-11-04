@@ -5,7 +5,7 @@ from collections import defaultdict
 
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
-
+import re
 import pandas as pd
 from domain.fund import Fund
 
@@ -270,6 +270,9 @@ class TradingComplianceAnalyzer:
                     sell_quantity = abs(quantity_delta)
 
             net_trades[key] = {
+                "buy_quantity": buy_quantity,
+                "sell_quantity": sell_quantity,
+                "net_quantity": quantity_delta,
                 "buys": buy_quantity,
                 "sells": sell_quantity,
                 "net": quantity_delta,
@@ -460,26 +463,6 @@ class TradingComplianceAnalyzer:
 
         return None
 
-    def _resolve_fund_object(
-        self,
-        *sources: Mapping[str, Any],
-    ) -> Optional[Fund]:
-        for source in sources:
-            if not isinstance(source, Mapping):
-                continue
-
-            for key in ("fund", "fund_object"):
-                candidate = source.get(key)
-                if isinstance(candidate, Fund):
-                    return candidate
-
-            nested = source.get("fund_data")
-            if isinstance(nested, Mapping):
-                candidate = nested.get("fund") or nested.get("fund_object")
-                if isinstance(candidate, Fund):
-                    return candidate
-
-        return None
 
     def _extract_trade_series(self, df: pd.DataFrame) -> pd.Series:
         if not isinstance(df, pd.DataFrame) or df.empty:

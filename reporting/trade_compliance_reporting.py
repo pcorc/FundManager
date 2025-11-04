@@ -45,7 +45,6 @@ def generate_trading_excel_report(comparison_data: Mapping[str, Any], output_pat
     _create_summary_sheet(workbook, comparison_data)
     _create_trade_activity_sheet(workbook, comparison_data)
     _create_compliance_details_sheet(workbook, comparison_data)
-    _create_individual_fund_sheets(workbook, comparison_data)
 
     workbook.save(path)
     logger.info("Trading comparison report saved to: %s", path)
@@ -249,6 +248,7 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
     sheet = workbook.create_sheet("Trade Activity")
     sheet["A1"] = "Trade Activity Overview"
     sheet["A1"].font = Font(size=12, bold=True)
+    sheet.freeze_panes = "A3"
 
     summary_headers = [
         "Fund",
@@ -264,18 +264,24 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
         "Trade vs Ex-Ante %",
         "Ex-Post vs Ex-Ante %",
         "Net Trade Value",
+        "Net Buy Qty",
+        "Net Sell Qty",
+        "Net Buy Value",
+        "Net Sell Value",
     ]
 
-    row = 2
+    header_row = 3
     for col, header in enumerate(summary_headers, start=1):
-        cell = sheet.cell(row=row, column=col, value=header)
+        cell = sheet.cell(row=header_row, column=col, value=header)
         cell.font = Font(bold=True)
         cell.fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
         cell.alignment = Alignment(horizontal="center")
 
     asset_labels = {"equity": "Equity", "options": "Options", "treasury": "Treasury"}
 
-    row += 1
+    row = header_row + 1
+    summary_rows_written = False
+
     for fund_name, fund_data in sorted(data.get("funds", {}).items()):
         trade_info = fund_data.get("trade_info", {}) or {}
         asset_summary = trade_info.get("asset_trade_summary", {}) or {}
@@ -285,12 +291,22 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
         total_assets = float(trade_info.get("total_assets", 0.0) or 0.0)
 
         for asset_key in ("equity", "options", "treasury"):
-            summary = asset_summary.get(asset_key, {})
-            net_info = net_trades.get(asset_key, {})
+            summary = asset_summary.get(asset_key, {}) or {}
+            net_info = net_trades.get(asset_key, {}) or {}
 
             trade_value = float(summary.get("trade_value", 0.0) or 0.0)
             market_delta = float(summary.get("market_value_delta", 0.0) or 0.0)
             net_value = float(net_info.get("net_value", 0.0) or 0.0)
+            pct_tna = float(summary.get("pct_of_tna", 0.0) or 0.0)
+            pct_assets = float(summary.get("pct_of_total_assets", 0.0) or 0.0)
+            ex_ante = float(summary.get("ex_ante_market_value", 0.0) or 0.0)
+            ex_post = float(summary.get("ex_post_market_value", 0.0) or 0.0)
+            trade_vs_ante = float(summary.get("trade_vs_ex_ante_pct", 0.0) or 0.0)
+            post_vs_ante = float(summary.get("ex_post_vs_ex_ante_pct", 0.0) or 0.0)
+            buy_qty = float(net_info.get("buy_quantity", net_info.get("buys", 0.0)) or 0.0)
+            sell_qty = float(net_info.get("sell_quantity", net_info.get("sells", 0.0)) or 0.0)
+            buy_val = float(net_info.get("buy_value", 0.0) or 0.0)
+            sell_val = float(net_info.get("sell_value", 0.0) or 0.0)
 
             if not any(
                 abs(val) > 0.0
@@ -298,9 +314,15 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
                     trade_value,
                     market_delta,
                     net_value,
+                    buy_qty,
+                    sell_qty,
+                    buy_val,
+                    sell_val,
                 )
             ):
                 continue
+
+            summary_rows_written = True
 
             sheet.cell(row=row, column=1, value=fund_name)
             sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
@@ -314,62 +336,60 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
             trade_val_cell = sheet.cell(row=row, column=5, value=trade_value)
             trade_val_cell.number_format = "#,##0.00"
 
-            pct_tna_cell = sheet.cell(
-                row=row,
-                column=6,
-                value=float(summary.get("pct_of_tna", 0.0) or 0.0),
-            )
+            pct_tna_cell = sheet.cell(row=row, column=6, value=pct_tna)
             pct_tna_cell.number_format = "0.00%"
 
-            pct_assets_cell = sheet.cell(
-                row=row,
-                column=7,
-                value=float(summary.get("pct_of_total_assets", 0.0) or 0.0),
-            )
+            pct_assets_cell = sheet.cell(row=row, column=7, value=pct_assets)
             pct_assets_cell.number_format = "0.00%"
 
-            ex_ante_cell = sheet.cell(
-                row=row,
-                column=8,
-                value=float(summary.get("ex_ante_market_value", 0.0) or 0.0),
-            )
+            ex_ante_cell = sheet.cell(row=row, column=8, value=ex_ante)
             ex_ante_cell.number_format = "#,##0.00"
 
-            ex_post_cell = sheet.cell(
-                row=row,
-                column=9,
-                value=float(summary.get("ex_post_market_value", 0.0) or 0.0),
-            )
+            ex_post_cell = sheet.cell(row=row, column=9, value=ex_post)
             ex_post_cell.number_format = "#,##0.00"
 
             delta_cell = sheet.cell(row=row, column=10, value=market_delta)
             delta_cell.number_format = "#,##0.00"
 
-            trade_vs_ante_cell = sheet.cell(
-                row=row,
-                column=11,
-                value=float(summary.get("trade_vs_ex_ante_pct", 0.0) or 0.0),
-            )
+            trade_vs_ante_cell = sheet.cell(row=row, column=11, value=trade_vs_ante)
             trade_vs_ante_cell.number_format = "0.00%"
 
-            post_vs_ante_cell = sheet.cell(
-                row=row,
-                column=12,
-                value=float(summary.get("ex_post_vs_ex_ante_pct", 0.0) or 0.0),
-            )
+            post_vs_ante_cell = sheet.cell(row=row, column=12, value=post_vs_ante)
             post_vs_ante_cell.number_format = "0.00%"
 
             net_val_cell = sheet.cell(row=row, column=13, value=net_value)
             net_val_cell.number_format = "#,##0.00"
 
+            buy_qty_cell = sheet.cell(row=row, column=14, value=buy_qty)
+            buy_qty_cell.number_format = "#,##0.00"
+
+            sell_qty_cell = sheet.cell(row=row, column=15, value=sell_qty)
+            sell_qty_cell.number_format = "#,##0.00"
+
+            buy_val_cell = sheet.cell(row=row, column=16, value=buy_val)
+            buy_val_cell.number_format = "#,##0.00"
+
+            sell_val_cell = sheet.cell(row=row, column=17, value=sell_val)
+            sell_val_cell.number_format = "#,##0.00"
+
             row += 1
+
+    if not summary_rows_written:
+        sheet.cell(row=header_row + 1, column=1, value="No trading activity detected.")
 
     for col in range(1, len(summary_headers) + 1):
         column = get_column_letter(col)
-        sheet.column_dimensions[column].width = 20
+        width = sheet.column_dimensions[column].width or 0
+        desired = 22 if col <= 5 else 18
+        if col in (1, 2):
+            desired = 24 if col == 1 else 20
+        if width < desired:
+            sheet.column_dimensions[column].width = desired
 
-    row += 2
-    detail_header_row = row
+    row = max(row + 2, header_row + 3)
+    sheet.cell(row=row, column=1, value="Trade Activity Details").font = Font(size=12, bold=True)
+    row += 1
+
     detail_headers = [
         "Fund",
         "Asset Class",
@@ -380,99 +400,14 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
     ]
 
     for col, header in enumerate(detail_headers, start=1):
-        cell = sheet.cell(row=detail_header_row, column=col, value=header)
+        cell = sheet.cell(row=row, column=col, value=header)
         cell.font = Font(bold=True)
         cell.fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
         cell.alignment = Alignment(horizontal="center")
 
-    row = detail_header_row + 1
-    for fund_name, fund_data in sorted(data.get("funds", {}).items()):
-        trade_info = fund_data.get("trade_info", {}) or {}
-        activity = trade_info.get("trade_activity", {}) or {}
+    row += 1
+    detail_rows_written = False
 
-        for asset_key in ("equity", "options", "treasury"):
-            asset_details = activity.get(asset_key)
-            if not asset_details:
-                continue
-
-            net = asset_details.get("net", {})
-            buy_qty = float(net.get("buy_quantity", 0.0) or 0.0)
-            sell_qty = float(net.get("sell_quantity", 0.0) or 0.0)
-            buy_val = float(net.get("buy_value", 0.0) or 0.0)
-            sell_val = float(net.get("sell_value", 0.0) or 0.0)
-
-            sheet.cell(row=row, column=1, value=fund_name)
-            sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
-            sheet.cell(row=row, column=3, value="Net Buy")
-            buy_qty_cell = sheet.cell(row=row, column=5, value=buy_qty)
-            buy_qty_cell.number_format = "#,##0.00"
-            buy_val_cell = sheet.cell(row=row, column=6, value=buy_val)
-            buy_val_cell.number_format = "#,##0.00"
-            row += 1
-
-            sheet.cell(row=row, column=1, value=fund_name)
-            sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
-            sheet.cell(row=row, column=3, value="Net Sell")
-            sell_qty_cell = sheet.cell(row=row, column=5, value=sell_qty)
-            sell_qty_cell.number_format = "#,##0.00"
-            sell_val_cell = sheet.cell(row=row, column=6, value=sell_val)
-            sell_val_cell.number_format = "#,##0.00"
-            row += 1
-
-            for trade in asset_details.get("buys", []):
-                sheet.cell(row=row, column=1, value=fund_name)
-                sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
-                sheet.cell(row=row, column=3, value="Buy")
-                sheet.cell(row=row, column=4, value=trade.get("ticker", ""))
-                qty_cell = sheet.cell(
-                    row=row, column=5, value=float(trade.get("quantity", 0.0) or 0.0)
-                )
-                qty_cell.number_format = "#,##0.00"
-                val_cell = sheet.cell(
-                    row=row, column=6, value=float(trade.get("market_value", 0.0) or 0.0)
-                )
-                val_cell.number_format = "#,##0.00"
-                row += 1
-
-            for trade in asset_details.get("sells", []):
-                sheet.cell(row=row, column=1, value=fund_name)
-                sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
-                sheet.cell(row=row, column=3, value="Sell")
-                sheet.cell(row=row, column=4, value=trade.get("ticker", ""))
-                qty_cell = sheet.cell(
-                    row=row, column=5, value=float(trade.get("quantity", 0.0) or 0.0)
-                )
-                qty_cell.number_format = "#,##0.00"
-                val_cell = sheet.cell(
-                    row=row, column=6, value=float(trade.get("market_value", 0.0) or 0.0)
-                )
-                val_cell.number_format = "#,##0.00"
-                row += 1
-
-            row += 1
-
-    for col in range(1, len(detail_headers) + 1):
-        column = get_column_letter(col)
-        width = sheet.column_dimensions[column].width
-        if width is None or width < 18:
-            sheet.column_dimensions[column].width = 18
-
-
-def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) -> None:
-    """Tab describing detailed trading activity by fund and asset class."""
-
-    sheet = workbook.create_sheet("Trade Activity")
-    headers = ["Fund", "Asset Class", "Direction", "Ticker", "Quantity", "Market Value"]
-
-    for col, header in enumerate(headers, start=1):
-        cell = sheet.cell(row=1, column=col, value=header)
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
-        cell.alignment = Alignment(horizontal="center")
-
-    asset_labels = {"equity": "Equity", "options": "Options", "treasury": "Treasury"}
-
-    row = 2
     for fund_name, fund_data in sorted(data.get("funds", {}).items()):
         trade_info = fund_data.get("trade_info", {}) or {}
         activity = trade_info.get("trade_activity", {}) or {}
@@ -480,75 +415,89 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
         if not activity:
             continue
 
+        fund_rows_written = False
+
         for asset_key in ("equity", "options", "treasury"):
             asset_details = activity.get(asset_key)
             if not asset_details:
                 continue
 
-            net = asset_details.get("net", {})
+            asset_rows_written = False
+            net = asset_details.get("net", {}) or {}
             buy_qty = float(net.get("buy_quantity", 0.0) or 0.0)
             sell_qty = float(net.get("sell_quantity", 0.0) or 0.0)
             buy_val = float(net.get("buy_value", 0.0) or 0.0)
             sell_val = float(net.get("sell_value", 0.0) or 0.0)
 
-            if buy_qty or sell_qty or asset_details.get("buys") or asset_details.get("sells"):
+            if any(val != 0.0 for val in (buy_qty, buy_val)):
+                detail_rows_written = True
+                asset_rows_written = True
+                fund_rows_written = True
                 sheet.cell(row=row, column=1, value=fund_name)
                 sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
                 sheet.cell(row=row, column=3, value="Net Buy")
-                buy_qty_cell = sheet.cell(row=row, column=5, value=buy_qty)
-                buy_qty_cell.number_format = "#,##0.00"
-                buy_val_cell = sheet.cell(row=row, column=6, value=buy_val)
-                buy_val_cell.number_format = "#,##0.00"
+                qty_cell = sheet.cell(row=row, column=5, value=buy_qty)
+                qty_cell.number_format = "#,##0.00"
+                val_cell = sheet.cell(row=row, column=6, value=buy_val)
+                val_cell.number_format = "#,##0.00"
                 row += 1
 
+            if any(val != 0.0 for val in (sell_qty, sell_val)):
+                detail_rows_written = True
+                asset_rows_written = True
+                fund_rows_written = True
                 sheet.cell(row=row, column=1, value=fund_name)
                 sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
                 sheet.cell(row=row, column=3, value="Net Sell")
-                sell_qty_cell = sheet.cell(row=row, column=5, value=sell_qty)
-                sell_qty_cell.number_format = "#,##0.00"
-                sell_val_cell = sheet.cell(row=row, column=6, value=sell_val)
-                sell_val_cell.number_format = "#,##0.00"
+                qty_cell = sheet.cell(row=row, column=5, value=sell_qty)
+                qty_cell.number_format = "#,##0.00"
+                val_cell = sheet.cell(row=row, column=6, value=sell_val)
+                val_cell.number_format = "#,##0.00"
                 row += 1
 
-                if asset_details.get("buys"):
-                    for trade in asset_details["buys"]:
-                        sheet.cell(row=row, column=1, value=fund_name)
-                        sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
-                        sheet.cell(row=row, column=3, value="Buy")
-                        sheet.cell(row=row, column=4, value=trade.get("ticker", ""))
-                        qty_cell = sheet.cell(
-                            row=row, column=5, value=float(trade.get("quantity", 0.0) or 0.0)
-                        )
-                        qty_cell.number_format = "#,##0.00"
-                        val_cell = sheet.cell(
-                            row=row, column=6, value=float(trade.get("market_value", 0.0) or 0.0)
-                        )
-                        val_cell.number_format = "#,##0.00"
-                        row += 1
+            for trade in asset_details.get("buys", []):
+                detail_rows_written = True
+                asset_rows_written = True
+                fund_rows_written = True
+                sheet.cell(row=row, column=1, value=fund_name)
+                sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
+                sheet.cell(row=row, column=3, value="Buy")
+                sheet.cell(row=row, column=4, value=trade.get("ticker", ""))
+                qty_cell = sheet.cell(row=row, column=5, value=float(trade.get("quantity", 0.0) or 0.0))
+                qty_cell.number_format = "#,##0.00"
+                val_cell = sheet.cell(row=row, column=6, value=float(trade.get("market_value", 0.0) or 0.0))
+                val_cell.number_format = "#,##0.00"
+                row += 1
 
-                if asset_details.get("sells"):
-                    for trade in asset_details["sells"]:
-                        sheet.cell(row=row, column=1, value=fund_name)
-                        sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
-                        sheet.cell(row=row, column=3, value="Sell")
-                        sheet.cell(row=row, column=4, value=trade.get("ticker", ""))
-                        qty_cell = sheet.cell(
-                            row=row, column=5, value=float(trade.get("quantity", 0.0) or 0.0)
-                        )
-                        qty_cell.number_format = "#,##0.00"
-                        val_cell = sheet.cell(
-                            row=row, column=6, value=float(trade.get("market_value", 0.0) or 0.0)
-                        )
-                        val_cell.number_format = "#,##0.00"
-                        row += 1
+            for trade in asset_details.get("sells", []):
+                detail_rows_written = True
+                asset_rows_written = True
+                fund_rows_written = True
+                sheet.cell(row=row, column=1, value=fund_name)
+                sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
+                sheet.cell(row=row, column=3, value="Sell")
+                sheet.cell(row=row, column=4, value=trade.get("ticker", ""))
+                qty_cell = sheet.cell(row=row, column=5, value=float(trade.get("quantity", 0.0) or 0.0))
+                qty_cell.number_format = "#,##0.00"
+                val_cell = sheet.cell(row=row, column=6, value=float(trade.get("market_value", 0.0) or 0.0))
+                val_cell.number_format = "#,##0.00"
+                row += 1
 
-                row += 1  # Blank line between asset sections
+            if asset_rows_written:
+                row += 1
 
-        row += 1  # Blank line between funds
+        if fund_rows_written:
+            row += 1
 
-    for col in range(1, len(headers) + 1):
-        sheet.column_dimensions[get_column_letter(col)].width = 18
+    if not detail_rows_written:
+        sheet.cell(row=row, column=1, value="No trade details available.")
 
+    for col in range(1, len(detail_headers) + 1):
+        column = get_column_letter(col)
+        width = sheet.column_dimensions[column].width or 0
+        desired = 18 if col >= 4 else 20
+        if width < desired:
+            sheet.column_dimensions[column].width = desired
 
 def _populate_compliance_detail_sheet(sheet, data: Mapping[str, Any]) -> None:
     headers = [
@@ -604,54 +553,6 @@ def _create_compliance_details_sheet(workbook: Workbook, data: Mapping[str, Any]
 
 
 
-def _create_individual_fund_sheets(workbook: Workbook, data: Mapping[str, Any]) -> None:
-    """Optional per-fund tabs detailing compliance checks."""
-
-    funds = data.get("funds", {})
-    for fund_name, fund_info in sorted(funds.items()):
-        checks = fund_info.get("checks", {})
-        if not checks:
-            continue
-
-        sheet_name = fund_name[:31]
-        sheet = workbook.create_sheet(sheet_name)
-        headers = [
-            "Compliance Check",
-            "Status Before",
-            "Status After",
-            "Violations Before",
-            "Violations After",
-            "Changed",
-        ]
-
-        for col, header in enumerate(headers, start=1):
-            cell = sheet.cell(row=1, column=col, value=header)
-            cell.font = Font(bold=True)
-            cell.fill = PatternFill(
-                start_color="DDDDDD", end_color="DDDDDD", fill_type="solid"
-            )
-
-        row = 2
-        for check_name, check_info in sorted(checks.items()):
-            sheet.cell(row=row, column=1, value=check_name)
-            sheet.cell(row=row, column=2, value=check_info.get("status_before", "UNKNOWN"))
-            sheet.cell(row=row, column=3, value=check_info.get("status_after", "UNKNOWN"))
-            sheet.cell(row=row, column=4, value=check_info.get("violations_before", 0))
-            sheet.cell(row=row, column=5, value=check_info.get("violations_after", 0))
-            changed = bool(check_info.get("changed"))
-            sheet.cell(row=row, column=6, value="YES" if changed else "NO")
-
-            if changed:
-                for col in range(1, len(headers) + 1):
-                    sheet.cell(row=row, column=col).fill = PatternFill(
-                        start_color="FFFFCC", end_color="FFFFCC", fill_type="solid"
-                    )
-
-            row += 1
-
-        for col in range(1, len(headers) + 1):
-            sheet.column_dimensions[get_column_letter(col)].width = 22
-
 
 class TradingCompliancePDF(FPDF):
     """Custom PDF class for trading compliance reports."""
@@ -679,7 +580,7 @@ def generate_trading_pdf_report(comparison_data: Mapping[str, Any], output_path:
 
     try:
         pdf = TradingCompliancePDF(date=str(comparison_data.get("date", "")))
-        pdf.add_page()
+        pdf.add_page(orientation="L")
         _add_compliance_overview(pdf, comparison_data)
 
         _add_summary_metrics_section(pdf, comparison_data)
@@ -898,20 +799,6 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
                 pdf.cell(col_widths[5], 6, format_number(ex_post, digits=2), 1, 0, "R")
                 pdf.cell(col_widths[6], 6, format_number(delta, digits=2), 1, 1, "R")
 
-                pdf.set_font("Arial", "I", 6)
-                pdf.cell(
-                    0,
-                    4,
-                    "Trade vs Ex-Ante: "
-                    f"{_format_percent(trade_vs_ante)} | Ex-Post vs Ex-Ante: "
-                    f"{_format_percent(post_vs_ante)} | Net Trade Value: "
-                    f"{format_number(net_value, digits=2)}",
-                    0,
-                    1,
-                    "L",
-                )
-                pdf.set_font("Arial", "", 7)
-
             pdf.ln(1)
 
         for asset_key in ("equity", "options", "treasury"):
@@ -1010,7 +897,7 @@ def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
         "total_net_assets": "Total Net Assets",
     }
 
-    column_widths = [45, 70, 30, 30, 30]
+    column_widths = [40, 55, 35, 35, 35]
     headers = ["Fund", "Metric", "Ex-Ante", "Ex-Post", "Delta"]
     page_height_limit = lambda: pdf.h - pdf.b_margin - 10
 
