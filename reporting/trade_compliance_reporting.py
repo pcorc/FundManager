@@ -43,7 +43,6 @@ def generate_trading_excel_report(comparison_data: Mapping[str, Any], output_pat
     workbook.remove(default_sheet)
 
     _create_summary_sheet(workbook, comparison_data)
-    _create_summary_metrics_sheet(workbook, comparison_data)
     _create_trade_activity_sheet(workbook, comparison_data)
     _create_compliance_details_sheet(workbook, comparison_data)
     _create_individual_fund_sheets(workbook, comparison_data)
@@ -64,28 +63,12 @@ def _create_summary_sheet(workbook: Workbook, data: Mapping[str, Any]) -> None:
 
     row = 4
     row = _append_compliance_changes_table(sheet, data, summary, start_row=row)
-    _append_aggregate_summary_metrics(sheet, summary, start_row=row + 1)
+    _append_fund_summary_metrics_table(sheet, data, start_row=row + 2)
 
-def _append_aggregate_summary_metrics(sheet, summary: Mapping[str, Any], *, start_row: int) -> int:
-    aggregate_metrics = summary.get("summary_metrics_totals", {}) or {}
-    ex_ante_totals = aggregate_metrics.get("ex_ante", {}) or {}
-    ex_post_totals = aggregate_metrics.get("ex_post", {}) or {}
-
-    if not (ex_ante_totals or ex_post_totals):
-        return start_row
-
-    row = start_row
-    sheet[f"A{row}"] = "Aggregate Summary Metrics"
-    sheet[f"A{row}"].font = Font(size=12, bold=True)
-    row += 1
-
-    headers = ["Metric", "Ex-Ante", "Ex-Post", "Delta"]
-    for col, header in enumerate(headers, start=1):
-        cell = sheet.cell(row=row, column=col, value=header)
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
-        cell.alignment = Alignment(horizontal="center")
-    row += 1
+def _append_fund_summary_metrics_table(
+    sheet, data: Mapping[str, Any], *, start_row: int
+) -> int:
+    funds = data.get("funds", {}) or {}
 
     metric_labels = {
         "cash_value": "Cash Value",
@@ -97,25 +80,66 @@ def _append_aggregate_summary_metrics(sheet, summary: Mapping[str, Any], *, star
         "total_net_assets": "Total Net Assets",
     }
 
-    for metric_key, label in metric_labels.items():
-        if metric_key not in ex_ante_totals and metric_key not in ex_post_totals:
+    populated = False
+    row = start_row
+
+    for fund_name, fund_data in sorted(funds.items()):
+        summary_metrics = fund_data.get("summary_metrics", {}) or {}
+        ex_ante = summary_metrics.get("ex_ante", {}) or {}
+        ex_post = summary_metrics.get("ex_post", {}) or {}
+
+        if not ex_ante and not ex_post:
             continue
-        ante_value = float(ex_ante_totals.get(metric_key, 0.0) or 0.0)
-        post_value = float(ex_post_totals.get(metric_key, 0.0) or 0.0)
-        delta = post_value - ante_value
 
-        sheet.cell(row=row, column=1, value=label)
-        sheet.cell(row=row, column=2, value=ante_value)
-        sheet.cell(row=row, column=3, value=post_value)
-        sheet.cell(row=row, column=4, value=delta)
-        row += 1
+        if not populated:
+            sheet[f"A{row}"] = "Fund Summary Metrics"
+            sheet[f"A{row}"].font = Font(size=12, bold=True)
+            row += 1
 
-    if sheet.column_dimensions["C"].width is None or sheet.column_dimensions["C"].width < 25:
-        sheet.column_dimensions["C"].width = 25
-    if sheet.column_dimensions["D"].width is None or sheet.column_dimensions["D"].width < 25:
-        sheet.column_dimensions["D"].width = 25
-    return row + 1
+            headers = ["Fund", "Metric", "Ex-Ante", "Ex-Post", "Delta"]
+            for col, header in enumerate(headers, start=1):
+                cell = sheet.cell(row=row, column=col, value=header)
+                cell.font = Font(bold=True)
+                cell.fill = PatternFill(
+                    start_color="DDDDDD", end_color="DDDDDD", fill_type="solid"
+                )
+                cell.alignment = Alignment(horizontal="center")
+            row += 1
+            populated = True
 
+        wrote_row = False
+        for metric_key, label in metric_labels.items():
+            if metric_key not in ex_ante and metric_key not in ex_post:
+                continue
+
+            ante_value = float(ex_ante.get(metric_key, 0.0) or 0.0)
+            post_value = float(ex_post.get(metric_key, 0.0) or 0.0)
+            delta = post_value - ante_value
+
+            sheet.cell(row=row, column=1, value=fund_name if not wrote_row else "")
+            sheet.cell(row=row, column=2, value=label)
+            ante_cell = sheet.cell(row=row, column=3, value=ante_value)
+            ante_cell.number_format = "#,##0.00"
+            post_cell = sheet.cell(row=row, column=4, value=post_value)
+            post_cell.number_format = "#,##0.00"
+            delta_cell = sheet.cell(row=row, column=5, value=delta)
+            delta_cell.number_format = "#,##0.00"
+
+            row += 1
+            wrote_row = True
+
+        if wrote_row:
+            row += 1
+
+    if populated:
+        for col_idx in range(1, 6):
+            column = get_column_letter(col_idx)
+            if sheet.column_dimensions[column].width is None or sheet.column_dimensions[
+                column
+            ].width < (30 if col_idx == 2 else 20):
+                sheet.column_dimensions[column].width = 30 if col_idx == 2 else 20
+
+    return row
 
 def _append_compliance_changes_table(
     sheet, data: Mapping[str, Any], summary: Mapping[str, Any], *, start_row: int
@@ -579,53 +603,6 @@ def _create_compliance_details_sheet(workbook: Workbook, data: Mapping[str, Any]
     _populate_compliance_detail_sheet(sheet, data)
 
 
-def _create_summary_metrics_sheet(workbook: Workbook, data: Mapping[str, Any]) -> None:
-    """Display ex-ante vs ex-post summary metrics for each fund."""
-
-    sheet = workbook.create_sheet("Summary Metrics")
-    headers = ["Fund", "Metric", "Ex-Ante", "Ex-Post", "Delta"]
-
-    for col, header in enumerate(headers, start=1):
-        cell = sheet.cell(row=1, column=col, value=header)
-        cell.font = Font(bold=True)
-        cell.fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
-
-    metric_labels = {
-        "cash_value": "Cash Value",
-        "equity_market_value": "Equity Market Value",
-        "option_market_value": "Option Market Value",
-        "option_delta_adjusted_notional": "Option Delta Adjusted Notional",
-        "treasury": "Treasury Market Value",
-        "total_assets": "Total Assets",
-        "total_net_assets": "Total Net Assets",
-    }
-
-    row = 2
-    for fund_name, fund_data in sorted(data.get("funds", {}).items()):
-        summary_metrics = fund_data.get("summary_metrics", {}) or {}
-        ex_ante = summary_metrics.get("ex_ante", {}) or {}
-        ex_post = summary_metrics.get("ex_post", {}) or {}
-
-        if not ex_ante and not ex_post:
-            continue
-
-        for metric_key, label in metric_labels.items():
-            if metric_key not in ex_ante and metric_key not in ex_post:
-                continue
-            ante_value = float(ex_ante.get(metric_key, 0.0) or 0.0)
-            post_value = float(ex_post.get(metric_key, 0.0) or 0.0)
-            delta = post_value - ante_value
-
-            sheet.cell(row=row, column=1, value=fund_name)
-            sheet.cell(row=row, column=2, value=label)
-            sheet.cell(row=row, column=3, value=ante_value)
-            sheet.cell(row=row, column=4, value=post_value)
-            sheet.cell(row=row, column=5, value=delta)
-            row += 1
-
-    for col in range(1, len(headers) + 1):
-        sheet.column_dimensions[get_column_letter(col)].width = 24
-
 
 def _create_individual_fund_sheets(workbook: Workbook, data: Mapping[str, Any]) -> None:
     """Optional per-fund tabs detailing compliance checks."""
@@ -705,7 +682,6 @@ def generate_trading_pdf_report(comparison_data: Mapping[str, Any], output_path:
         pdf.add_page()
         _add_compliance_overview(pdf, comparison_data)
 
-        pdf.add_page(orientation="L")
         _add_summary_metrics_section(pdf, comparison_data)
 
         pdf.add_page(orientation="P")
@@ -750,56 +726,6 @@ def _add_compliance_overview(pdf: FPDF, data: Mapping[str, Any]) -> None:
 
     _render_compliance_changes_table(pdf, data)
     pdf.ln(3)
-    _render_aggregate_summary_metrics(pdf, summary)
-
-def _render_aggregate_summary_metrics(pdf: FPDF, summary: Mapping[str, Any]) -> None:
-    aggregate_metrics = summary.get("summary_metrics_totals", {}) or {}
-    ex_ante_totals = aggregate_metrics.get("ex_ante", {}) or {}
-    ex_post_totals = aggregate_metrics.get("ex_post", {}) or {}
-
-    if not (ex_ante_totals or ex_post_totals):
-        return
-
-    if pdf.get_y() > 250:
-        pdf.add_page()
-
-    pdf.set_font("Arial", "B", 10)
-    pdf.cell(0, 7, "Aggregate Summary Metrics", 0, 1, "L")
-    pdf.ln(1)
-
-    headers = ["Metric", "Ex-Ante", "Ex-Post", "Delta"]
-    col_widths = [60, 35, 35, 35]
-
-    pdf.set_font("Arial", "B", 8)
-    pdf.set_fill_color(200, 200, 200)
-    for width, header in zip(col_widths, headers):
-        pdf.cell(width, 6, header, 1, 0, "C", True)
-    pdf.ln()
-
-    pdf.set_font("Arial", "", 8)
-
-    metric_labels = {
-        "cash_value": "Cash Value",
-        "equity_market_value": "Equity Market Value",
-        "option_market_value": "Option Market Value",
-        "option_delta_adjusted_notional": "Option Delta Adjusted Notional",
-        "treasury": "Treasury Market Value",
-        "total_assets": "Total Assets",
-        "total_net_assets": "Total Net Assets",
-    }
-
-    for metric_key, label in metric_labels.items():
-        if metric_key not in ex_ante_totals and metric_key not in ex_post_totals:
-            continue
-
-        ante_value = float(ex_ante_totals.get(metric_key, 0.0) or 0.0)
-        post_value = float(ex_post_totals.get(metric_key, 0.0) or 0.0)
-        delta = post_value - ante_value
-
-        pdf.cell(col_widths[0], 6, label, 1, 0, "L")
-        pdf.cell(col_widths[1], 6, format_number(ante_value, digits=2), 1, 0, "R")
-        pdf.cell(col_widths[2], 6, format_number(post_value, digits=2), 1, 0, "R")
-        pdf.cell(col_widths[3], 6, format_number(delta, digits=2), 1, 1, "R")
 
 
 def _render_compliance_changes_table(pdf: FPDF, data: Mapping[str, Any]) -> None:
@@ -1084,9 +1010,9 @@ def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
         "total_net_assets": "Total Net Assets",
     }
 
-    column_widths = [55, 85, 45, 45, 45]
+    column_widths = [45, 70, 30, 30, 30]
     headers = ["Fund", "Metric", "Ex-Ante", "Ex-Post", "Delta"]
-    available_height = 190
+    page_height_limit = lambda: pdf.h - pdf.b_margin - 10
 
     def _draw_header(title: str) -> None:
         pdf.set_font("Arial", "B", 12)
@@ -1098,6 +1024,10 @@ def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
             pdf.cell(width, 7, header, 1, 0, "C", True)
         pdf.ln()
         pdf.set_font("Arial", "", 8)
+
+    if pdf.get_y() > page_height_limit():
+        current_orientation = getattr(pdf, "cur_orientation", "P")
+        pdf.add_page(orientation=current_orientation)
 
     _draw_header("Fund Summary Metrics")
 
@@ -1115,8 +1045,9 @@ def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
             if metric_key not in ex_ante and metric_key not in ex_post:
                 continue
 
-            if pdf.get_y() > available_height:
-                pdf.add_page(orientation="L")
+            if pdf.get_y() > page_height_limit():
+                current_orientation = getattr(pdf, "cur_orientation", "P")
+                pdf.add_page(orientation=current_orientation)
                 _draw_header("Fund Summary Metrics (cont.)")
 
             ante_value = float(ex_ante.get(metric_key, 0.0) or 0.0)
@@ -1132,7 +1063,7 @@ def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
 
             wrote_metrics = True
 
-        if wrote_metrics and pdf.get_y() <= available_height:
+        if wrote_metrics and pdf.get_y() <= page_height_limit():
             pdf.ln(1)
 
 def _add_detailed_comparison(pdf: FPDF, data: Mapping[str, Any]) -> None:

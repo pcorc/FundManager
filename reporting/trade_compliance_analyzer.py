@@ -372,46 +372,57 @@ class TradingComplianceAnalyzer:
         fund: Optional[Fund] = None,
         additional_sources: Tuple[Mapping[str, Any], ...] = (),
     ) -> pd.DataFrame:
-        base_sources: Tuple[Mapping[str, Any], ...] = tuple(
+        sources: Tuple[Mapping[str, Any], ...] = tuple(
             source
-            for source in (results,) + additional_sources
+            for source in (results,) + tuple(additional_sources)
             if isinstance(source, Mapping)
         )
 
-        def _coerce_df(value: Any) -> Optional[pd.DataFrame]:
-            if isinstance(value, pd.DataFrame):
+        def _extract_frame(value: Any) -> Optional[pd.DataFrame]:
+            if isinstance(value, pd.DataFrame) and not value.empty:
                 return value
             if isinstance(value, Mapping):
-                for key in ("holdings", "positions", "data"):
-                    nested = value.get(key)
-                    if isinstance(nested, pd.DataFrame):
+                for nested_key in ("holdings", "positions", "data"):
+                    nested = value.get(nested_key)
+                    if isinstance(nested, pd.DataFrame) and not nested.empty:
                         return nested
             holder = getattr(value, "holdings", None)
-            if isinstance(holder, pd.DataFrame):
+            if isinstance(holder, pd.DataFrame) and not holder.empty:
                 return holder
             return None
 
-        for source in base_sources:
-            candidate = _coerce_df(source.get(attribute))
-            if candidate is not None:
-                return candidate
+        candidate_keys = (
+            attribute,
+            f"{attribute}_holdings",
+            f"{attribute}_positions",
+            f"vest_{attribute}",
+            f"vest_{attribute}_holdings",
+            attribute.replace("_holdings", ""),
+        )
 
-            for key in (
-                f"{attribute}_holdings",
-                f"{attribute}_positions",
-                f"{attribute}_data",
-                attribute.replace("_holdings", ""),
-            ):
+        for source in sources:
+            for key in candidate_keys:
                 if key not in source:
                     continue
-                candidate = _coerce_df(source.get(key))
+                candidate = _extract_frame(source.get(key))
                 if candidate is not None:
-                    return candidate
+                    return candidate.copy()
 
-        if isinstance(fund, Fund):
-            fund_df = self._get_holdings_from_fund(fund, attribute)
+        resolved_fund = fund
+        if not isinstance(resolved_fund, Fund):
+            resolved_fund = self._resolve_fund_object(*sources)
+
+        if isinstance(resolved_fund, Fund):
+            fund_df = self._get_holdings_from_fund(resolved_fund, attribute)
             if not fund_df.empty:
                 return fund_df
+
+            snapshot = getattr(getattr(resolved_fund, "data", None), "current", None)
+            custodian = getattr(snapshot, "custodian", None)
+            if custodian is not None:
+                holdings = getattr(custodian, attribute, None)
+                if isinstance(holdings, pd.DataFrame) and not holdings.empty:
+                    return holdings.copy()
 
         return pd.DataFrame()
 
@@ -424,9 +435,30 @@ class TradingComplianceAnalyzer:
 
         holdings = getattr(vest_holdings, attribute, None)
         if isinstance(holdings, pd.DataFrame):
-            return holdings
+            return holdings.copy()
 
         return pd.DataFrame()
+
+    def _resolve_fund_object(
+        self,
+        *sources: Mapping[str, Any],
+    ) -> Optional[Fund]:
+        for source in sources:
+            if not isinstance(source, Mapping):
+                continue
+
+            for key in ("fund", "fund_object"):
+                candidate = source.get(key)
+                if isinstance(candidate, Fund):
+                    return candidate
+
+            nested = source.get("fund_data")
+            if isinstance(nested, Mapping):
+                candidate = nested.get("fund") or nested.get("fund_object")
+                if isinstance(candidate, Fund):
+                    return candidate
+
+        return None
 
     def _resolve_fund_object(
         self,

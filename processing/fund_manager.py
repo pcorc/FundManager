@@ -329,6 +329,10 @@ class FundManager:
                 },
             )
 
+            # Preserve the analysed fund so downstream reports can access
+            # holdings and other contextual information without reloading data.
+            fund_results["fund_object"] = fund
+
             return fund_results
         except Exception as e:
             self.logger.error(f"Compliance error for {fund.name}: {e}")
