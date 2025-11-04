@@ -131,6 +131,8 @@ class TradingComplianceAnalyzer:
         for check in check_names:
             ante_status = self._extract_status(ante_results.get(check))
             post_status = self._extract_status(post_results.get(check))
+            if ante_status == post_status == "UNKNOWN":
+                continue
             changed = ante_status != post_status
 
             if ante_status == "FAIL":
@@ -228,14 +230,14 @@ class TradingComplianceAnalyzer:
             final_quantity = float(post_quantities.sum())
             initial_quantity = float(ante_quantities.sum())
 
-            quantity_delta = post_df["trade_rebal"].sum()
+            trade_rebal_series = self._extract_trade_series(post_df)
+            quantity_delta = float(trade_rebal_series.sum())
             if quantity_delta == 0.0:
                 quantity_delta = final_quantity - initial_quantity
 
             final_shares[key] = final_quantity
             initial_shares[key] = initial_quantity
 
-            trade_rebal_series = post_df["trade_rebal"]
             buy_quantity = float(trade_rebal_series[trade_rebal_series > 0.0].sum())
             sell_quantity = abs(
                 float(trade_rebal_series[trade_rebal_series < 0.0].sum())
@@ -272,8 +274,9 @@ class TradingComplianceAnalyzer:
                 if any(net_values):
                     trade_activity[key] = activity_details
 
-            buy_value = activity_details["net"].get("buy_value", 0.0)
-            sell_value = activity_details["net"].get("sell_value", 0.0)
+            net_payload = activity_details.get("net", {}) if activity_details else {}
+            buy_value = float(net_payload.get("buy_value", 0.0) or 0.0)
+            sell_value = float(net_payload.get("sell_value", 0.0) or 0.0)
             net_trades[key].update(
                 {
                     "buy_value": buy_value,
@@ -343,10 +346,44 @@ class TradingComplianceAnalyzer:
     def _get_holdings(self, results: Mapping[str, Any], attribute: str) -> pd.DataFrame:
         if not isinstance(results, Mapping):
             return pd.DataFrame()
-        candidate = results.get(attribute)
-        if isinstance(candidate, pd.DataFrame):
+
+        def _coerce_df(value: Any) -> Optional[pd.DataFrame]:
+            if isinstance(value, pd.DataFrame):
+                return value
+            if isinstance(value, Mapping):
+                for key in ("holdings", "positions", "data"):
+                    nested = value.get(key)
+                    if isinstance(nested, pd.DataFrame):
+                        return nested
+            holder = getattr(value, "holdings", None)
+            if isinstance(holder, pd.DataFrame):
+                return holder
+            return None
+
+        candidate = _coerce_df(results.get(attribute))
+        if candidate is not None:
             return candidate
+
+        for key in (
+            f"{attribute}_holdings",
+            f"{attribute}_positions",
+            f"{attribute}_data",
+            attribute.replace("_holdings", ""),
+        ):
+            if key not in results:
+                continue
+            candidate = _coerce_df(results.get(key))
+            if candidate is not None:
+                return candidate
+
         return pd.DataFrame()
+
+    def _extract_trade_series(self, df: pd.DataFrame) -> pd.Series:
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            return pd.Series(dtype=float)
+        if "trade_rebal" not in df.columns:
+            return pd.Series(0.0, index=df.index, dtype=float)
+        return pd.to_numeric(df["trade_rebal"], errors="coerce").fillna(0.0)
 
     def _calculate_notional(
         self,
@@ -368,26 +405,6 @@ class TradingComplianceAnalyzer:
             return float((quantities * prices * multiplier).sum())
         except (TypeError, ValueError):
             return 0.0
-
-    def _resolve_quantity_series(
-            self, df: pd.DataFrame, *, preferred: Optional[str] = None
-    ) -> Tuple[str, pd.Series]:
-        if not isinstance(df, pd.DataFrame) or df.empty:
-            column = preferred or "nav_shares"
-            return column, pd.Series(dtype=float)
-
-        column = preferred or "nav_shares"
-        candidates = [column]
-        for fallback in ("nav_shares", "iiv_shares", "shares", "quantity", "units"):
-            if fallback not in candidates:
-                candidates.append(fallback)
-
-        for candidate in candidates:
-            if candidate in df.columns:
-                series = pd.to_numeric(df[candidate], errors="coerce").fillna(0.0)
-                return candidate, series
-
-        return column, pd.Series(0.0, index=df.index, dtype=float)
 
 
     def _resolve_quantity_series(
@@ -432,45 +449,30 @@ class TradingComplianceAnalyzer:
         *,
         asset_type: str,
     ) -> Dict[str, Any]:
-        if not isinstance(holdings, pd.DataFrame) or holdings.empty:
-            return {
-                "buys": [],
-                "sells": [],
-                "net": {
-                    "buy_quantity": 0.0,
-                    "sell_quantity": 0.0,
-                    "buy_value": 0.0,
-                    "sell_value": 0.0,
-                },
-            }
+        empty_result = {
+            "buys": [],
+            "sells": [],
+            "net": {
+                "buy_quantity": 0.0,
+                "sell_quantity": 0.0,
+                "buy_value": 0.0,
+                "sell_value": 0.0,
+            },
+        }
 
-        if "trade_rebal" not in holdings.columns:
-            return {
-                "buys": [],
-                "sells": [],
-                "net": {
-                    "buy_quantity": 0.0,
-                    "sell_quantity": 0.0,
-                    "buy_value": 0.0,
-                    "sell_value": 0.0,
-                },
-            }
+        if not isinstance(holdings, pd.DataFrame) or holdings.empty:
+            return empty_result
+
+        trade_series = self._extract_trade_series(holdings)
+        if trade_series.empty or (trade_series == 0.0).all():
+            return empty_result
 
         df = holdings.copy()
-        df["trade_rebal"] = pd.to_numeric(df["trade_rebal"], errors="coerce").fillna(0.0)
+        df["trade_rebal"] = trade_series
         df = df.loc[df["trade_rebal"] != 0.0]
 
         if df.empty:
-            return {
-                "buys": [],
-                "sells": [],
-                "net": {
-                    "buy_quantity": 0.0,
-                    "sell_quantity": 0.0,
-                    "buy_value": 0.0,
-                    "sell_value": 0.0,
-                },
-            }
+            return empty_result
 
         buys = []
         sells = []
