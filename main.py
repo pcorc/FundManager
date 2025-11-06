@@ -357,7 +357,6 @@ if __name__ == "__main__":
     #     "analysis_type": "trading_compliance",
     #     "as_of_date": "2025-10-24",
     #     "funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',],
-    #     #"funds": ['TDVI',],
     #     "compliance_tests": [
     #         # "gics_compliance",
     #         "prospectus_80pct_policy",
@@ -380,28 +379,30 @@ if __name__ == "__main__":
     # }
     # raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
 
-    # 'KNG', 'TDVI', 'RDVI', SDVD', 'FDND', 'FGSI', 'DOGG',
-    # 'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727',
-    # 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2', 'FTCSH'
+    # 'KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',  'FTCSH'
+    # 'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2',
+    #  'FTCSH'
+    # ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'], #
+
 
     RUNTIME_OVERRIDES = {
         "analysis_type": "eod",
-        "as_of_date": "2025-10-24",
-        "funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'], #
-        "previous_date": "2025-10-23",
+        "as_of_date": "2025-11-05",
+        "funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',  'FTCSH'],
+        "previous_date": "2025-11-04",
         "eod_reports": ["compliance"],
         "compliance_tests": [
             "gics_compliance",
-            "prospectus_80pct_policy",
-            "diversification_40act_check",
-            "diversification_IRS_check",
-            "diversification_IRC_check",
-            "max_15pct_illiquid_sai",
-            "real_estate_check",
-            "commodities_check",
-            "twelve_d1a_other_inv_cos",
-            "twelve_d2_insurance_cos",
-            "twelve_d3_sec_biz",
+            # "prospectus_80pct_policy",
+            # "diversification_40act_check",
+            # "diversification_IRS_check",
+            # "diversification_IRC_check",
+            # "max_15pct_illiquid_sai",
+            # "real_estate_check",
+            # "commodities_check",
+            # "twelve_d1a_other_inv_cos",
+            # "twelve_d2_insurance_cos",
+            # "twelve_d3_sec_biz",
         ],
         "create_pdf": True,
         "output_dir": "./outputs",

@@ -6,6 +6,8 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+
 from typing import Dict, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 from config.fund_registry import FundRegistry
@@ -183,7 +185,23 @@ def run_trading_mode(
         create_pdf=params.create_pdf,
     )
 
-    return results_ex_ante, results_ex_post, artefacts
+    ex_post_compliance_report = None
+    if post_payload:
+        ex_post_compliance_report = build_compliance_reports(
+            results_ex_post,
+            report_date=params.ex_post_date,
+            output_dir=str(output_dir),
+            file_name_prefix="compliance_results_expost",
+            test_functions=params.compliance_tests or None,
+            create_pdf=params.create_pdf,
+        )
+
+    combined_artefacts = SimpleNamespace(
+        report=artefacts,
+        ex_post_compliance=ex_post_compliance_report,
+    )
+
+    return results_ex_ante, results_ex_post, combined_artefacts
 
 def run_eod_range_mode(
     session,
@@ -314,12 +332,27 @@ def flatten_trading_paths(artefacts) -> Dict[str, str]:  # type: ignore[no-untyp
     if artefacts is None:
         return paths
 
-    report = getattr(artefacts, "report", None)
-    if report is not None:
-        if getattr(report, "excel_path", None):
-            paths["trading_compliance_excel"] = report.excel_path  # type: ignore[attr-defined]
-        if getattr(report, "pdf_path", None):
-            paths["trading_compliance_pdf"] = report.pdf_path  # type: ignore[attr-defined]
+    def _extract(name: str):
+        if isinstance(artefacts, Mapping):
+            return artefacts.get(name)
+        return getattr(artefacts, name, None)
+
+    def _append(prefix: str, report) -> None:
+        if report is None:
+            return
+        excel_path = getattr(report, "excel_path", None)
+        pdf_path = getattr(report, "pdf_path", None)
+        if excel_path:
+            paths[f"{prefix}_excel"] = excel_path
+        if pdf_path:
+            paths[f"{prefix}_pdf"] = pdf_path
+
+    if hasattr(artefacts, "excel_path") or hasattr(artefacts, "pdf_path"):
+        _append("trading_compliance", artefacts)
+        return paths
+
+    _append("trading_compliance", _extract("report"))
+    _append("trading_ex_post_compliance", _extract("ex_post_compliance"))
 
     return paths
 
