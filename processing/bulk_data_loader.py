@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 from sqlalchemy import func, literal, and_, or_
+from pandas.tseries.offsets import BDay
 
 from utilities.ticker_utils import normalize_all_holdings
 
@@ -68,8 +69,16 @@ class BulkDataLoader:
         self._bulk_load_cash_data(
             data_store, all_funds, target_date, previous_date
         )
+        tplus_one = self._business_day_shift(target_date, 1)
+        previous_tplus_one = self._business_day_shift(previous_date, 1)
+
         self._bulk_load_index_data(
-            data_store, all_funds, target_date, previous_date
+            data_store,
+            all_funds,
+            target_date,
+            previous_date,
+            tplus_one,
+            previous_tplus_one,
         )
         self._bulk_load_overlap_data(
             data_store, all_funds, target_date, previous_date
@@ -1181,6 +1190,8 @@ class BulkDataLoader:
         all_funds: Dict,
         target_date: date,
         previous_date: Optional[date],
+        tplus_one: Optional[date],
+        previous_tplus_one: Optional[date],
     ) -> None:
         """Load ALL index data with provider-specific logic."""
         table_to_funds = self._group_funds_by_table(all_funds, 'index_holdings')
@@ -1192,7 +1203,12 @@ class BulkDataLoader:
             for fund in funds:
                 try:
                     fund_index = self._get_index_data(
-                        table_name, target_date, fund, previous_date
+                        table_name,
+                        target_date,
+                        fund,
+                        previous_date,
+                        tplus_one,
+                        previous_tplus_one,
                     )
                     if isinstance(fund_index, tuple):
                         current, previous = fund_index
@@ -1214,6 +1230,8 @@ class BulkDataLoader:
         target_date: date,
         fund,
         previous_date: Optional[date],
+        tplus_one: Optional[date],
+        previous_tplus_one: Optional[date],
     ) -> pd.DataFrame | Tuple[pd.DataFrame, pd.DataFrame]:
         """Dispatch to the appropriate index provider query."""
         provider_map = {
@@ -1225,7 +1243,13 @@ class BulkDataLoader:
 
         handler = provider_map.get(table_name)
         if handler:
-            return handler(target_date, fund, previous_date)
+            return handler(
+                target_date,
+                fund,
+                previous_date,
+                tplus_one,
+                previous_tplus_one,
+            )
 
         # Generic fallback: query table and filter by fund when possible
         table = getattr(self.base_cls.classes, table_name)
@@ -1261,6 +1285,8 @@ class BulkDataLoader:
         target_date: date,
         fund,
         previous_date: Optional[date],
+        tplus_one: Optional[date],
+        previous_tplus_one: Optional[date],
     ) -> pd.DataFrame | Tuple[pd.DataFrame, pd.DataFrame]:
         nasdaq = getattr(self.base_cls.classes, 'nasdaq_pro', None)
         if nasdaq is None:
@@ -1287,18 +1313,22 @@ class BulkDataLoader:
         if bbg is not None:
             query = query.join(bbg, nasdaq.ticker == bbg.TICKER)
         filters = [nasdaq.fund == fund.index_ticker_join]
+        previous_filter_date = None
         if previous_date is not None:
-            query = query.filter(nasdaq.file_date.in_([target_date, previous_date]), *filters)
+            previous_filter_date = previous_tplus_one or previous_date
+            query = query.filter(
+                nasdaq.file_date.in_([tplus_one, previous_filter_date]), *filters
+            )
         else:
-            query = query.filter(nasdaq.date == target_date, *filters)
+            query = query.filter(nasdaq.file_date == tplus_one, *filters)
         query = query.group_by(nasdaq.ticker)
 
         df = pd.read_sql(query.statement, self.session.bind)
         current, previous = self._split_current_previous(
             df,
             'date',
-            target_date,
-            previous_date,
+            tplus_one,
+            previous_filter_date,
         )
         if previous_date is None:
             return current
@@ -1309,6 +1339,8 @@ class BulkDataLoader:
         target_date: date,
         fund,
         previous_date: Optional[date],
+        tplus_one: Optional[date],
+        previous_tplus_one: Optional[date],
     ) -> pd.DataFrame | Tuple[pd.DataFrame, pd.DataFrame]:
         sp = getattr(self.base_cls.classes, 'sp_holdings', None)
         if sp is None:
@@ -1335,17 +1367,21 @@ class BulkDataLoader:
         if bbg is not None:
             query = query.join(bbg, sp.TICKER == bbg.TICKER)
         query = query.filter(sp.INDEX_CODE == fund.index_ticker_join)
+        previous_filter_date = None
         if previous_date is not None:
-            query = query.filter(sp.EFFECTIVE_DATE.in_([target_date, previous_date]))
+            previous_filter_date = previous_tplus_one or previous_date
+            query = query.filter(
+                sp.EFFECTIVE_DATE.in_([tplus_one, previous_filter_date])
+            )
         else:
-            query = query.filter(sp.EFFECTIVE_DATE == target_date)
+            query = query.filter(sp.EFFECTIVE_DATE == tplus_one)
 
         df = pd.read_sql(query.statement, self.session.bind)
         current, previous = self._split_current_previous(
             df,
             'date',
-            target_date,
-            previous_date,
+            tplus_one,
+            previous_filter_date,
         )
         if previous_date is None:
             return current
@@ -1356,6 +1392,8 @@ class BulkDataLoader:
         target_date: date,
         fund,
         previous_date: Optional[date],
+        tplus_one: Optional[date],
+        previous_tplus_one: Optional[date],
     ) -> pd.DataFrame | Tuple[pd.DataFrame, pd.DataFrame]:
         cboe = getattr(self.base_cls.classes, 'cboe_holdings', None)
         if cboe is None:
@@ -1404,6 +1442,8 @@ class BulkDataLoader:
         target_date: date,
         fund,
         previous_date: Optional[date],
+        tplus_one: Optional[date],
+        previous_tplus_one: Optional[date],
     ) -> pd.DataFrame | Tuple[pd.DataFrame, pd.DataFrame]:
         dogg = getattr(self.base_cls.classes, 'dogg_index', None)
         if dogg is None:
@@ -1443,6 +1483,14 @@ class BulkDataLoader:
         if previous_date is None:
             return current
         return current, previous
+
+    @staticmethod
+    def _business_day_shift(anchor: Optional[date], offset: int = 1) -> Optional[date]:
+        if anchor is None:
+            return None
+        if offset == 0:
+            return anchor
+        return (pd.Timestamp(anchor) + BDay(offset)).date()
 
     def _query_custodian_holdings_table(
         self,

@@ -25,7 +25,7 @@ schemas = {
     'bloomberg_emsx': ['bbg_equity_flds_blotter', 'bbg_options_flds_blotter', 'emsx_equity_route_sub',
                        'emsx_equity_order_sub', 'bbg_feed_equity_closes', 'daily_bbg_flex_pricing'],
     'compliance': ['compliance_daily_results', 'gics_mapper'],
-    'pricing_data': ['cboe_holdings', 'sp_cls', 'sp_holdings', 'nasdaq_holdings', 'dogg_index',
+    'pricing_data': ['cboe_holdings', 'sp_cls', 'sp_holdings', 'nasdaq_holdings', 'nasdaq_pro', 'dogg_index',
                      'tif_index_mappings', 'tif_iiv_index_def'],
     'reconciliation': ['tif_oms_option_holdings', 'tif_oms_equity_holdings', 'tif_oms_treasury_holdings'],
     'calendar': ['settlement_holidays', 'distributions']

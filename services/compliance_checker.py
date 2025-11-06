@@ -1164,20 +1164,7 @@ class ComplianceChecker:
             illiquid_eqy_value = float(
                 vest_eqy_holdings.loc[illiquid_mask, "equity_market_value"].sum()
             )
-
-            if vest_opt_holdings.columns:
-                opt_illiquid_mask = vest_opt_holdings["is_illiquid"] == True
-                share_col, option_shares = self._resolve_share_series(vest_opt_holdings)
-                vest_opt_holdings[share_col] = option_shares
-                illiquid_opt_value = float(
-                    (
-                        vest_opt_holdings.loc[opt_illiquid_mask, "price"]
-                        * option_shares.loc[opt_illiquid_mask]
-                        * 100
-                    ).sum()
-                )
-            else:
-                illiquid_opt_value = 0.0
+            illiquid_opt_value = 0.0
 
             total_illiquid_value = illiquid_eqy_value + illiquid_opt_value
             illiquid_percentage = total_illiquid_value / total_assets

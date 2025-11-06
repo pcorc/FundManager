@@ -356,8 +356,8 @@ if __name__ == "__main__":
     RUNTIME_OVERRIDES = {
         "analysis_type": "trading_compliance",
         "as_of_date": "2025-10-24",
-        #"funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2',],
-        "funds": ['TDVI',],
+        "funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2',],
+        #"funds": ['TDVI',],
         "compliance_tests": [
             # "gics_compliance",
             "prospectus_80pct_policy",
