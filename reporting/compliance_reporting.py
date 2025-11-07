@@ -25,6 +25,7 @@ from utilities.logger import setup_logger
 
 logger = setup_logger("compliance_report", "logs/compliance.log")
 _PERCENT_RE = re.compile(r"^\s*-?\d+(?:\.\d+)?%$")
+_IRS_DIVERSIFICATION_FUNDS = {"FTCSH"}
 
 
 @dataclass
@@ -238,7 +239,15 @@ class ComplianceReport:
     def process_gics_compliance(self) -> None:
         gics_results: list[Dict[str, object]] = []
         gics_calculations: list[Dict[str, object]] = []
-        mapping_df = self.gics_mapping if isinstance(self.gics_mapping, pd.DataFrame) else pd.DataFrame()
+        mapping_df = (
+            self.gics_mapping.copy()
+            if isinstance(self.gics_mapping, pd.DataFrame)
+            else pd.DataFrame()
+        )
+        if not mapping_df.empty:
+            mapping_df = mapping_df.applymap(
+                lambda value: str(value).strip() if value is not None else ""
+            )
         summary_columns = [
             "Date",
             "Fund",
@@ -317,7 +326,9 @@ class ComplianceReport:
                         except (TypeError, ValueError):
                             fund_weight_value = 0.0
                         try:
-                            index_weight_value = float(index_weights.get(category, 0.0) or 0.0)
+                            index_weight_value = float(
+                                index_weights.get(category, 0.0) or 0.0
+                            )
                         except (TypeError, ValueError):
                             index_weight_value = 0.0
 
@@ -327,20 +338,13 @@ class ComplianceReport:
                             and gics_class in mapping_df.columns
                             and "GICS_SECTOR_NAME" in mapping_df.columns
                         ):
+                            category_key = str(category).strip()
                             matches = mapping_df.loc[
-                                mapping_df[gics_class] == category,
+                                mapping_df[gics_class].str.upper() == category_key.upper(),
                                 "GICS_SECTOR_NAME",
                             ]
-                            if matches.empty and isinstance(category, str):
-                                matches = mapping_df.loc[
-                                    mapping_df[gics_class]
-                                    .astype(str)
-                                    .str.strip()
-                                    .eq(category),
-                                    "GICS_SECTOR_NAME",
-                                ]
                             if not matches.empty:
-                                sector_name = matches.iloc[0]
+                                sector_name = str(matches.iloc[0]).strip() or "N/A"
 
                         gics_calculations.append(
                             {
@@ -380,7 +384,9 @@ class ComplianceReport:
             df_details["Index_Weight"] = df_details["Index_Weight_Value"].apply(
                 lambda value: f"{value:.2%}"
             )
-            df_details.drop(columns=["Fund_Weight_Value", "Index_Weight_Value"], inplace=True)
+            df_details.drop(
+                columns=["Fund_Weight_Value", "Index_Weight_Value"], inplace=True
+            )
         else:
             df_details = pd.DataFrame(
                 columns=[
@@ -397,7 +403,9 @@ class ComplianceReport:
             )
 
         self.sheet_data["GICS_Compliance"] = df_summary
-        self.sheet_data["GICS_Calculations"] = df_details
+        include_details = self.test_functions is None or len(self.test_functions) > 1
+        if include_details and (not df_details.empty):
+            self.sheet_data["GICS_Calculations"] = df_details
 
 
     # ------------------------------------------------------------------
@@ -1065,16 +1073,26 @@ class ComplianceReport:
 class ComplianceReportPDF(BaseReportPDF):
     """Render compliance results to a PDF document."""
 
-    def __init__(self, results: Mapping[str, Mapping[str, object]], output_path: str) -> None:
-        super().__init__(output_path)
+    def __init__(
+        self,
+        results: Mapping[str, Mapping[str, object]],
+        output_path: str,
+        *,
+        allowed_tests: Optional[Iterable[str]] = None,
+    ) -> None:
+        super().__init__(output_path, orientation="L")
         self.results = flatten_compliance_results(results)
+        self.allowed_tests = {test for test in allowed_tests or [] if test}
         self.generate_pdf()
 
     # ------------------------------------------------------------------
     def generate_pdf(self) -> None:
         grouped_results = self._group_results_by_fund()
         if not grouped_results:
-            self.pdf.add_page()
+            if self.pdf.page_no() == 0:
+                self.pdf.add_page()
+            else:
+                self.pdf.set_y(self.pdf.t_margin)
             self._add_header("Compliance Overview")
             self.pdf.set_font("Arial", "", 9)
             self.pdf.cell(0, 6, "No compliance results available.", ln=True)
@@ -1084,8 +1102,10 @@ class ComplianceReportPDF(BaseReportPDF):
         self.grouped_results = grouped_results
         self.fund_order = sorted(grouped_results)
 
-        self.pdf.add_page()
-        self._add_header("Compliance Overview")
+        if self.pdf.page_no() == 0:
+            self.pdf.add_page()
+        else:
+            self.pdf.set_y(self.pdf.t_margin)
 
         summary_metrics = [
             ("Cash", lambda data: self._format_currency(self._get_summary_value(data, "cash_value"))),
@@ -1567,9 +1587,13 @@ class ComplianceReportPDF(BaseReportPDF):
         ]
 
         for key, renderer in tests:
+            if not self._is_test_selected(key):
+                continue
             if key == "prospectus_80pct_policy" and (
                 fund_name.startswith(exclude_prefixes) or fund_name in exclude_funds
             ):
+                continue
+            if key == "diversification_IRS_check" and fund_name not in _IRS_DIVERSIFICATION_FUNDS:
                 continue
 
             test_data = fund_data.get(key)
@@ -1648,6 +1672,11 @@ class ComplianceReportPDF(BaseReportPDF):
             return summary.get(key)
         return 0.0
 
+    def _is_test_selected(self, test_name: str) -> bool:
+        if not self.allowed_tests:
+            return True
+        return test_name in self.allowed_tests
+
     def _get_test_payload(self, fund_data: Mapping[str, Any], key: str) -> Mapping[str, Any]:
         if not isinstance(fund_data, Mapping):
             return {}
@@ -1658,7 +1687,10 @@ class ComplianceReportPDF(BaseReportPDF):
         return self._get_nested(payload, "calculations", key)
 
     def _get_detail(self, payload: Mapping[str, Any], key: str) -> object:
-        return self._get_nested(payload, "details", key)
+        value = self._get_nested(payload, "details", key)
+        if value is None and isinstance(payload, Mapping):
+            return payload.get(key)
+        return value
 
     @staticmethod
     def _get_nested(payload: Mapping[str, Any], *keys: str) -> object:
@@ -2220,7 +2252,11 @@ def generate_compliance_reports(
     pdf_path = None
     if create_pdf:
         try:
-            ComplianceReportPDF(report.results, str(Path(output_dir) / f"{file_name_prefix}_{report.report_date}.pdf"))
+            ComplianceReportPDF(
+                report.results,
+                str(Path(output_dir) / f"{file_name_prefix}_{report.report_date}.pdf"),
+                allowed_tests=test_functions,
+            )
             pdf_path = os.path.join(output_dir, f"{file_name_prefix}_{report.report_date}.pdf")
         except RuntimeError as exc:  # pragma: no cover - optional dependency missing
             logger.warning("PDF generation skipped: %s", exc)

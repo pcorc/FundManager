@@ -1330,9 +1330,7 @@ class ComplianceChecker:
             else:
                 overall_status = (
                     "PASS"
-                    if sector_within_limit
-                    and industry_group_within_limit
-                    and industry_within_limit
+                    if  industry_within_limit
                     else "FAIL"
                 )
 

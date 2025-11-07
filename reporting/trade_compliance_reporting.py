@@ -115,7 +115,9 @@ def _append_fund_summary_metrics_table(
             post_value = float(ex_post.get(metric_key, 0.0) or 0.0)
             delta = post_value - ante_value
 
-            sheet.cell(row=row, column=1, value=fund_name if not wrote_row else "")
+            fund_cell = sheet.cell(row=row, column=1, value=fund_name if not wrote_row else "")
+            if fund_cell.value:
+                fund_cell.font = Font(bold=True)
             sheet.cell(row=row, column=2, value=label)
             ante_cell = sheet.cell(row=row, column=3, value=ante_value)
             ante_cell.number_format = "#,##0.00"
@@ -431,7 +433,7 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
 
     for fund_name, fund_data in sorted(data.get("funds", {}).items()):
         trade_info = fund_data.get("trade_info", {}) or {}
-        activity = activity_info
+        activity = trade_info.get("trade_activity", {}) or {}
 
         if not activity:
             continue
@@ -609,7 +611,7 @@ def generate_trading_pdf_report(comparison_data: Mapping[str, Any], output_path:
         pdf.add_page(orientation="L")
         _add_detailed_comparison(pdf, comparison_data)
 
-        pdf.add_page(orientation="P")
+        pdf.add_page(orientation="L")
         _add_trade_activity(pdf, comparison_data)
 
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -725,187 +727,259 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
     pdf.cell(0, 10, "Trade Activity", 0, 1, "L")
     pdf.ln(3)
 
-    asset_titles = {"equity": "Equity", "options": "Options", "treasury": "Treasury"}
+    funds_payload = data.get("funds", {}) or {}
+    asset_labels = {"equity": "Equity", "options": "Options", "treasury": "Treasury"}
 
-    for fund_name, fund_data in sorted(data.get("funds", {}).items()):
+    summary_rows: list[dict[str, Any]] = []
+    detail_rows: list[tuple[str, str, str, str, float, float]] = []
+
+    for fund_name, fund_data in sorted(funds_payload.items()):
         trade_info = fund_data.get("trade_info", {}) or {}
-        activity = trade_info.get("trade_activity", {}) or {}
         asset_summary = trade_info.get("asset_trade_summary", {}) or {}
         net_trades = trade_info.get("net_trades", {}) or {}
-
-        if not activity and not asset_summary:
-            continue
-
-        pdf.set_font("Arial", "B", 11)
-        pdf.set_fill_color(230, 230, 230)
-        pdf.cell(0, 8, fund_name, 1, 1, "L", True)
-        pdf.ln(1)
+        activity = trade_info.get("trade_activity", {}) or {}
 
         total_net_assets = float(trade_info.get("total_net_assets", 0.0) or 0.0)
         total_assets = float(trade_info.get("total_assets", 0.0) or 0.0)
-        pdf.set_font("Arial", "", 8)
-        pdf.cell(
-            0,
-            5,
-            f"Total Net Assets: {format_number(total_net_assets, digits=2)}",
-            0,
-            1,
-            "L",
-        )
-        pdf.cell(
-            0,
-            5,
-            f"Total Assets: {format_number(total_assets, digits=2)}",
-            0,
-            1,
-            "L",
-        )
-
-        if asset_summary:
-            pdf.ln(1)
-            pdf.set_font("Arial", "B", 8)
-            pdf.set_fill_color(200, 200, 200)
-            col_widths = [28, 28, 20, 20, 28, 28, 28]
-            headers = [
-                "Asset Class",
-                "Trade Value",
-                "% TNA",
-                "% Assets",
-                "Ex-Ante MV",
-                "Ex-Post MV",
-                "Delta",
-            ]
-            for width, header in zip(col_widths, headers):
-                pdf.cell(width, 6, header, 1, 0, "C", True)
-            pdf.ln()
-
-            pdf.set_font("Arial", "", 7)
-            asset_labels = {"equity": "Equity", "options": "Options", "treasury": "Treasury"}
-            for asset_key in ("equity", "options", "treasury"):
-                summary = asset_summary.get(asset_key)
-                if not summary:
-                    continue
-
-                if pdf.get_y() > 260:
-                    pdf.add_page()
-                    pdf.set_font("Arial", "B", 8)
-                    pdf.set_fill_color(200, 200, 200)
-                    for width, header in zip(col_widths, headers):
-                        pdf.cell(width, 6, header, 1, 0, "C", True)
-                    pdf.ln()
-                    pdf.set_font("Arial", "", 7)
-
-                trade_value = float(summary.get("trade_value", 0.0) or 0.0)
-                pct_tna = float(summary.get("pct_of_tna", 0.0) or 0.0)
-                pct_assets = float(summary.get("pct_of_total_assets", 0.0) or 0.0)
-                ex_ante = float(summary.get("ex_ante_market_value", 0.0) or 0.0)
-                ex_post = float(summary.get("ex_post_market_value", 0.0) or 0.0)
-                delta = float(summary.get("market_value_delta", 0.0) or 0.0)
-                trade_vs_ante = float(summary.get("trade_vs_ex_ante_pct", 0.0) or 0.0)
-                post_vs_ante = float(summary.get("ex_post_vs_ex_ante_pct", 0.0) or 0.0)
-                net_value = float(net_trades.get(asset_key, {}).get("net_value", 0.0) or 0.0)
-
-                pdf.cell(col_widths[0], 6, asset_labels.get(asset_key, asset_key.title()), 1, 0, "L")
-                pdf.cell(
-                    col_widths[1],
-                    6,
-                    format_number(trade_value, digits=2),
-                    1,
-                    0,
-                    "R",
-                )
-                pdf.cell(col_widths[2], 6, _format_percent(pct_tna), 1, 0, "R")
-                pdf.cell(col_widths[3], 6, _format_percent(pct_assets), 1, 0, "R")
-                pdf.cell(col_widths[4], 6, format_number(ex_ante, digits=2), 1, 0, "R")
-                pdf.cell(col_widths[5], 6, format_number(ex_post, digits=2), 1, 0, "R")
-                pdf.cell(col_widths[6], 6, format_number(delta, digits=2), 1, 1, "R")
-
-            pdf.ln(1)
 
         for asset_key in ("equity", "options", "treasury"):
-            asset_details = activity.get(asset_key)
-            if not asset_details:
+            summary = asset_summary.get(asset_key, {}) or {}
+            activity_details = activity.get(asset_key, {}) or {}
+
+            activity_net = {}
+            if isinstance(activity_details, Mapping):
+                activity_net = dict(activity_details.get("net", {}) or {})
+            raw_net = net_trades.get(asset_key, {}) or {}
+            if isinstance(raw_net, Mapping):
+                net_info = {**activity_net, **raw_net}
+            else:
+                net_info = activity_net
+
+            trade_value = float(summary.get("trade_value", 0.0) or 0.0)
+            market_delta = float(summary.get("market_value_delta", 0.0) or 0.0)
+            pct_tna = float(summary.get("pct_of_tna", 0.0) or 0.0)
+            pct_assets = float(summary.get("pct_of_total_assets", 0.0) or 0.0)
+            ex_ante = float(summary.get("ex_ante_market_value", 0.0) or 0.0)
+            ex_post = float(summary.get("ex_post_market_value", 0.0) or 0.0)
+
+            buy_qty = float(net_info.get("buy_quantity", net_info.get("buys", 0.0)) or 0.0)
+            sell_qty = float(net_info.get("sell_quantity", net_info.get("sells", 0.0)) or 0.0)
+            buy_val = float(net_info.get("buy_value", 0.0) or 0.0)
+            sell_val = float(net_info.get("sell_value", 0.0) or 0.0)
+            raw_net_value = net_info.get("net_value")
+            if raw_net_value in (None, ""):
+                net_value = buy_val - sell_val
+            else:
+                try:
+                    net_value = float(raw_net_value)
+                except (TypeError, ValueError):
+                    net_value = buy_val - sell_val
+
+            if not any(
+                abs(val) > 0
+                for val in (
+                    trade_value,
+                    market_delta,
+                    net_value,
+                    buy_qty,
+                    sell_qty,
+                    buy_val,
+                    sell_val,
+                )
+            ):
                 continue
 
-            net = asset_details.get("net", {})
-            buy_qty = float(net.get("buy_quantity", 0.0) or 0.0)
-            sell_qty = float(net.get("sell_quantity", 0.0) or 0.0)
-            buy_val = float(net.get("buy_value", 0.0) or 0.0)
-            sell_val = float(net.get("sell_value", 0.0) or 0.0)
+            summary_rows.append(
+                {
+                    "fund": fund_name,
+                    "asset": asset_labels.get(asset_key, asset_key.title()),
+                    "total_net_assets": total_net_assets,
+                    "total_assets": total_assets,
+                    "trade_value": trade_value,
+                    "pct_tna": pct_tna,
+                    "pct_assets": pct_assets,
+                    "ex_ante": ex_ante,
+                    "ex_post": ex_post,
+                    "delta": market_delta,
+                    "net_value": net_value,
+                    "buy_value": buy_val,
+                    "sell_value": sell_val,
+                }
+            )
 
-            pdf.set_font("Arial", "B", 9)
-            pdf.cell(0, 7, asset_titles.get(asset_key, asset_key.title()), 0, 1, "L")
+            if buy_qty or buy_val:
+                detail_rows.append(
+                    (
+                        fund_name,
+                        asset_labels.get(asset_key, asset_key.title()),
+                        "Net Buy",
+                        "",
+                        buy_qty,
+                        buy_val,
+                    )
+                )
+            if sell_qty or sell_val:
+                detail_rows.append(
+                    (
+                        fund_name,
+                        asset_labels.get(asset_key, asset_key.title()),
+                        "Net Sell",
+                        "",
+                        sell_qty,
+                        sell_val,
+                    )
+                )
 
-            pdf.set_font("Arial", "", 8)
-            pdf.cell(40, 6, "Net Buy", 1, 0, "L")
-            pdf.cell(35, 6, format_number(buy_qty, digits=2), 1, 0, "R")
-            pdf.cell(45, 6, format_number(buy_val, digits=2), 1, 1, "R")
-            pdf.cell(40, 6, "Net Sell", 1, 0, "L")
-            pdf.cell(35, 6, format_number(sell_qty, digits=2), 1, 0, "R")
-            pdf.cell(45, 6, format_number(sell_val, digits=2), 1, 1, "R")
+            for trade in activity_details.get("buys", []):
+                quantity = float(trade.get("quantity", 0.0) or 0.0)
+                value = float(trade.get("market_value", 0.0) or 0.0)
+                if not quantity and not value:
+                    continue
+                detail_rows.append(
+                    (
+                        fund_name,
+                        asset_labels.get(asset_key, asset_key.title()),
+                        "Buy",
+                        str(trade.get("ticker", "")),
+                        quantity,
+                        value,
+                    )
+                )
 
-            buys = asset_details.get("buys", [])
-            sells = asset_details.get("sells", [])
+            for trade in activity_details.get("sells", []):
+                quantity = float(trade.get("quantity", 0.0) or 0.0)
+                value = float(trade.get("market_value", 0.0) or 0.0)
+                if not quantity and not value:
+                    continue
+                detail_rows.append(
+                    (
+                        fund_name,
+                        asset_labels.get(asset_key, asset_key.title()),
+                        "Sell",
+                        str(trade.get("ticker", "")),
+                        quantity,
+                        value,
+                    )
+                )
 
-            if buys or sells:
-                pdf.ln(1)
-                pdf.set_font("Arial", "B", 8)
+    if not summary_rows and not detail_rows:
+        pdf.set_font("Arial", "", 9)
+        pdf.cell(0, 6, "No trading activity detected.", 0, 1, "L")
+        return
+
+    usable_width = pdf.w - pdf.l_margin - pdf.r_margin
+    summary_headers = [
+        "Fund",
+        "Asset Class",
+        "Total Net Assets",
+        "Total Assets",
+        "Trade Value",
+        "% of TNA",
+        "% of Assets",
+        "Ex-Ante MV",
+        "Ex-Post MV",
+        "Market Value Δ",
+        "Net Trade Value",
+        "Net Buy Value",
+        "Net Sell Value",
+    ]
+    summary_rel_widths = [1.1, 1.0, 1.15, 1.1, 1.1, 0.85, 0.85, 1.1, 1.1, 1.1, 1.0, 1.0, 1.0]
+    total_weight = sum(summary_rel_widths)
+    summary_widths = [usable_width * w / total_weight for w in summary_rel_widths]
+
+    pdf.set_font("Arial", "B", 10)
+    pdf.cell(0, 6, "Trade Activity Summary", 0, 1, "L")
+    pdf.ln(1)
+
+    pdf.set_font("Arial", "B", 6)
+    pdf.set_fill_color(200, 200, 200)
+    for width, header in zip(summary_widths, summary_headers):
+        pdf.cell(width, 5.5, header, 1, 0, "C", True)
+    pdf.ln(5.5)
+
+    pdf.set_font("Arial", "", 6)
+    page_limit = pdf.h - pdf.b_margin - 10
+    row_height = 5.0
+    last_fund = None
+
+    for row in sorted(summary_rows, key=lambda item: (item["fund"], item["asset"])):
+        if pdf.get_y() + row_height > page_limit:
+            pdf.add_page(orientation=getattr(pdf, "cur_orientation", "L"))
+            pdf.set_font("Arial", "B", 6)
+            pdf.set_fill_color(200, 200, 200)
+            for width, header in zip(summary_widths, summary_headers):
+                pdf.cell(width, 5.5, header, 1, 0, "C", True)
+            pdf.ln(5.5)
+            pdf.set_font("Arial", "", 6)
+
+        fund_label = row["fund"] if row["fund"] != last_fund else ""
+        if fund_label:
+            pdf.set_font("Arial", "B", 6)
+        pdf.cell(summary_widths[0], row_height, fund_label, 1, 0, "L")
+        if fund_label:
+            pdf.set_font("Arial", "", 6)
+        pdf.cell(summary_widths[1], row_height, row["asset"], 1, 0, "L")
+
+        pdf.cell(summary_widths[2], row_height, format_number(row["total_net_assets"], digits=2), 1, 0, "R")
+        pdf.cell(summary_widths[3], row_height, format_number(row["total_assets"], digits=2), 1, 0, "R")
+        pdf.cell(summary_widths[4], row_height, format_number(row["trade_value"], digits=2), 1, 0, "R")
+        pdf.cell(summary_widths[5], row_height, _format_percent(row["pct_tna"]), 1, 0, "R")
+        pdf.cell(summary_widths[6], row_height, _format_percent(row["pct_assets"]), 1, 0, "R")
+        pdf.cell(summary_widths[7], row_height, format_number(row["ex_ante"], digits=2), 1, 0, "R")
+        pdf.cell(summary_widths[8], row_height, format_number(row["ex_post"], digits=2), 1, 0, "R")
+        pdf.cell(summary_widths[9], row_height, format_number(row["delta"], digits=2), 1, 0, "R")
+        pdf.cell(summary_widths[10], row_height, format_number(row["net_value"], digits=2), 1, 0, "R")
+        pdf.cell(summary_widths[11], row_height, format_number(row["buy_value"], digits=2), 1, 0, "R")
+        pdf.cell(summary_widths[12], row_height, format_number(row["sell_value"], digits=2), 1, 1, "R")
+
+        last_fund = row["fund"]
+
+    pdf.ln(3)
+
+    if detail_rows:
+        detail_headers = ["Fund", "Asset Class", "Direction", "Ticker", "Quantity", "Market Value"]
+        detail_rel_widths = [1.2, 1.0, 0.9, 1.0, 0.9, 1.1]
+        detail_total = sum(detail_rel_widths)
+        detail_widths = [usable_width * w / detail_total for w in detail_rel_widths]
+
+        pdf.set_font("Arial", "B", 10)
+        pdf.cell(0, 6, "Trade Activity Details", 0, 1, "L")
+        pdf.ln(1)
+
+        pdf.set_font("Arial", "B", 6)
+        pdf.set_fill_color(200, 200, 200)
+        for width, header in zip(detail_widths, detail_headers):
+            pdf.cell(width, 5.5, header, 1, 0, "C", True)
+        pdf.ln(5.5)
+
+        pdf.set_font("Arial", "", 6)
+        last_fund = None
+        row_height = 5.0
+
+        for fund_name, asset, direction, ticker, quantity, value in detail_rows:
+            if pdf.get_y() + row_height > page_limit:
+                pdf.add_page(orientation=getattr(pdf, "cur_orientation", "L"))
+                pdf.set_font("Arial", "B", 6)
                 pdf.set_fill_color(200, 200, 200)
-                col_widths = [20, 40, 35, 45]
-                headers = ["Type", "Ticker", "Quantity", "Market Value"]
-                for width, header in zip(col_widths, headers):
-                    pdf.cell(width, 6, header, 1, 0, "C", True)
-                pdf.ln()
+                for width, header in zip(detail_widths, detail_headers):
+                    pdf.cell(width, 5.5, header, 1, 0, "C", True)
+                pdf.ln(5.5)
+                pdf.set_font("Arial", "", 6)
 
-                pdf.set_font("Arial", "", 8)
-                for trade in buys:
-                    if pdf.get_y() > 265:
-                        pdf.add_page()
-                    pdf.cell(col_widths[0], 6, "Buy", 1, 0, "L")
-                    pdf.cell(col_widths[1], 6, trade.get("ticker", ""), 1, 0, "L")
-                    pdf.cell(
-                        col_widths[2],
-                        6,
-                        format_number(float(trade.get("quantity", 0.0) or 0.0), digits=2),
-                        1,
-                        0,
-                        "R",
-                    )
-                    pdf.cell(
-                        col_widths[3],
-                        6,
-                        format_number(float(trade.get("market_value", 0.0) or 0.0), digits=2),
-                        1,
-                        1,
-                        "R",
-                    )
+            fund_label = fund_name if fund_name != last_fund else ""
+            if fund_label:
+                pdf.set_font("Arial", "B", 6)
+            pdf.cell(detail_widths[0], row_height, fund_label, 1, 0, "L")
+            if fund_label:
+                pdf.set_font("Arial", "", 6)
 
-                for trade in sells:
-                    if pdf.get_y() > 265:
-                        pdf.add_page()
-                    pdf.cell(col_widths[0], 6, "Sell", 1, 0, "L")
-                    pdf.cell(col_widths[1], 6, trade.get("ticker", ""), 1, 0, "L")
-                    pdf.cell(
-                        col_widths[2],
-                        6,
-                        format_number(float(trade.get("quantity", 0.0) or 0.0), digits=2),
-                        1,
-                        0,
-                        "R",
-                    )
-                    pdf.cell(
-                        col_widths[3],
-                        6,
-                        format_number(float(trade.get("market_value", 0.0) or 0.0), digits=2),
-                        1,
-                        1,
-                        "R",
-                    )
+            pdf.cell(detail_widths[1], row_height, asset, 1, 0, "L")
+            pdf.cell(detail_widths[2], row_height, direction, 1, 0, "L")
+            pdf.cell(detail_widths[3], row_height, ticker, 1, 0, "L")
+            pdf.cell(detail_widths[4], row_height, format_number(quantity, digits=2), 1, 0, "R")
+            pdf.cell(detail_widths[5], row_height, format_number(value, digits=2), 1, 1, "R")
 
-            pdf.ln(3)
-
-        pdf.ln(4)
-
+            last_fund = fund_name
 
 def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
     metric_labels = {
@@ -918,61 +992,83 @@ def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
         "total_net_assets": "Total Net Assets",
     }
 
-    column_widths = [40, 55, 35, 35, 35]
-    headers = ["Fund", "Metric", "Ex-Ante", "Ex-Post", "Delta"]
-    page_height_limit = lambda: pdf.h - pdf.b_margin - 10
+    funds = sorted(data.get("funds", {}).keys())
+    if not funds:
+        return
+
+    rows: list[list[str]] = []
+    for metric_key, label in metric_labels.items():
+        row: list[str] = [label]
+        has_value = False
+        for fund_name in funds:
+            summary_metrics = (
+                data.get("funds", {}).get(fund_name, {}).get("summary_metrics", {}) or {}
+            )
+            ex_ante = summary_metrics.get("ex_ante", {}) or {}
+            ex_post = summary_metrics.get("ex_post", {}) or {}
+
+            if metric_key not in ex_ante and metric_key not in ex_post:
+                row.append("")
+                continue
+
+            ante_value = float(ex_ante.get(metric_key, 0.0) or 0.0)
+            post_value = float(ex_post.get(metric_key, 0.0) or 0.0)
+            delta = post_value - ante_value
+            combined = " | ".join(
+                [
+                    f"EA: {format_number(ante_value, digits=2)}",
+                    f"EP: {format_number(post_value, digits=2)}",
+                    f"Δ: {format_number(delta, digits=2)}",
+                ]
+            )
+            row.append(combined)
+            has_value = has_value or any((ante_value, post_value, delta))
+
+        if has_value:
+            rows.append(row)
+
+    if not rows:
+        return
+
+    usable_width = pdf.w - pdf.l_margin - pdf.r_margin
+    metric_width = min(50.0, usable_width * 0.22)
+    remaining_width = usable_width - metric_width
+    value_columns = max(len(funds), 1)
+    value_width = remaining_width / value_columns if value_columns else remaining_width
+    column_widths = [metric_width] + [value_width] * value_columns
+
+    page_limit = pdf.h - pdf.b_margin - 10
 
     def _draw_header(title: str) -> None:
         pdf.set_font("Arial", "B", 12)
         pdf.cell(0, 8, title, 0, 1, "L")
         pdf.ln(2)
-        pdf.set_font("Arial", "B", 8)
+        pdf.set_font("Arial", "B", 7)
         pdf.set_fill_color(200, 200, 200)
+        headers = ["Metric", *funds]
         for width, header in zip(column_widths, headers):
-            pdf.cell(width, 7, header, 1, 0, "C", True)
+            pdf.cell(width, 6, header, 1, 0, "C", True)
         pdf.ln()
-        pdf.set_font("Arial", "", 8)
+        pdf.set_font("Arial", "", 7)
 
-    if pdf.get_y() > page_height_limit():
-        current_orientation = getattr(pdf, "cur_orientation", "P")
-        pdf.add_page(orientation=current_orientation)
+    if pdf.get_y() > page_limit:
+        pdf.add_page(orientation=getattr(pdf, "cur_orientation", "L"))
 
     _draw_header("Fund Summary Metrics")
 
-    for fund_name, fund_data in sorted(data.get("funds", {}).items()):
-        summary_metrics = fund_data.get("summary_metrics", {}) or {}
-        ex_ante = summary_metrics.get("ex_ante", {}) or {}
-        ex_post = summary_metrics.get("ex_post", {}) or {}
+    row_height = 5.5
+    for idx, row in enumerate(rows):
+        if pdf.get_y() + row_height > page_limit:
+            pdf.add_page(orientation=getattr(pdf, "cur_orientation", "L"))
+            _draw_header("Fund Summary Metrics (cont.)")
 
-        if not ex_ante and not ex_post:
-            continue
+        pdf.cell(column_widths[0], row_height, row[0], 1, 0, "L")
+        for width, value in zip(column_widths[1:], row[1:]):
+            pdf.cell(width, row_height, value, 1, 0, "L")
+        pdf.ln(row_height)
 
-        wrote_metrics = False
-
-        for metric_key, label in metric_labels.items():
-            if metric_key not in ex_ante and metric_key not in ex_post:
-                continue
-
-            if pdf.get_y() > page_height_limit():
-                current_orientation = getattr(pdf, "cur_orientation", "P")
-                pdf.add_page(orientation=current_orientation)
-                _draw_header("Fund Summary Metrics (cont.)")
-
-            ante_value = float(ex_ante.get(metric_key, 0.0) or 0.0)
-            post_value = float(ex_post.get(metric_key, 0.0) or 0.0)
-            delta = post_value - ante_value
-
-            fund_label = fund_name if not wrote_metrics else ""
-            pdf.cell(column_widths[0], 6, fund_label, 1, 0, "L")
-            pdf.cell(column_widths[1], 6, label, 1, 0, "L")
-            pdf.cell(column_widths[2], 6, format_number(ante_value, digits=2), 1, 0, "R")
-            pdf.cell(column_widths[3], 6, format_number(post_value, digits=2), 1, 0, "R")
-            pdf.cell(column_widths[4], 6, format_number(delta, digits=2), 1, 1, "R")
-
-            wrote_metrics = True
-
-        if wrote_metrics and pdf.get_y() <= page_height_limit():
-            pdf.ln(1)
+        if idx < len(rows) - 1 and pdf.get_y() <= page_limit:
+            pdf.ln(0.5)
 
 def _add_detailed_comparison(pdf: FPDF, data: Mapping[str, Any]) -> None:
     column_gap = 10
@@ -1047,7 +1143,11 @@ def _add_detailed_comparison(pdf: FPDF, data: Mapping[str, Any]) -> None:
             changed_flag = "YES" if bool(check_data.get("changed")) else "NO"
 
             pdf.set_x(x_position)
+            if fund_label:
+                pdf.set_font("Arial", "B", 7)
             pdf.cell(column_widths[0], row_height, fund_display, 1, 0, "L")
+            if fund_label:
+                pdf.set_font("Arial", "", 7)
 
             if after_upper == "FAIL":
                 pdf.set_fill_color(255, 204, 204)
