@@ -878,7 +878,7 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
         "% of Assets",
         "Ex-Ante MV",
         "Ex-Post MV",
-        "Market Value Δ",
+        "Market Value Delta",
         "Net Trade Value",
         "Net Buy Value",
         "Net Sell Value",
@@ -1018,7 +1018,7 @@ def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
                 [
                     f"EA: {format_number(ante_value, digits=2)}",
                     f"EP: {format_number(post_value, digits=2)}",
-                    f"Δ: {format_number(delta, digits=2)}",
+                    f"Delta: {format_number(delta, digits=2)}",
                 ]
             )
             row.append(combined)

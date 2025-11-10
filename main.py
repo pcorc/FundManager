@@ -356,7 +356,8 @@ if __name__ == "__main__":
     RUNTIME_OVERRIDES = {
         "analysis_type": "trading_compliance",
         "as_of_date": "2025-11-07",
-        "funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',],
+        # "funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',],
+        "funds": ['DOGG', 'TDVI'],
         "compliance_tests": [
             "gics_compliance",
             "prospectus_80pct_policy",
