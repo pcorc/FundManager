@@ -185,8 +185,8 @@ class ComplianceReport:
         rows = []
         for date_str, funds in self.results.items():
             for fund_name, data in funds.items():
-                summary = data.get("summary_metrics") or {}
-                fund_totals = data.get("fund_current_totals") or {}
+                summary = dict(data.get("summary_metrics") or {})
+                fund_totals = dict(data.get("fund_current_totals") or {})
 
                 if not summary and not fund_totals:
                     continue
@@ -1437,23 +1437,31 @@ class ComplianceReportPDF(BaseReportPDF):
         ]
 
         sections = [
-            ("Summary Metrics", summary_metrics, None),
-            ("Prospectus 80% Policy", prospectus_metrics, "prospectus_80pct"),
-            ("40 Act Diversification", forty_act_metrics, "40act"),
-            ("IRS Diversification", irs_metrics, "irs"),
-            ("IRC Diversification", irc_metrics, "irc"),
-            ("15% Illiquid Assets", illiquid_metrics, "illiquid"),
-            ("Real Estate", real_estate_metrics, "real_estate"),
-            ("Commodities", commodities_metrics, "commodities"),
-            ("Rule 12d1-1", rule_12d1_metrics, "12d1"),
-            ("Rule 12d2", rule_12d2_metrics, "12d2"),
-            ("Rule 12d3", rule_12d3_metrics, "12d3"),
+            ("Summary Metrics", summary_metrics, None, None),
+            ("Prospectus 80% Policy", prospectus_metrics, "prospectus_80pct", None),
+            (
+                "40 Act Diversification",
+                forty_act_metrics,
+                "40act",
+                {"Registration Match", "Condition 2a OCC"},
+            ),
+            ("IRS Diversification", irs_metrics, "irs", None),
+            ("IRC Diversification", irc_metrics, "irc", None),
+            ("15% Illiquid Assets", illiquid_metrics, "illiquid", None),
+            ("Real Estate", real_estate_metrics, "real_estate", None),
+            ("Commodities", commodities_metrics, "commodities", None),
+            ("Rule 12d1-1", rule_12d1_metrics, "12d1", None),
+            ("Rule 12d2", rule_12d2_metrics, "12d2", None),
+            ("Rule 12d3", rule_12d3_metrics, "12d3", None),
         ]
 
-        for title, metrics, footnote in sections:
-            self._render_metric_section(title, metrics, footnote_key=footnote)
-
-        self.output()
+        for title, metrics, footnote, skip_labels in sections:
+            self._render_metric_section(
+                title,
+                metrics,
+                footnote_key=footnote,
+                skip_fail_highlight_labels=skip_labels,
+            )
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -1500,7 +1508,15 @@ class ComplianceReportPDF(BaseReportPDF):
 
         self._print_test_header(title)
         headers = ["Metric", *self.fund_order]
-        self._draw_metric_table(headers, rows)
+        self._draw_metric_table(
+            headers,
+            rows,
+            skip_fail_labels={
+                self._sanitize_text(label)
+                for label in (skip_fail_highlight_labels or [])
+                if label
+            },
+        )
         if footnote_key:
             self._draw_footnotes_section(footnote_key)
         self.pdf.ln(2)
@@ -1613,11 +1629,23 @@ class ComplianceReportPDF(BaseReportPDF):
         self.pdf.set_font("Arial", "", 9)
 
 
-    def _draw_metric_table(self, headers: Iterable[str], rows: Iterable[Iterable[str]]) -> None:
+    def _draw_metric_table(
+        self,
+        headers: Iterable[str],
+        rows: Iterable[Iterable[str]],
+        *,
+        skip_fail_labels: Optional[Iterable[str]] = None,
+    ) -> None:
         headers = list(headers)
         rows = [list(row) for row in rows]
         if not headers or not rows:
             return
+
+        skip_fail = {
+            self._sanitize_text(label).lower()
+            for label in (skip_fail_labels or [])
+            if label
+        }
 
         usable_width = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
         metric_width = min(45.0, usable_width * 0.3)
@@ -1636,10 +1664,11 @@ class ComplianceReportPDF(BaseReportPDF):
 
         self.pdf.set_font("Arial", "", 6)
         for row in rows:
+            row_label = self._sanitize_text(row[0]).lower() if row else ""
             for idx, value in enumerate(row):
                 text = self._sanitize_text(value).replace("\n", " /")
                 width = widths[idx]
-                if text.upper() == "FAIL":
+                if text.upper() == "FAIL" and row_label not in skip_fail:
                     self.pdf.set_fill_color(255, 200, 200)
                     self.pdf.set_text_color(139, 0, 0)
                     self.pdf.cell(width, row_height, text, border=1, align="C", fill=True)

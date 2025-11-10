@@ -1535,6 +1535,9 @@ class BulkDataLoader:
         if fund_values:
             query = query.filter(fund_column.in_(fund_values))
 
+        if holdings_kind == "treasury":
+            x=pd.read_sql(query.statement, self.session.bind)
+
         return pd.read_sql(query.statement, self.session.bind)
 
     def _build_bny_holdings_query(

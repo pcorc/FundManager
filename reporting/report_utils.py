@@ -84,7 +84,7 @@ def flatten_compliance_results(results_by_date: Mapping[str, Mapping[str, Any]])
     flattened: Dict[Tuple[str, str], Dict[str, Any]] = {}
     for date_str, fund_results in results_by_date.items():
         for fund_name, data in fund_results.items():
-            flattened[(fund_name, date_str)] = data
+            flattened[(fund_name, date_str)] = dict(data)
     return flattened
 
 

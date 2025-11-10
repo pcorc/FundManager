@@ -154,29 +154,38 @@ def _append_fund_summary_metrics_table(
     populated = False
     row = start_row
 
+    def _update_width(col_idx: int, value: object) -> None:
+        text = "" if value is None else str(value)
+        current = width_tracker.get(col_idx, 0)
+        width_tracker[col_idx] = max(current, len(text))
+
     for fund_name, fund_data in sorted(funds.items()):
         summary_metrics = fund_data.get("summary_metrics", {}) or {}
-        ex_ante = summary_metrics.get("ex_ante", {}) or {}
-        ex_post = summary_metrics.get("ex_post", {}) or {}
+        ex_ante = dict(summary_metrics.get("ex_ante", {}) or {})
+        ex_post = dict(summary_metrics.get("ex_post", {}) or {})
 
         if not ex_ante and not ex_post:
             continue
 
-        if not populated:
-            sheet[f"A{row}"] = "Fund Summary Metrics"
-            sheet[f"A{row}"].font = Font(size=12, bold=True)
-            row += 1
-
-            headers = ["Fund", "Metric", "Ex-Ante", "Ex-Post", "Delta"]
-            for col, header in enumerate(headers, start=1):
-                cell = sheet.cell(row=row, column=col, value=header)
-                cell.font = Font(bold=True)
-                cell.fill = PatternFill(
-                    start_color="DDDDDD", end_color="DDDDDD", fill_type="solid"
-                )
-                cell.alignment = Alignment(horizontal="center")
+            _update_width(1, "Fund Summary Metrics")
             row += 1
             populated = True
+
+        sheet[f"A{row}"] = f"Fund Summary Metrics - {fund_name}"
+        sheet[f"A{row}"].font = Font(size=11, bold=True)
+        _update_width(1, f"Fund Summary Metrics - {fund_name}")
+        row += 1
+
+        headers = ["Metric", "Ex-Ante", "Ex-Post", "Delta"]
+        for col, header in enumerate(headers, start=1):
+            cell = sheet.cell(row=row, column=col, value=header)
+            cell.font = Font(bold=True)
+            cell.fill = PatternFill(
+                start_color="DDDDDD", end_color="DDDDDD", fill_type="solid"
+            )
+            cell.alignment = Alignment(horizontal="center")
+            _update_width(col, header)
+        row += 1
 
         wrote_row = False
         for metric_key, label in metric_labels.items():
@@ -187,30 +196,33 @@ def _append_fund_summary_metrics_table(
             post_value = float(ex_post.get(metric_key, 0.0) or 0.0)
             delta = post_value - ante_value
 
-            fund_cell = sheet.cell(row=row, column=1, value=fund_name if not wrote_row else "")
-            if fund_cell.value:
-                fund_cell.font = Font(bold=True)
-            sheet.cell(row=row, column=2, value=label)
-            ante_cell = sheet.cell(row=row, column=3, value=ante_value)
+            sheet.cell(row=row, column=1, value=label)
+            ante_cell = sheet.cell(row=row, column=2, value=ante_value)
             ante_cell.number_format = "#,##0.00"
-            post_cell = sheet.cell(row=row, column=4, value=post_value)
+            ante_cell.alignment = Alignment(horizontal="right")
+            post_cell = sheet.cell(row=row, column=3, value=post_value)
             post_cell.number_format = "#,##0.00"
-            delta_cell = sheet.cell(row=row, column=5, value=delta)
+            post_cell.alignment = Alignment(horizontal="right")
+            delta_cell = sheet.cell(row=row, column=4, value=delta)
             delta_cell.number_format = "#,##0.00"
+            delta_cell.alignment = Alignment(horizontal="right")
+
+            _update_width(1, label)
+            _update_width(2, f"{ante_value:,.2f}")
+            _update_width(3, f"{post_value:,.2f}")
+            _update_width(4, f"{delta:,.2f}")
 
             row += 1
             wrote_row = True
 
         if wrote_row:
-            row += 1
+            row += 2
 
-    if populated:
-        for col_idx in range(1, 6):
-            column = get_column_letter(col_idx)
-            if sheet.column_dimensions[column].width is None or sheet.column_dimensions[
-                column
-            ].width < (30 if col_idx == 2 else 20):
-                sheet.column_dimensions[column].width = 30 if col_idx == 2 else 20
+        if populated:
+            for col_idx, width in width_tracker.items():
+                column = get_column_letter(col_idx)
+                adjusted_width = min(max(width + 2, 14), 60)
+                sheet.column_dimensions[column].width = adjusted_width
 
     return row
 
@@ -291,8 +303,11 @@ def _append_compliance_changes_table(
 
         if fill_color:
             fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type="solid")
-            for col_idx in range(1, len(headers) + 1):
-                sheet.cell(row=row, column=col_idx).fill = fill
+            if fill_color == "FF9999":
+                sheet.cell(row=row, column=1).fill = fill
+            else:
+                for col_idx in range(1, len(headers) + 1):
+                    sheet.cell(row=row, column=col_idx).fill = fill
 
         row += 1
 
@@ -1005,8 +1020,8 @@ def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
     fund_entries: list[tuple[str, Dict[str, Any], Dict[str, Any]]] = []
     for fund_name, fund_payload in sorted(data.get("funds", {}).items()):
         summary_metrics = fund_payload.get("summary_metrics", {}) or {}
-        ex_ante = summary_metrics.get("ex_ante", {}) or {}
-        ex_post = summary_metrics.get("ex_post", {}) or {}
+        ex_ante = dict(summary_metrics.get("ex_ante", {}) or {})
+        ex_post = dict(summary_metrics.get("ex_post", {}) or {})
         if ex_ante or ex_post:
             fund_entries.append((fund_name, ex_ante, ex_post))
 

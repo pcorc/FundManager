@@ -486,9 +486,22 @@ class TradingComplianceAnalyzer:
         if quantities.empty:
             return 0.0
         prices = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
-        multiplier = 100.0 if asset_type == "options" else 1.0
+
+        if asset_type == "options":
+            multiplier_series = None
+            for column in ("contract_multiplier", "multiplier"):
+                if column in df.columns:
+                    multiplier_series = (
+                        pd.to_numeric(df[column], errors="coerce").fillna(100.0)
+                    )
+                    break
+            if multiplier_series is None:
+                multiplier_series = pd.Series(100.0, index=df.index, dtype=float)
+        else:
+            multiplier_series = pd.Series(1.0, index=df.index, dtype=float)
+
         try:
-            return float((quantities * prices * multiplier).sum())
+            return float((quantities * prices * multiplier_series).sum())
         except (TypeError, ValueError):
             return 0.0
 
@@ -632,6 +645,18 @@ class TradingComplianceAnalyzer:
         asset_type: str,
     ) -> float:
         multiplier = 100.0 if asset_type == "options" else 1.0
+        if asset_type == "options":
+            for column in ("contract_multiplier", "multiplier"):
+                value = row.get(column)
+                if pd.notna(value):
+                    try:
+                        parsed = float(value)
+                    except (TypeError, ValueError):
+                        continue
+                    if parsed:
+                        multiplier = parsed
+                        break
+
         if "price" in row and pd.notna(row["price"]):
             try:
                 price_value = float(row["price"])
