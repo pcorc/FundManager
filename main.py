@@ -353,45 +353,10 @@ def _coerce_date(value: object, field_name: str) -> date:
 
 
 if __name__ == "__main__":
-    # RUNTIME_OVERRIDES = {
-    #     "analysis_type": "trading_compliance",
-    #     "as_of_date": "2025-10-24",
-    #     "funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',],
-    #     "compliance_tests": [
-    #         "gics_compliance",
-    #         "prospectus_80pct_policy",
-    #         "diversification_40act_check",
-    #         "diversification_IRS_check",
-    #         "diversification_IRC_check",
-    #         "max_15pct_illiquid_sai",
-    #         "real_estate_check",
-    #         "commodities_check",
-    #         "twelve_d1a_other_inv_cos",
-    #         "twelve_d2_insurance_cos",
-    #         "twelve_d3_sec_biz",
-    #     ],
-    #     "ex_ante_date": "2025-10-24",
-    #     "ex_post_date": "2025-10-24",
-    #     "custodian_date": "2025-10-23",
-    #     "custodian_previous_date": "2025-10-22",
-    #     "create_pdf": True,
-    #     "output_dir": "./outputs",
-    # }
-    # raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
-
-    # 'KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',  'FTCSH'
-    # 'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2',
-    #  'FTCSH'
-    # ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'], #
-
-
     RUNTIME_OVERRIDES = {
-        "analysis_type": "eod",
-        "as_of_date": "2025-11-05",
-        #"funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'],
-        "funds": ["FGSI"],
-        "previous_date": "2025-11-04",
-        "eod_reports": ["compliance"],
+        "analysis_type": "trading_compliance",
+        "as_of_date": "2025-11-07",
+        "funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',],
         "compliance_tests": [
             "gics_compliance",
             "prospectus_80pct_policy",
@@ -405,10 +370,45 @@ if __name__ == "__main__":
             "twelve_d2_insurance_cos",
             "twelve_d3_sec_biz",
         ],
+        "ex_ante_date": "2025-11-07",
+        "ex_post_date": "2025-11-07",
+        "custodian_date": "2025-11-06",
+        "custodian_previous_date": "2025-11-05",
         "create_pdf": True,
         "output_dir": "./outputs",
     }
     raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
+
+    # 'KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',  'FTCSH'
+    # 'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2',
+    #  'FTCSH'
+    # ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'], #
+
+
+    # RUNTIME_OVERRIDES = {
+    #     "analysis_type": "eod",
+    #     "as_of_date": "2025-11-05",
+    #     #"funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'],
+    #     "funds": ["FGSI"],
+    #     "previous_date": "2025-11-04",
+    #     "eod_reports": ["compliance"],
+    #     "compliance_tests": [
+    #         "gics_compliance",
+    #         "prospectus_80pct_policy",
+    #         "diversification_40act_check",
+    #         "diversification_IRS_check",
+    #         "diversification_IRC_check",
+    #         "max_15pct_illiquid_sai",
+    #         "real_estate_check",
+    #         "commodities_check",
+    #         "twelve_d1a_other_inv_cos",
+    #         "twelve_d2_insurance_cos",
+    #         "twelve_d3_sec_biz",
+    #     ],
+    #     "create_pdf": True,
+    #     "output_dir": "./outputs",
+    # }
+    # raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
 
     # Example: run the same configuration for a list of explicit business dates.
     # MULTI_DAY_OVERRIDES = {
