@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 import logging
 
@@ -16,6 +16,78 @@ from openpyxl.utils import get_column_letter
 from reporting.report_utils import format_number, normalize_report_date
 
 logger = logging.getLogger(__name__)
+
+ASSET_KEY_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "equity": ("equity", "equities"),
+    "options": ("options", "option"),
+    "treasury": ("treasury", "treasuries", "bonds", "bond"),
+}
+
+ASSET_LABELS: Dict[str, str] = {
+    "equity": "Equity",
+    "options": "Options",
+    "treasury": "Treasury",
+}
+
+ASSET_ORDER: Tuple[str, ...] = ("equity", "options", "treasury")
+
+
+def _asset_key_candidates(asset_key: str) -> Tuple[str, ...]:
+    aliases = ASSET_KEY_ALIASES.get(asset_key, (asset_key,))
+    if asset_key in aliases:
+        ordered: Iterable[str] = aliases
+    else:
+        ordered = (asset_key,) + aliases
+    seen: list[str] = []
+    for candidate in ordered:
+        if candidate not in seen:
+            seen.append(candidate)
+    return tuple(seen) if seen else (asset_key,)
+
+
+def _extract_asset_mapping(source: Mapping[str, Any], asset_key: str) -> Dict[str, Any]:
+    if not isinstance(source, Mapping):
+        return {}
+    for candidate in _asset_key_candidates(asset_key):
+        value = source.get(candidate)
+        if isinstance(value, Mapping):
+            return dict(value)
+    return {}
+
+
+def _build_asset_sections(trade_info: Mapping[str, Any]) -> Sequence[Dict[str, Any]]:
+    asset_summary = trade_info.get("asset_trade_summary", {}) or {}
+    net_trades = trade_info.get("net_trades", {}) or {}
+    activity_info = trade_info.get("trade_activity", {}) or {}
+
+    sections: list[Dict[str, Any]] = []
+    for asset_key in ASSET_ORDER:
+        summary = _extract_asset_mapping(asset_summary, asset_key)
+        activity_details = _extract_asset_mapping(activity_info, asset_key)
+
+        net_payload: Dict[str, Any] = {}
+        if isinstance(activity_details, Mapping):
+            net_payload.update(dict(activity_details.get("net", {}) or {}))
+        for candidate in _asset_key_candidates(asset_key):
+            candidate_net = net_trades.get(candidate)
+            if isinstance(candidate_net, Mapping):
+                if not net_payload:
+                    net_payload = dict(candidate_net)
+                else:
+                    net_payload.update(candidate_net)
+                break
+
+        sections.append(
+            {
+                "asset_key": asset_key,
+                "label": ASSET_LABELS.get(asset_key, asset_key.title()),
+                "summary": summary,
+                "activity": activity_details if isinstance(activity_details, Mapping) else {},
+                "net": net_payload,
+            }
+        )
+
+    return sections
 
 
 @dataclass
@@ -279,36 +351,20 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
         cell.fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
         cell.alignment = Alignment(horizontal="center")
 
-    asset_labels = {"equity": "Equity", "options": "Options", "treasury": "Treasury"}
-
     row = header_row + 1
     summary_rows_written = False
 
     for fund_name, fund_data in sorted(data.get("funds", {}).items()):
         trade_info = fund_data.get("trade_info", {}) or {}
-        asset_summary = trade_info.get("asset_trade_summary", {}) or {}
-        net_trades = trade_info.get("net_trades", {}) or {}
-        activity_info = trade_info.get("trade_activity", {}) or {}
-
+        sections = _build_asset_sections(trade_info)
 
         total_net_assets = float(trade_info.get("total_net_assets", 0.0) or 0.0)
         total_assets = float(trade_info.get("total_assets", 0.0) or 0.0)
 
-        for asset_key in ("equity", "options", "treasury"):
-            summary = asset_summary.get(asset_key, {}) or {}
-            activity_details = activity_info.get(asset_key, {}) or {}
-
-            activity_net: Dict[str, Any]
-            if isinstance(activity_details, Mapping):
-                activity_net = dict(activity_details.get("net", {}) or {})
-            else:
-                activity_net = {}
-
-            raw_net = net_trades.get(asset_key, {}) or {}
-            if isinstance(raw_net, Mapping):
-                net_info = {**activity_net, **raw_net}
-            else:
-                net_info = activity_net
+        for section in sections:
+            summary = section.get("summary", {}) or {}
+            activity_details = section.get("activity", {}) or {}
+            net_info = section.get("net", {}) or {}
 
             trade_value = float(summary.get("trade_value", 0.0) or 0.0)
             market_delta = float(summary.get("market_value_delta", 0.0) or 0.0)
@@ -322,6 +378,10 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
             sell_qty = float(net_info.get("sell_quantity", net_info.get("sells", 0.0)) or 0.0)
             buy_val = float(net_info.get("buy_value", 0.0) or 0.0)
             sell_val = float(net_info.get("sell_value", 0.0) or 0.0)
+
+            if trade_value == 0.0:
+                trade_value = abs(buy_val) + abs(sell_val)
+
             raw_net_value = net_info.get("net_value")
             if raw_net_value in (None, ""):
                 net_value = buy_val - sell_val
@@ -331,24 +391,28 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
                 except (TypeError, ValueError):
                     net_value = buy_val - sell_val
 
-            if not any(
-                abs(val) > 0.0
-                for val in (
-                    trade_value,
-                    market_delta,
-                    net_value,
-                    buy_qty,
-                    sell_qty,
-                    buy_val,
-                    sell_val,
-                )
+            buys_list = activity_details.get("buys") if isinstance(activity_details, Mapping) else []
+            sells_list = activity_details.get("sells") if isinstance(activity_details, Mapping) else []
+            has_trade_lists = bool(buys_list or sells_list)
+
+            if not has_trade_lists and not any(
+                    abs(val) > 0.0
+                    for val in (
+                            trade_value,
+                            market_delta,
+                            net_value,
+                            buy_qty,
+                            sell_qty,
+                            buy_val,
+                            sell_val,
+                    )
             ):
                 continue
 
             summary_rows_written = True
 
             sheet.cell(row=row, column=1, value=fund_name)
-            sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
+            sheet.cell(row=row, column=2, value=section.get("label", section.get("asset_key", "")).title())
 
             tna_cell = sheet.cell(row=row, column=3, value=total_net_assets)
             tna_cell.number_format = "#,##0.00"
@@ -373,27 +437,6 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
 
             delta_cell = sheet.cell(row=row, column=10, value=market_delta)
             delta_cell.number_format = "#,##0.00"
-
-            trade_vs_ante_cell = sheet.cell(row=row, column=11, value=trade_vs_ante)
-            trade_vs_ante_cell.number_format = "0.00%"
-
-            post_vs_ante_cell = sheet.cell(row=row, column=12, value=post_vs_ante)
-            post_vs_ante_cell.number_format = "0.00%"
-
-            net_val_cell = sheet.cell(row=row, column=13, value=net_value)
-            net_val_cell.number_format = "#,##0.00"
-
-            buy_qty_cell = sheet.cell(row=row, column=14, value=buy_qty)
-            buy_qty_cell.number_format = "#,##0.00"
-
-            sell_qty_cell = sheet.cell(row=row, column=15, value=sell_qty)
-            sell_qty_cell.number_format = "#,##0.00"
-
-            buy_val_cell = sheet.cell(row=row, column=16, value=buy_val)
-            buy_val_cell.number_format = "#,##0.00"
-
-            sell_val_cell = sheet.cell(row=row, column=17, value=sell_val)
-            sell_val_cell.number_format = "#,##0.00"
 
             row += 1
 
@@ -433,84 +476,69 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
 
     for fund_name, fund_data in sorted(data.get("funds", {}).items()):
         trade_info = fund_data.get("trade_info", {}) or {}
-        activity = trade_info.get("trade_activity", {}) or {}
-
-        if not activity:
-            continue
+        sections = _build_asset_sections(trade_info)
 
         fund_rows_written = False
 
-        for asset_key in ("equity", "options", "treasury"):
-            asset_details = activity.get(asset_key)
-            if not asset_details:
+        for section in sections:
+            activity_details = section.get("activity", {}) or {}
+            if not isinstance(activity_details, Mapping):
                 continue
 
-            asset_rows_written = False
-            net = asset_details.get("net", {}) or {}
-            buy_qty = float(net.get("buy_quantity", 0.0) or 0.0)
-            sell_qty = float(net.get("sell_quantity", 0.0) or 0.0)
-            buy_val = float(net.get("buy_value", 0.0) or 0.0)
-            sell_val = float(net.get("sell_value", 0.0) or 0.0)
+            net_info = section.get("net", {}) or {}
+            buys_list = activity_details.get("buys", []) or []
+            sells_list = activity_details.get("sells", []) or []
 
-            if any(val != 0.0 for val in (buy_qty, buy_val)):
-                detail_rows_written = True
-                asset_rows_written = True
-                fund_rows_written = True
-                sheet.cell(row=row, column=1, value=fund_name)
-                sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
-                sheet.cell(row=row, column=3, value="Net Buy")
-                qty_cell = sheet.cell(row=row, column=5, value=buy_qty)
+            buy_qty = float(net_info.get("buy_quantity", net_info.get("buys", 0.0)) or 0.0)
+            sell_qty = float(net_info.get("sell_quantity", net_info.get("sells", 0.0)) or 0.0)
+            buy_val = float(net_info.get("buy_value", 0.0) or 0.0)
+            sell_val = float(net_info.get("sell_value", 0.0) or 0.0)
+
+            if not buys_list and not sells_list and all(
+                abs(val) == 0.0 for val in (buy_qty, sell_qty, buy_val, sell_val)
+            ):
+                continue
+
+            asset_label = section.get("label", section.get("asset_key", "")).title()
+
+            def _write_row(direction: str, ticker: str, quantity: float, value: float) -> None:
+                nonlocal row, fund_rows_written, detail_rows_written
+                sheet.cell(row=row, column=1, value=fund_name if not fund_rows_written else "")
+                sheet.cell(row=row, column=2, value=asset_label)
+                sheet.cell(row=row, column=3, value=direction)
+                sheet.cell(row=row, column=4, value=ticker)
+                qty_cell = sheet.cell(row=row, column=5, value=quantity)
                 qty_cell.number_format = "#,##0.00"
-                val_cell = sheet.cell(row=row, column=6, value=buy_val)
+                val_cell = sheet.cell(row=row, column=6, value=value)
                 val_cell.number_format = "#,##0.00"
                 row += 1
-
-            if any(val != 0.0 for val in (sell_qty, sell_val)):
                 detail_rows_written = True
-                asset_rows_written = True
                 fund_rows_written = True
-                sheet.cell(row=row, column=1, value=fund_name)
-                sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
-                sheet.cell(row=row, column=3, value="Net Sell")
-                qty_cell = sheet.cell(row=row, column=5, value=sell_qty)
-                qty_cell.number_format = "#,##0.00"
-                val_cell = sheet.cell(row=row, column=6, value=sell_val)
-                val_cell.number_format = "#,##0.00"
-                row += 1
 
-            for trade in asset_details.get("buys", []):
-                detail_rows_written = True
-                asset_rows_written = True
-                fund_rows_written = True
-                sheet.cell(row=row, column=1, value=fund_name)
-                sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
-                sheet.cell(row=row, column=3, value="Buy")
-                sheet.cell(row=row, column=4, value=trade.get("ticker", ""))
-                qty_cell = sheet.cell(row=row, column=5, value=float(trade.get("quantity", 0.0) or 0.0))
-                qty_cell.number_format = "#,##0.00"
-                val_cell = sheet.cell(row=row, column=6, value=float(trade.get("market_value", 0.0) or 0.0))
-                val_cell.number_format = "#,##0.00"
-                row += 1
+            if abs(buy_qty) > 0.0 or abs(buy_val) > 0.0:
+                _write_row("Net Buy", "", buy_qty, buy_val)
 
-            for trade in asset_details.get("sells", []):
-                detail_rows_written = True
-                asset_rows_written = True
-                fund_rows_written = True
-                sheet.cell(row=row, column=1, value=fund_name)
-                sheet.cell(row=row, column=2, value=asset_labels.get(asset_key, asset_key.title()))
-                sheet.cell(row=row, column=3, value="Sell")
-                sheet.cell(row=row, column=4, value=trade.get("ticker", ""))
-                qty_cell = sheet.cell(row=row, column=5, value=float(trade.get("quantity", 0.0) or 0.0))
-                qty_cell.number_format = "#,##0.00"
-                val_cell = sheet.cell(row=row, column=6, value=float(trade.get("market_value", 0.0) or 0.0))
-                val_cell.number_format = "#,##0.00"
-                row += 1
+            if abs(sell_qty) > 0.0 or abs(sell_val) > 0.0:
+                _write_row("Net Sell", "", sell_qty, sell_val)
 
-            if asset_rows_written:
-                row += 1
+            for trade in buys_list:
+                quantity = float(trade.get("quantity", 0.0) or 0.0)
+                value = float(trade.get("market_value", 0.0) or 0.0)
+                if quantity == 0.0 and value == 0.0:
+                    continue
+                ticker = str(trade.get("ticker", ""))
+                _write_row("Buy", ticker, quantity, value)
 
-        if fund_rows_written:
-            row += 1
+            for trade in sells_list:
+                quantity = float(trade.get("quantity", 0.0) or 0.0)
+                value = float(trade.get("market_value", 0.0) or 0.0)
+                if quantity == 0.0 and value == 0.0:
+                    continue
+                ticker = str(trade.get("ticker", ""))
+                _write_row("Sell", ticker, quantity, value)
+
+            if fund_rows_written:
+                row += 1
 
     if not detail_rows_written:
         sheet.cell(row=row, column=1, value="No trade details available.")
@@ -728,32 +756,21 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
     pdf.ln(3)
 
     funds_payload = data.get("funds", {}) or {}
-    asset_labels = {"equity": "Equity", "options": "Options", "treasury": "Treasury"}
 
     summary_rows: list[dict[str, Any]] = []
     detail_rows: list[tuple[str, str, str, str, float, float]] = []
 
     for fund_name, fund_data in sorted(funds_payload.items()):
         trade_info = fund_data.get("trade_info", {}) or {}
-        asset_summary = trade_info.get("asset_trade_summary", {}) or {}
-        net_trades = trade_info.get("net_trades", {}) or {}
-        activity = trade_info.get("trade_activity", {}) or {}
+        sections = _build_asset_sections(trade_info)
 
         total_net_assets = float(trade_info.get("total_net_assets", 0.0) or 0.0)
         total_assets = float(trade_info.get("total_assets", 0.0) or 0.0)
 
-        for asset_key in ("equity", "options", "treasury"):
-            summary = asset_summary.get(asset_key, {}) or {}
-            activity_details = activity.get(asset_key, {}) or {}
-
-            activity_net = {}
-            if isinstance(activity_details, Mapping):
-                activity_net = dict(activity_details.get("net", {}) or {})
-            raw_net = net_trades.get(asset_key, {}) or {}
-            if isinstance(raw_net, Mapping):
-                net_info = {**activity_net, **raw_net}
-            else:
-                net_info = activity_net
+        for section in sections:
+            summary = section.get("summary", {}) or {}
+            activity_details = section.get("activity", {}) or {}
+            net_info = section.get("net", {}) or {}
 
             trade_value = float(summary.get("trade_value", 0.0) or 0.0)
             market_delta = float(summary.get("market_value_delta", 0.0) or 0.0)
@@ -766,6 +783,10 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
             sell_qty = float(net_info.get("sell_quantity", net_info.get("sells", 0.0)) or 0.0)
             buy_val = float(net_info.get("buy_value", 0.0) or 0.0)
             sell_val = float(net_info.get("sell_value", 0.0) or 0.0)
+
+            if trade_value == 0.0:
+                trade_value = abs(buy_val) + abs(sell_val)
+
             raw_net_value = net_info.get("net_value")
             if raw_net_value in (None, ""):
                 net_value = buy_val - sell_val
@@ -775,7 +796,11 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
                 except (TypeError, ValueError):
                     net_value = buy_val - sell_val
 
-            if not any(
+            buys_list = activity_details.get("buys") if isinstance(activity_details, Mapping) else []
+            sells_list = activity_details.get("sells") if isinstance(activity_details, Mapping) else []
+            has_trade_lists = bool(buys_list or sells_list)
+
+            if not has_trade_lists and not any(
                 abs(val) > 0
                 for val in (
                     trade_value,
@@ -789,10 +814,12 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
             ):
                 continue
 
+            asset_label = section.get("label", section.get("asset_key", "")).title()
+
             summary_rows.append(
                 {
                     "fund": fund_name,
-                    "asset": asset_labels.get(asset_key, asset_key.title()),
+                    "asset": asset_label,
                     "total_net_assets": total_net_assets,
                     "total_assets": total_assets,
                     "trade_value": trade_value,
@@ -807,30 +834,12 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
                 }
             )
 
-            if buy_qty or buy_val:
-                detail_rows.append(
-                    (
-                        fund_name,
-                        asset_labels.get(asset_key, asset_key.title()),
-                        "Net Buy",
-                        "",
-                        buy_qty,
-                        buy_val,
-                    )
-                )
-            if sell_qty or sell_val:
-                detail_rows.append(
-                    (
-                        fund_name,
-                        asset_labels.get(asset_key, asset_key.title()),
-                        "Net Sell",
-                        "",
-                        sell_qty,
-                        sell_val,
-                    )
-                )
+            if abs(buy_qty) > 0.0 or abs(buy_val) > 0.0:
+                detail_rows.append((fund_name, asset_label, "Net Buy", "", buy_qty, buy_val))
+            if abs(sell_qty) > 0.0 or abs(sell_val) > 0.0:
+                detail_rows.append((fund_name, asset_label, "Net Sell", "", sell_qty, sell_val))
 
-            for trade in activity_details.get("buys", []):
+            for trade in buys_list or []:
                 quantity = float(trade.get("quantity", 0.0) or 0.0)
                 value = float(trade.get("market_value", 0.0) or 0.0)
                 if not quantity and not value:
@@ -838,7 +847,7 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
                 detail_rows.append(
                     (
                         fund_name,
-                        asset_labels.get(asset_key, asset_key.title()),
+                        asset_label,
                         "Buy",
                         str(trade.get("ticker", "")),
                         quantity,
@@ -846,7 +855,7 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
                     )
                 )
 
-            for trade in activity_details.get("sells", []):
+            for trade in sells_list or []:
                 quantity = float(trade.get("quantity", 0.0) or 0.0)
                 value = float(trade.get("market_value", 0.0) or 0.0)
                 if not quantity and not value:
@@ -854,7 +863,7 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
                 detail_rows.append(
                     (
                         fund_name,
-                        asset_labels.get(asset_key, asset_key.title()),
+                        asset_label,
                         "Sell",
                         str(trade.get("ticker", "")),
                         quantity,
@@ -981,6 +990,7 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
 
             last_fund = fund_name
 
+
 def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
     metric_labels = {
         "cash_value": "Cash Value",
@@ -992,63 +1002,67 @@ def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
         "total_net_assets": "Total Net Assets",
     }
 
-    funds = sorted(data.get("funds", {}).keys())
-    if not funds:
+    fund_entries: list[tuple[str, Dict[str, Any], Dict[str, Any]]] = []
+    for fund_name, fund_payload in sorted(data.get("funds", {}).items()):
+        summary_metrics = fund_payload.get("summary_metrics", {}) or {}
+        ex_ante = summary_metrics.get("ex_ante", {}) or {}
+        ex_post = summary_metrics.get("ex_post", {}) or {}
+        if ex_ante or ex_post:
+            fund_entries.append((fund_name, ex_ante, ex_post))
+
+    if not fund_entries:
         return
 
-    rows: list[list[str]] = []
+    table_rows: list[tuple[str, list[tuple[float, float, float]]]] = []
     for metric_key, label in metric_labels.items():
-        row: list[str] = [label]
-        has_value = False
-        for fund_name in funds:
-            summary_metrics = (
-                data.get("funds", {}).get(fund_name, {}).get("summary_metrics", {}) or {}
-            )
-            ex_ante = summary_metrics.get("ex_ante", {}) or {}
-            ex_post = summary_metrics.get("ex_post", {}) or {}
-
-            if metric_key not in ex_ante and metric_key not in ex_post:
-                row.append("")
-                continue
-
+        metric_values: list[tuple[float, float, float]] = []
+        metric_present = False
+        for _, ex_ante, ex_post in fund_entries:
             ante_value = float(ex_ante.get(metric_key, 0.0) or 0.0)
             post_value = float(ex_post.get(metric_key, 0.0) or 0.0)
-            delta = post_value - ante_value
-            combined = " | ".join(
-                [
-                    f"EA: {format_number(ante_value, digits=2)}",
-                    f"EP: {format_number(post_value, digits=2)}",
-                    f"Delta: {format_number(delta, digits=2)}",
-                ]
-            )
-            row.append(combined)
-            has_value = has_value or any((ante_value, post_value, delta))
+            if metric_key in ex_ante or metric_key in ex_post:
+                metric_present = True
+            metric_values.append((ante_value, post_value, post_value - ante_value))
+        if metric_present:
+            table_rows.append((label, metric_values))
 
-        if has_value:
-            rows.append(row)
-
-    if not rows:
+    if not table_rows:
         return
 
     usable_width = pdf.w - pdf.l_margin - pdf.r_margin
-    metric_width = min(50.0, usable_width * 0.22)
-    remaining_width = usable_width - metric_width
-    value_columns = max(len(funds), 1)
-    value_width = remaining_width / value_columns if value_columns else remaining_width
-    column_widths = [metric_width] + [value_width] * value_columns
+    metric_width = min(60.0, max(40.0, usable_width * 0.22))
+    remaining_width = max(usable_width - metric_width, 60.0)
+    per_value_width = remaining_width / (len(fund_entries) * 3)
 
-    page_limit = pdf.h - pdf.b_margin - 10
+    header_height = 6
+    row_height = 5.5
+    page_limit = pdf.h - pdf.b_margin - 5
 
     def _draw_header(title: str) -> None:
         pdf.set_font("Arial", "B", 12)
         pdf.cell(0, 8, title, 0, 1, "L")
-        pdf.ln(2)
+        pdf.ln(1)
+
+        start_x = pdf.l_margin
+        start_y = pdf.get_y()
+
         pdf.set_font("Arial", "B", 7)
         pdf.set_fill_color(200, 200, 200)
-        headers = ["Metric", *funds]
-        for width, header in zip(column_widths, headers):
-            pdf.cell(width, 6, header, 1, 0, "C", True)
-        pdf.ln()
+
+        metric_height = header_height * 2
+        pdf.cell(metric_width, metric_height, "Metric", 1, 0, "C", True)
+        for fund_name, _, _ in fund_entries:
+            display = fund_name if len(fund_name) <= 24 else f"{fund_name[:21]}..."
+            pdf.cell(per_value_width * 3, header_height, display, 1, 0, "C", True)
+
+        pdf.ln(header_height)
+        pdf.set_xy(start_x + metric_width, start_y + header_height)
+        for _ in fund_entries:
+            for sub in ("Ex-Ante", "Ex-Post", "Delta"):
+                pdf.cell(per_value_width, header_height, sub, 1, 0, "C", True)
+
+        pdf.ln(header_height)
+        pdf.set_y(start_y + metric_height)
         pdf.set_font("Arial", "", 7)
 
     if pdf.get_y() > page_limit:
@@ -1056,114 +1070,134 @@ def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
 
     _draw_header("Fund Summary Metrics")
 
-    row_height = 5.5
-    for idx, row in enumerate(rows):
+    for label, values in table_rows:
         if pdf.get_y() + row_height > page_limit:
             pdf.add_page(orientation=getattr(pdf, "cur_orientation", "L"))
             _draw_header("Fund Summary Metrics (cont.)")
 
-        pdf.cell(column_widths[0], row_height, row[0], 1, 0, "L")
-        for width, value in zip(column_widths[1:], row[1:]):
-            pdf.cell(width, row_height, value, 1, 0, "L")
-        pdf.ln(row_height)
-
-        if idx < len(rows) - 1 and pdf.get_y() <= page_limit:
-            pdf.ln(0.5)
-
-def _add_detailed_comparison(pdf: FPDF, data: Mapping[str, Any]) -> None:
-    column_gap = 10
-    column_widths = [26, 58, 17, 17, 15]
-    headers = ["Fund", "Compliance Check", "Before", "After", "Changed"]
-    table_width = sum(column_widths)
-    row_height = 6
-    header_height = 6
-
-    def _render_heading() -> None:
-        pdf.set_font("Arial", "B", 14)
-        pdf.cell(0, 10, "Detailed Comparison by Compliance Check", 0, 1, "L")
-        pdf.ln(2)
-
-    def _reset_columns() -> tuple[list[float], list[float]]:
-        start_y = pdf.get_y()
-        positions = [
-            pdf.l_margin,
-            pdf.l_margin + table_width + column_gap,
-        ]
-        heights = [start_y, start_y]
-        return positions, heights
-
-    def _max_y() -> float:
-        return pdf.h - pdf.b_margin
-
-    _render_heading()
-    column_positions, column_heights = _reset_columns()
-    current_column = 0
-
-    def _ensure_space(required_height: float) -> None:
-        nonlocal current_column, column_positions, column_heights
-
-        while column_heights[current_column] + required_height > _max_y():
-            current_column += 1
-            if current_column >= len(column_positions):
-                pdf.add_page(orientation="L")
-                _render_heading()
-                column_positions, column_heights = _reset_columns()
-                current_column = 0
-                if column_heights[current_column] + required_height > _max_y():
-                    break
-
-    funds = sorted(data.get("funds", {}).items())
-    for fund_name, fund_data in funds:
-        checks = sorted(fund_data.get("checks", {}).items())
-        if not checks:
-            continue
-
-        table_height = header_height + len(checks) * row_height + 4
-        _ensure_space(table_height)
-
-        x_position = column_positions[current_column]
-        pdf.set_xy(x_position, column_heights[current_column])
-
-        pdf.set_font("Arial", "B", 8)
-        pdf.set_fill_color(200, 200, 200)
-        for width, header in zip(column_widths, headers):
-            pdf.cell(width, header_height, header, 1, 0, "C", True)
-        pdf.ln()
-
-        pdf.set_x(x_position)
+        pdf.set_x(pdf.l_margin)
+        pdf.set_font("Arial", "B", 7)
+        pdf.cell(metric_width, row_height, label, 1, 0, "L")
         pdf.set_font("Arial", "", 7)
 
-        for index, (check_name, check_data) in enumerate(checks):
-            fund_label = fund_name if index == 0 else ""
-            fund_display = fund_label if len(fund_label) <= 22 else f"{fund_label[:19]}..."
-            display_check = check_name if len(check_name) <= 30 else f"{check_name[:27]}..."
-            before_status = str(check_data.get("status_before", "UNKNOWN"))
-            after_status = str(check_data.get("status_after", "UNKNOWN"))
-            after_upper = after_status.upper()
-            changed_flag = "YES" if bool(check_data.get("changed")) else "NO"
+        for ante_value, post_value, delta in values:
+            pdf.cell(per_value_width, row_height, format_number(ante_value, digits=2), 1, 0, "R")
+            pdf.cell(per_value_width, row_height, format_number(post_value, digits=2), 1, 0, "R")
+            pdf.cell(per_value_width, row_height, format_number(delta, digits=2), 1, 0, "R")
 
-            pdf.set_x(x_position)
-            if fund_label:
-                pdf.set_font("Arial", "B", 7)
-            pdf.cell(column_widths[0], row_height, fund_display, 1, 0, "L")
-            if fund_label:
-                pdf.set_font("Arial", "", 7)
+        pdf.ln(row_height)
 
+    pdf.ln(3)
+
+def _add_detailed_comparison(pdf: FPDF, data: Mapping[str, Any]) -> None:
+    funds = []
+    for fund_name, fund_payload in sorted(data.get("funds", {}).items()):
+        checks = fund_payload.get("checks", {}) or {}
+        if checks:
+            funds.append((fund_name, checks))
+
+    if not funds:
+        return
+
+    check_names: list[str] = []
+    seen_checks: set[str] = set()
+    for _, checks in funds:
+        for check_name in checks.keys():
+            if check_name not in seen_checks:
+                seen_checks.add(check_name)
+                check_names.append(check_name)
+    check_names.sort()
+
+    if not check_names:
+        return
+
+    table_rows: list[tuple[str, list[tuple[str, str, str, str]]]] = []
+    for check_name in check_names:
+        row_values: list[tuple[str, str, str, str]] = []
+        row_present = False
+        for _, checks in funds:
+            check_data = checks.get(check_name) or {}
+            if check_data:
+                row_present = True
+            before_status = str(check_data.get("status_before", "")) if check_data else ""
+            after_status = str(check_data.get("status_after", "")) if check_data else ""
+            changed_flag = "YES" if bool(check_data.get("changed")) else ("" if not check_data else "NO")
+            row_values.append((before_status, after_status, changed_flag, after_status.upper()))
+        if row_present:
+            table_rows.append((check_name, row_values))
+
+    if not table_rows:
+        return
+
+    usable_width = pdf.w - pdf.l_margin - pdf.r_margin
+    metric_width = min(70.0, max(45.0, usable_width * 0.25))
+    remaining_width = max(usable_width - metric_width, 60.0)
+    per_value_width = remaining_width / (len(funds) * 3)
+
+    header_height = 6
+    row_height = 6
+    page_limit = pdf.h - pdf.b_margin - 5
+
+    def _render_header(title: str) -> None:
+        pdf.set_font("Arial", "B", 14)
+        pdf.cell(0, 10, title, 0, 1, "L")
+        pdf.ln(1)
+
+        start_x = pdf.l_margin
+        start_y = pdf.get_y()
+
+        pdf.set_font("Arial", "B", 7)
+        pdf.set_fill_color(200, 200, 200)
+
+        metric_height = header_height * 2
+        pdf.cell(metric_width, metric_height, "Compliance Check", 1, 0, "C", True)
+        for fund_name, _ in funds:
+            display = fund_name if len(fund_name) <= 24 else f"{fund_name[:21]}..."
+            pdf.cell(per_value_width * 3, header_height, display, 1, 0, "C", True)
+
+        pdf.ln(header_height)
+        pdf.set_xy(start_x + metric_width, start_y + header_height)
+        for _ in funds:
+            for sub in ("Before", "After", "Changed"):
+                pdf.cell(per_value_width, header_height, sub, 1, 0, "C", True)
+
+        pdf.ln(header_height)
+        pdf.set_y(start_y + metric_height)
+        pdf.set_font("Arial", "", 7)
+
+    _render_header("Detailed Comparison by Compliance Check")
+
+    for check_name, values in table_rows:
+        if pdf.get_y() + row_height > page_limit:
+            pdf.add_page(orientation=getattr(pdf, "cur_orientation", "L"))
+            _render_header("Detailed Comparison by Compliance Check (cont.)")
+
+        pdf.set_x(pdf.l_margin)
+        display_check = check_name if len(check_name) <= 40 else f"{check_name[:37]}..."
+        pdf.set_font("Arial", "B", 7)
+        pdf.cell(metric_width, row_height, display_check, 1, 0, "L")
+        pdf.set_font("Arial", "", 7)
+
+        for before_status, after_status, changed_flag, after_upper in values:
+            pdf.cell(per_value_width, row_height, before_status, 1, 0, "C")
             if after_upper == "FAIL":
                 pdf.set_fill_color(255, 204, 204)
-                pdf.cell(column_widths[1], row_height, display_check, 1, 0, "L", True)
+                pdf.cell(per_value_width, row_height, after_status, 1, 0, "C", True)
                 pdf.set_fill_color(255, 255, 255)
             else:
-                pdf.cell(column_widths[1], row_height, display_check, 1, 0, "L")
+                pdf.cell(per_value_width, row_height, after_status, 1, 0, "C")
 
-            pdf.cell(column_widths[2], row_height, before_status, 1, 0, "C")
-            pdf.cell(column_widths[3], row_height, after_status, 1, 0, "C")
-            pdf.cell(column_widths[4], row_height, changed_flag, 1, 1, "C")
+            changed_display = changed_flag or ""
+            if changed_display.upper() == "YES":
+                pdf.set_fill_color(255, 255, 204)
+                pdf.cell(per_value_width, row_height, changed_display, 1, 0, "C", True)
+                pdf.set_fill_color(255, 255, 255)
+            else:
+                pdf.cell(per_value_width, row_height, changed_display, 1, 0, "C")
 
-        column_heights[current_column] = pdf.get_y() + 4
+        pdf.ln(row_height)
 
-        if column_heights[current_column] > _max_y():
-            _ensure_space(0)
+    pdf.ln(3)
 
 def generate_trading_compliance_reports(
     comparison_data: Mapping[str, Any],

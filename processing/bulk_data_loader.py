@@ -2,7 +2,7 @@
 import logging
 from dataclasses import dataclass
 from datetime import date
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
 from sqlalchemy import func, literal, and_, or_
