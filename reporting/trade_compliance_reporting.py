@@ -470,8 +470,9 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
         if width < desired:
             sheet.column_dimensions[column].width = desired
 
+    # Trade Activity Details section
     row = max(row + 2, header_row + 3)
-    sheet.cell(row=row, column=1, value="Trade Activity Details").font = Font(size=12, bold=True)
+    sheet.cell(row=row, column=1, value="Trade Activity Details (Top 5 by Market Value)").font = Font(size=12, bold=True)
     row += 1
 
     detail_headers = [
@@ -503,21 +504,27 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
             if not isinstance(activity_details, Mapping):
                 continue
 
-            net_info = section.get("net", {}) or {}
-            buys_list = activity_details.get("buys", []) or []
-            sells_list = activity_details.get("sells", []) or []
+            asset_label = section.get("label", section.get("asset_key", "")).title()
 
-            buy_qty = float(net_info.get("buy_quantity", net_info.get("buys", 0.0)) or 0.0)
-            sell_qty = float(net_info.get("sell_quantity", net_info.get("sells", 0.0)) or 0.0)
+            # Only show top 5 trades for equity and options
+            if section.get("asset_key") in ("equity", "options"):
+                buys_list = _get_top_trades(activity_details.get("buys", []), n=5)
+                sells_list = _get_top_trades(activity_details.get("sells", []), n=5)
+            else:
+                # Show all trades for treasury or other assets
+                buys_list = activity_details.get("buys", []) or []
+                sells_list = activity_details.get("sells", []) or []
+
+            net_info = section.get("net", {}) or {}
+            buy_qty = float(net_info.get("buy_quantity", 0.0) or 0.0)
+            sell_qty = float(net_info.get("sell_quantity", 0.0) or 0.0)
             buy_val = float(net_info.get("buy_value", 0.0) or 0.0)
             sell_val = float(net_info.get("sell_value", 0.0) or 0.0)
 
             if not buys_list and not sells_list and all(
-                abs(val) == 0.0 for val in (buy_qty, sell_qty, buy_val, sell_val)
+                    abs(val) == 0.0 for val in (buy_qty, sell_qty, buy_val, sell_val)
             ):
                 continue
-
-            asset_label = section.get("label", section.get("asset_key", "")).title()
 
             def _write_row(direction: str, ticker: str, quantity: float, value: float) -> None:
                 nonlocal row, fund_rows_written, detail_rows_written
@@ -533,12 +540,14 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
                 detail_rows_written = True
                 fund_rows_written = True
 
+            # Always show net totals
             if abs(buy_qty) > 0.0 or abs(buy_val) > 0.0:
                 _write_row("Net Buy", "", buy_qty, buy_val)
 
             if abs(sell_qty) > 0.0 or abs(sell_val) > 0.0:
                 _write_row("Net Sell", "", sell_qty, sell_val)
 
+            # Show individual trades (limited to top 5 for equity/options)
             for trade in buys_list:
                 quantity = float(trade.get("quantity", 0.0) or 0.0)
                 value = float(trade.get("market_value", 0.0) or 0.0)
@@ -767,6 +776,13 @@ def _render_compliance_changes_table(pdf: FPDF, data: Mapping[str, Any]) -> None
     pdf.cell(col_widths[4], 6, str(total_net), 1, 1, "C", True)
     pdf.set_font("Arial", "", 8)
 
+def _get_top_trades(trades_list: list, n: int = 5) -> list:
+    """Get top N trades sorted by market value."""
+    if not trades_list:
+        return []
+    # Sort by market value (descending) and take top N
+    sorted_trades = sorted(trades_list, key=lambda x: abs(float(x.get("market_value", 0))), reverse=True)
+    return sorted_trades[:n]
 
 def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
     pdf.set_font("Arial", "B", 14)
@@ -816,6 +832,11 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
 
             buys_list = activity_details.get("buys") if isinstance(activity_details, Mapping) else []
             sells_list = activity_details.get("sells") if isinstance(activity_details, Mapping) else []
+
+            if section.get("asset_key") in ("equity", "options"):
+                buys_list = _get_top_trades(buys_list or [], n=5)
+                sells_list = _get_top_trades(sells_list or [], n=5)
+
             has_trade_lists = bool(buys_list or sells_list)
 
             if not has_trade_lists and not any(
