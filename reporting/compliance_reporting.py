@@ -1110,6 +1110,10 @@ class ComplianceReportPDF(BaseReportPDF):
                 self.pdf.add_page()
             else:
                 self.pdf.set_y(self.pdf.t_margin)
+
+            if self._is_test_selected("gics_compliance"):
+                self._render_gics_compliance_overview()
+
             self._add_header("Compliance Overview")
             self.pdf.set_font("Arial", "", 9)
             self.pdf.cell(0, 6, "No compliance results available.", ln=True)
@@ -2273,6 +2277,86 @@ class ComplianceReportPDF(BaseReportPDF):
 
         self._draw_two_column_table(rows)
         self._draw_footnotes_section("illiquid")
+
+    def _render_gics_compliance_overview(self) -> None:
+        """Render the Excel-like GICS_Compliance summary as a PDF table (no calculations)."""
+        # Headers aligned to ComplianceReport.process_gics_compliance() summary_columns
+        headers = [
+            "Date",
+            "Fund",
+            "Overall GICS Compliance",
+            "Industry Exceeds 25%",
+            "Industry Group Exceeds 25%",
+            "Index Industry Exceeds 25%?",
+            "Index Industry Group Exceeds 25%?",
+            "Can Fund exceed 25% if Index does?",
+            "Exceptions to Conc Policy",
+        ]
+
+        # Collect rows from flattened results (keyed by (fund, date))
+        rows: list[list[str]] = []
+        # Keep ordering stable by fund then date
+        for (fund_name, date_str), payload in sorted(
+            self.results.items(), key=lambda kv: (kv[0][0], kv[0][1])
+        ):
+            gics = (payload or {}).get("gics_compliance")
+            if not isinstance(gics, dict):
+                continue
+
+            # Excel logic parity:
+            # "Industry Exceeds 25%" and "Industry Group Exceeds 25%"
+            # are TRUE when the fund actually exceeds (so negate the "within limit" flags)
+            industry_exceeds = not bool(gics.get("industry_exceeds_25", True))
+            industry_group_exceeds = not bool(gics.get("industry_group_exceeds_25", True))
+
+            exceeding_index = gics.get("exceeding_index_gics", {}) or {}
+            index_industry_exceeds = len(exceeding_index.get("GICS_INDUSTRY_NAME", {}) or {}) > 0
+            index_industry_group_exceeds = len(exceeding_index.get("GICS_INDUSTRY_GROUP_NAME", {}) or {}) > 0
+
+            # Keep the same “can exceed” and “exceptions” display as Excel
+            can_exceed = "Yes" if str(fund_name).upper() in {"KNG", "FDND"} else "No"
+            exceptions = "Information Technology Sector" if str(fund_name).upper() == "TDVI" else ""
+
+            # Nice, human-friendly date
+            try:
+                date_disp = datetime.fromisoformat(date_str).date()
+            except Exception:
+                date_disp = date_str
+
+            rows.append([
+                str(date_disp),
+                str(fund_name),
+                str(gics.get("overall_gics_compliance", "")),
+                "Yes" if industry_exceeds else "No",
+                "Yes" if industry_group_exceeds else "No",
+                "Yes" if index_industry_exceeds else "No",
+                "Yes" if index_industry_group_exceeds else "No",
+                can_exceed,
+                exceptions,
+            ])
+
+        if not rows:
+            return
+
+        # Page management + header
+        if self.pdf.get_y() > (self.pdf.h - self.pdf.b_margin - 40):
+            self.pdf.add_page()
+        self._print_test_header("GICS Compliance (Summary)")
+
+        # Slightly wider first columns improves readability
+        usable_width = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
+        col_widths = [
+            min(28, usable_width * 0.10),   # Date
+            min(22, usable_width * 0.08),   # Fund
+            min(40, usable_width * 0.15),   # Overall
+            *[min(28, usable_width * 0.10)] * 6,  # the middle Yes/No columns
+            min(44, usable_width * 0.17),   # Exceptions
+        ]
+
+        self._draw_table(headers, rows, col_widths=col_widths, row_height=6)
+        self._draw_footnotes_section("gics")
+        self.pdf.ln(4)
+
 
 
 def generate_compliance_reports(
