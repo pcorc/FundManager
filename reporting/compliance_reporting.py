@@ -1033,6 +1033,8 @@ class ComplianceReport:
                 if not output_df.empty:
                     output_df = output_df.where(pd.notnull(output_df), None)
                 safe_sheet = sheet_name[:31]
+                if safe_sheet == "Prospectus_80pct":
+                    x=1
                 output_df.to_excel(writer, sheet_name=safe_sheet, index=False)
 
             workbook = writer.book

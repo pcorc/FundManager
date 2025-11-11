@@ -35,6 +35,7 @@ class Reconciliator:
         self.logger = logging.getLogger(f"Reconciliator_{fund.name}")
         self.is_etf = not fund.is_private_fund and not fund.is_closed_end_fund
         self.has_sg_equity = fund.is_private_fund
+        self.summary_rows: list[dict[str, object]] = []
 
     # ------------------------------------------------------------------
     # Snapshot helpers
@@ -162,8 +163,40 @@ class Reconciliator:
         df_crrd = self.fund.cr_rd_data
 
         # Set quantities based on analysis type
+        # Set quantities based on analysis type
         df_oms['_vest_quantity'] = self._get_quantity_column(df_oms)
         df_oms1['_vest_quantity'] = self._get_quantity_column(df_oms1)
+
+        if 'shares_cust' not in df_cust.columns:
+            for candidate in [
+                'quantity',
+                'shares',
+                'share_qty',
+                'position',
+                'qty',
+            ]:
+                if candidate in df_cust.columns:
+                    df_cust['shares_cust'] = df_cust[candidate]
+                    break
+            else:
+                df_cust['shares_cust'] = pd.Series(dtype=float)
+
+        if 'shares_cust' not in df_cust1.columns:
+            for candidate in [
+                'quantity',
+                'shares',
+                'share_qty',
+                'position',
+                'qty',
+            ]:
+                if candidate in df_cust1.columns:
+                    df_cust1['shares_cust'] = df_cust1[candidate]
+                    break
+            else:
+                df_cust1['shares_cust'] = pd.Series(dtype=float)
+
+        df_cust['shares_cust'] = self._coerce_numeric_series(df_cust.get('shares_cust', pd.Series(dtype=float)))
+        df_cust1['shares_cust'] = self._coerce_numeric_series(df_cust1.get('shares_cust', pd.Series(dtype=float)))
 
         if 'shares_cust' not in df_cust.columns:
             for candidate in [
@@ -657,8 +690,16 @@ class Reconciliator:
         return summary
 
     def add_summary_row(self, test_name: str, ticker: str, description: str, value):
-        """Add summary row for logging"""
-        self.logger.info(f"[SUMMARY] {test_name} | {ticker} | {description} | {value}")
+        """Capture summary rows without emitting them to the logger."""
+
+        self.summary_rows.append(
+            {
+                "test": test_name,
+                "ticker": ticker,
+                "description": description,
+                "value": value,
+            }
+        )
 
     # Keep your existing _build_equity_details, get_detailed_calculations methods
     # but update them to use self.fund instead of self.fund_data

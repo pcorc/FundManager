@@ -182,6 +182,52 @@ class ReconciliationReport:
                             callback(flat, fund, date_str, subresults or {})
         return flat
 
+    def _process_from_descriptor(
+        self,
+        descriptor: ReconDescriptor,
+        fund: str,
+        date_str: str,
+        recon_type: str,
+        subresults: Mapping[str, Any],
+    ) -> ReconResult | None:
+        """Build a :class:`ReconResult` from the provided descriptor."""
+
+        holdings_df: pd.DataFrame | None = None
+        if descriptor.holdings_key:
+            holdings_raw = self._ensure_dataframe(subresults.get(descriptor.holdings_key))
+            if not holdings_raw.empty:
+                holdings_df = self._build_holdings_from_descriptor(
+                    descriptor,
+                    holdings_raw,
+                    fund,
+                    date_str,
+                    recon_type,
+                )
+        elif descriptor.require_holdings:
+            # If holdings are required but no key is defined, treat as no data.
+            return None
+
+        price_t, price_t1 = self._build_price_dfs(
+            descriptor,
+            subresults,
+            fund,
+            date_str,
+            recon_type,
+        )
+
+        if not any([holdings_df is not None and not holdings_df.empty, price_t is not None, price_t1 is not None]):
+            if descriptor.require_holdings:
+                return None
+
+        return ReconResult(
+            fund,
+            date_str,
+            recon_type,
+            holdings_df,
+            price_t,
+            price_t1,
+        )
+
     def _append_option_breakdowns(
         self,
         flat: Dict[Tuple[str, str, str], pd.DataFrame],
