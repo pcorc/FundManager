@@ -44,7 +44,6 @@ class BaseReportPDF:
     # ------------------------------------------------------------------
     def add_page(self, *, title: str | None = None, subtitle: str | None = None) -> None:
         """Create a new page optionally including a title/subtitle."""
-
         self.pdf.add_page()
         if title:
             self.add_title(title)
@@ -60,6 +59,14 @@ class BaseReportPDF:
     def add_subtitle(self, text: str, *, font_size: int = 11) -> None:
         self.pdf.set_font("Arial", "B", font_size)
         self.pdf.cell(0, 8, self._sanitize_text(text), ln=True)
+        self.add_spacer(1)
+        self.pdf.set_font("Arial", size=9)
+
+    def add_section_heading(self, text: str, *, font_size: int = 10) -> None:
+        """Add a section heading (smaller than subtitle, larger than paragraph)."""
+        self.pdf.set_font("Arial", "B", font_size)
+        self.pdf.set_fill_color(245, 245, 245)
+        self.pdf.cell(0, 7, self._sanitize_text(text), ln=True, fill=True)
         self.add_spacer(1)
         self.pdf.set_font("Arial", size=9)
 
@@ -92,7 +99,6 @@ class BaseReportPDF:
         font_size: int = 8,
     ) -> None:
         """Render a table with optional header row."""
-
         widths = self._resolve_column_widths(len(headers), column_widths)
         alignments = self._resolve_alignments(len(headers), align)
 
@@ -109,6 +115,35 @@ class BaseReportPDF:
             for value, width, cell_align in zip(row, widths, alignments):
                 self.pdf.cell(width, 6, self._sanitize_text(value), border=1, align=cell_align)
             self.pdf.ln(6)
+        self.add_spacer(3)
+
+    def add_key_value_table(
+        self,
+        rows: Sequence[Tuple[str, object]],
+        *,
+        header: Tuple[str, str] = ("Key", "Value"),
+        column_widths: Tuple[float, float] | None = None,
+        font_size: int = 8,
+    ) -> None:
+        """Render a two-column key-value table."""
+        if column_widths is None:
+            usable_width = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
+            column_widths = (usable_width * 0.4, usable_width * 0.6)
+
+        # Draw header
+        self.pdf.set_font("Arial", "B", font_size)
+        self.pdf.set_fill_color(230, 230, 230)
+        self.pdf.cell(column_widths[0], 6, self._sanitize_text(header[0]), border=1, align="L", fill=True)
+        self.pdf.cell(column_widths[1], 6, self._sanitize_text(header[1]), border=1, align="L", fill=True)
+        self.pdf.ln(6)
+
+        # Draw rows
+        self.pdf.set_font("Arial", size=font_size)
+        self.pdf.set_fill_color(255, 255, 255)
+        for key, value in rows:
+            self.pdf.cell(column_widths[0], 5, self._sanitize_text(key), border=1, align="L")
+            self.pdf.cell(column_widths[1], 5, self._sanitize_text(value), border=1, align="R")
+            self.pdf.ln(5)
         self.add_spacer(3)
 
     # ------------------------------------------------------------------

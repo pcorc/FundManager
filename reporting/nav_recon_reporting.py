@@ -472,7 +472,8 @@ class NAVReconciliationPDF(BaseReportPDF):
         self.results = normalize_nav_payload(results)
 
     def render(self) -> None:
-        self.add_title("NAV Reconciliation Summary", f"As of {self.report_date}")
+        self.add_title("NAV Reconciliation Summary")
+        self.add_subtitle(f"As of {self.report_date}")
 
         totals = summarise_nav_differences(self.results)
         if totals["funds"]:
@@ -530,8 +531,9 @@ class NAVReconciliationPDF(BaseReportPDF):
                 headers,
                 rows,
                 column_widths=[35, 22, 22, 28, 28, 32, 32],
-                align=["L", "R", "R", "R", "R", "R", "R"],
+                align=["L", "R", "R", "R", "R", "R", "R"],  # Changed from 'alignments'
             )
+
 
     # ------------------------------------------------------------------
     def _build_component_table(self, dataframe: pd.DataFrame) -> tuple[list[str], list[list[str]]]:
@@ -640,7 +642,9 @@ class DailyOperationsSummaryPDF(BaseReportPDF):
         self.nav_results = normalize_nav_payload(nav_results or {})
 
     def render(self) -> None:
-        self.add_title("Daily Oversight Summary", f"As of {self.report_date}")
+        # FIX: Use separate calls for title and subtitle
+        self.add_title("Daily Oversight Summary")
+        self.add_subtitle(f"As of {self.report_date}")
 
         if self.compliance_results:
             compliance_summary = summarise_compliance_status(self.compliance_results)
@@ -661,10 +665,11 @@ class DailyOperationsSummaryPDF(BaseReportPDF):
                 for name in sorted(totals)
             ]
             if rows:
+                # FIX: Use 'align' instead of 'alignments'
                 self.add_table([
                     "Reconciliation",
                     "Total Breaks",
-                ], rows, column_widths=[100, 40], alignments=["L", "R"])
+                ], rows, column_widths=[100, 40], align=["L", "R"])
 
             for fund_name, payload in sorted(self.reconciliation_results.items()):
                 summary = payload.get("summary", {})
@@ -713,11 +718,12 @@ class DailyOperationsSummaryPDF(BaseReportPDF):
                     )
                 )
             if detail_rows:
+                # FIX: Use 'align' instead of 'alignments'
                 self.add_table(
                     ["Fund", "Expected NAV", "Custodian NAV", "Variance"],
                     detail_rows,
                     column_widths=[70, 35, 35, 35],
-                    alignments=["L", "R", "R", "R"],
+                    align=["L", "R", "R", "R"],
                 )
 
         self.output()

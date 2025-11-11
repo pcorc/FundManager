@@ -527,11 +527,12 @@ class Reconciliator:
         df_oms1 = self._previous_frame('options', source='vest')
         df_cust1 = self._previous_frame('options', source='custodian')
 
-        # Take absolute value of option prices
+        # Take absolute value of option prices - FIX: Convert to numeric first
         for d in [df_oms, df_oms1]:
             if not d.empty and 'price' in d.columns:
-                d['price'] = d['price'].abs()
+                d['price'] = self._coerce_numeric_series(d['price']).abs()
 
+        # The rest of the method remains unchanged...
         # Calculate option weights for standard options only
         if not df_oms.empty and 'price' in df_oms.columns and 'quantity' in df_oms.columns:
             df_oms['market_value'] = df_oms['quantity'].fillna(0) * df_oms['price'].fillna(0) * 100
