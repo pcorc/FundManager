@@ -207,9 +207,9 @@ class TradingComplianceAnalyzer:
         return base_info
 
     def _compute_trade_summary(
-        self,
-        ante_results: Mapping[str, Any],
-        post_results: Mapping[str, Any],
+            self,
+            ante_results: Mapping[str, Any],
+            post_results: Mapping[str, Any],
             *,
             fund: Optional[Fund] = None,
             fallback_sources: Tuple[Mapping[str, Any], ...] = (),
@@ -278,6 +278,7 @@ class TradingComplianceAnalyzer:
                 "net": quantity_delta,
             }
 
+            # Calculate notionals using appropriate shares columns
             post_notional = self._calculate_notional(post_df, "iiv_shares", asset_type=key)
             ante_notional = self._calculate_notional(ante_df, "nav_shares", asset_type=key)
             notional_delta = post_notional - ante_notional
@@ -286,7 +287,10 @@ class TradingComplianceAnalyzer:
             ex_ante_market_values[key] = ante_notional
             ex_post_market_values[key] = post_notional
 
+            # IMPORTANT: Pass the post_df which has ex-post prices and iiv_shares for trade activity
+            # This ensures we use the same data source as Fund Summary Metrics Ex-Post
             activity_details = self._calculate_trade_activity(post_df, asset_type=key)
+
             if activity_details["buys"] or activity_details["sells"]:
                 trade_activity[key] = activity_details
             else:
@@ -315,7 +319,7 @@ class TradingComplianceAnalyzer:
             asset_trade_totals[key] = trade_total
             total_traded += trade_total
 
-        # Provide convenience aliases for downstream reporting
+        # Rest of the method remains the same...
         ante_metrics = self._extract_summary_metrics_payload(
             ante_results.get("summary_metrics")
         )
@@ -349,7 +353,6 @@ class TradingComplianceAnalyzer:
                 "ex_post_vs_ex_ante_pct": self._safe_percent(post_notional, ante_notional),
             }
 
-        # Provide convenience aliases for downstream reporting
         trade_summary: Dict[str, Any] = {
             "final_shares": final_shares,
             "initial_shares": initial_shares,
@@ -366,6 +369,97 @@ class TradingComplianceAnalyzer:
         }
 
         return trade_summary
+
+    def _calculate_trade_activity(
+            self,
+            holdings: pd.DataFrame,
+            *,
+            asset_type: str,
+    ) -> Dict[str, Any]:
+        """Calculate trade activity from holdings data.
+
+        Args:
+            holdings: DataFrame containing holdings data (should be ex-post data with iiv_shares)
+            asset_type: Type of asset (equity, options, treasury)
+        """
+        empty_result = {
+            "buys": [],
+            "sells": [],
+            "net": {
+                "buy_quantity": 0.0,
+                "sell_quantity": 0.0,
+                "buy_value": 0.0,
+                "sell_value": 0.0,
+            },
+        }
+
+        if not isinstance(holdings, pd.DataFrame) or holdings.empty:
+            return empty_result
+
+        trade_series = self._extract_trade_series(holdings)
+        if trade_series.empty or (trade_series == 0.0).all():
+            return empty_result
+
+        df = holdings.copy()
+        df["trade_rebal"] = trade_series
+        df = df.loc[df["trade_rebal"] != 0.0]
+
+        if df.empty:
+            return empty_result
+
+        buys = []
+        sells = []
+        total_buy_qty = 0.0
+        total_sell_qty = 0.0
+        total_buy_value = 0.0
+        total_sell_value = 0.0
+
+        # Detect the correct ticker column for this asset type
+        ticker_column = self._detect_ticker_column(df, asset_type)
+        if ticker_column is None:
+            ticker_column = 'ticker'
+
+        for _, row in df.iterrows():
+            quantity = float(row.get("trade_rebal", 0.0))
+            if quantity == 0.0:
+                continue
+
+            # Get ticker from the appropriate column
+            ticker = ""
+            if ticker_column in row:
+                ticker_value = row.get(ticker_column)
+                if pd.notna(ticker_value):
+                    ticker = str(ticker_value).upper().strip()
+
+            # Calculate market value using ex-post price and trade quantity
+            # This matches how Fund Summary Metrics Ex-Post is calculated
+            market_value = self._estimate_trade_market_value(row, quantity, asset_type)
+
+            trade_payload = {
+                "ticker": ticker,
+                "quantity": abs(quantity),
+                "market_value": abs(market_value),
+            }
+
+            if quantity > 0:
+                total_buy_qty += abs(quantity)
+                total_buy_value += abs(market_value)
+                buys.append(trade_payload)
+            else:
+                total_sell_qty += abs(quantity)
+                total_sell_value += abs(market_value)
+                sells.append(trade_payload)
+
+        return {
+            "buys": buys,
+            "sells": sells,
+            "net": {
+                "buy_quantity": total_buy_qty,
+                "sell_quantity": total_sell_qty,
+                "buy_value": total_buy_value,
+                "sell_value": total_sell_value,
+            },
+        }
 
     def _get_holdings(
         self,
@@ -543,10 +637,10 @@ class TradingComplianceAnalyzer:
         return metrics
 
     def _calculate_trade_activity(
-        self,
-        holdings: pd.DataFrame,
-        *,
-        asset_type: str,
+            self,
+            holdings: pd.DataFrame,
+            *,
+            asset_type: str,
     ) -> Dict[str, Any]:
         empty_result = {
             "buys": [],
@@ -580,14 +674,25 @@ class TradingComplianceAnalyzer:
         total_buy_value = 0.0
         total_sell_value = 0.0
 
+        # Detect the correct ticker column for this asset type
+        ticker_column = self._detect_ticker_column(df, asset_type)
+        if ticker_column is None:
+            # Fallback to 'ticker' if no specific column found
+            ticker_column = 'ticker'
+
         for _, row in df.iterrows():
             quantity = float(row.get("trade_rebal", 0.0))
             if quantity == 0.0:
                 continue
 
-            ticker = str(row.get("ticker", ""))
-            ticker = ticker.upper().strip()
+            # Get ticker from the appropriate column
+            ticker = ""
+            if ticker_column in row:
+                ticker_value = row.get(ticker_column)
+                if pd.notna(ticker_value):
+                    ticker = str(ticker_value).upper().strip()
 
+            # Calculate market value using the price and trade quantity
             market_value = self._estimate_trade_market_value(row, quantity, asset_type)
 
             trade_payload = {
@@ -616,54 +721,86 @@ class TradingComplianceAnalyzer:
             },
         }
 
-    @staticmethod
-    def _detect_ticker_column(df: pd.DataFrame, asset_type: str) -> Optional[str]:
-        candidates = {
-            "equity": (
-                "equity_ticker",
-                "ticker",
-                "symbol",
-                "underlying_symbol",
-            ),
-            "options": ("optticker", "occ_symbol", "ticker"),
-            "treasury": (
-                "cusip",
-                "ticker",
-                "security_id",
-            ),
-        }
-
-        for column in candidates.get(asset_type, ("ticker",)):
-            if column in df.columns:
-                return column
-        return None
-
     def _estimate_trade_market_value(
-        self,
-        row: pd.Series,
-        quantity: float,
-        asset_type: str,
+            self,
+            row: pd.Series,
+            quantity: float,
+            asset_type: str,
     ) -> float:
-        multiplier = 100.0 if asset_type == "options" else 1.0
+        """Calculate market value using price and appropriate multiplier.
+
+        For the Trade Activity Details, we use the prices from the holdings data
+        with the trade_rebal quantities to get accurate market values.
+        """
+        multiplier = 1.0
+
+        # For options, check for contract multiplier
         if asset_type == "options":
+            multiplier = 100.0  # Default for options
             for column in ("contract_multiplier", "multiplier"):
                 value = row.get(column)
                 if pd.notna(value):
                     try:
                         parsed = float(value)
+                        if parsed > 0:
+                            multiplier = parsed
+                            break
                     except (TypeError, ValueError):
                         continue
-                    if parsed:
-                        multiplier = parsed
-                        break
 
-        if "price" in row and pd.notna(row["price"]):
-            try:
-                price_value = float(row["price"])
-                return price_value * quantity * multiplier
-            except (TypeError, ValueError):
-                pass
-        return float(quantity * multiplier)
+        # Get the price from the row
+        price_value = 0.0
+        if "price" in row:
+            price_raw = row.get("price")
+            if pd.notna(price_raw):
+                try:
+                    price_value = float(price_raw)
+                except (TypeError, ValueError):
+                    price_value = 0.0
+
+        # Calculate market value
+        if price_value > 0:
+            return abs(price_value * quantity * multiplier)
+        else:
+            # Fallback if no price available
+            return abs(quantity * multiplier)
+
+    @staticmethod
+    def _detect_ticker_column(df: pd.DataFrame, asset_type: str) -> Optional[str]:
+        candidates = {
+            "equity": (
+                "ticker",
+                "equity_ticker",
+                "symbol",
+                "underlying_symbol",
+            ),
+            "options": (
+                "ticker",
+                "optticker",
+                "occ_symbol",
+                "option_ticker",
+            ),
+            "treasury": (
+                "cusip",
+                "ticker",
+                "security_id",
+                "bond_ticker",
+            ),
+        }
+
+        # Check each candidate column in order of preference
+        for column in candidates.get(asset_type, ("ticker",)):
+            if column in df.columns:
+                # Verify that the column has some non-null values
+                if df[column].notna().any():
+                    return column
+
+        # Final fallback - check if 'ticker' column exists even if not in candidates
+        if "ticker" in df.columns and df["ticker"].notna().any():
+            return "ticker"
+
+        return None
+
 
 
     # ------------------------------------------------------------------

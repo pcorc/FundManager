@@ -179,11 +179,38 @@ def run_trading_mode(
     if not ante_payload and not post_payload:
         raise RuntimeError("Trading compliance run produced no compliance results to compare")
 
+    # Extract traded funds information from the ex_post results
+    # This should include the holdings data with trade_rebal information
+    traded_funds_info = {}
+
+    # Method 1: Extract from the compliance results if they contain fund objects
+    for fund_name in post_payload.keys():
+        fund_info = {}
+
+        # Try to get the fund object or holdings data from results
+        if fund_name in post_payload:
+            fund_results = post_payload[fund_name]
+
+            # Look for fund object
+            if "fund_object" in fund_results:
+                fund_info["fund_object"] = fund_results["fund_object"]
+            elif "fund" in fund_results:
+                fund_info["fund"] = fund_results["fund"]
+
+            # Look for holdings data that might contain trade information
+            for asset_type in ["equity", "options", "treasury"]:
+                if asset_type in fund_results:
+                    fund_info[asset_type] = fund_results[asset_type]
+
+        if fund_info:
+            traded_funds_info[fund_name] = fund_info
+
     artefacts = build_trading_compliance_reports(
         results_ex_ante=ante_payload,
         results_ex_post=post_payload,
         report_date=params.ex_post_date,
         output_dir=str(output_dir),
+        traded_funds_info=traded_funds_info,  # Pass the populated traded_funds_info
         create_pdf=params.create_pdf,
     )
 

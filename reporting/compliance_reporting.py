@@ -1086,6 +1086,21 @@ class ComplianceReportPDF(BaseReportPDF):
         self.results = flatten_compliance_results(results)
         self.allowed_tests = {test for test in allowed_tests or [] if test}
         self.generate_pdf()
+        self.save_pdf()
+
+    def save_pdf(self) -> None:
+        """Save the PDF to the specified output path."""
+        try:
+            # Ensure the output directory exists
+            output_dir = Path(self.output_path).parent
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Save the PDF file
+            self.pdf.output(self.output_path, 'F')
+            logger.info(f"PDF saved successfully to: {self.output_path}")
+        except Exception as e:
+            logger.error(f"Failed to save PDF to {self.output_path}: {e}")
+            raise
 
     # ------------------------------------------------------------------
     def generate_pdf(self) -> None:
@@ -2284,13 +2299,16 @@ def generate_compliance_reports(
     pdf_path = None
     if create_pdf:
         try:
-            ComplianceReportPDF(
+            pdf_file_path = str(Path(output_dir) / f"{file_name_prefix}_{report.report_date}.pdf")
+            pdf_report = ComplianceReportPDF(
                 report.results,
-                str(Path(output_dir) / f"{file_name_prefix}_{report.report_date}.pdf"),
+                pdf_file_path,
                 allowed_tests=test_functions,
             )
-            pdf_path = os.path.join(output_dir, f"{file_name_prefix}_{report.report_date}.pdf")
+
         except RuntimeError as exc:  # pragma: no cover - optional dependency missing
             logger.warning("PDF generation skipped: %s", exc)
+        except Exception as exc:
+            logger.error("PDF generation failed: %s", exc)
 
-    return GeneratedComplianceReport(excel_path=str(report.file_path), pdf_path=pdf_path)
+    return GeneratedComplianceReport(excel_path=str(report.file_path), pdf_path=pdf_file_path)
