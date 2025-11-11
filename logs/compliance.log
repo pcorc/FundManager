@@ -742,3 +742,9 @@
 2025-11-11 14:29:55,434 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-06.pdf
 2025-11-11 14:49:45,034 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-06.pdf
 2025-11-11 15:19:52,583 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-06.pdf
+2025-11-11 15:42:17,510 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-06.pdf
+2025-11-11 15:47:46,728 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-06.pdf
+2025-11-11 15:49:46,630 - compliance_report - ERROR - PDF generation failed: FPDF.multi_cell() got an unexpected keyword argument 'ln'
+2025-11-11 15:54:09,666 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-06.pdf
+2025-11-11 15:57:49,048 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-06.pdf
+2025-11-11 15:59:40,350 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-06.pdf

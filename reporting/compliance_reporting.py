@@ -1111,7 +1111,8 @@ class ComplianceReportPDF(BaseReportPDF):
             else:
                 self.pdf.set_y(self.pdf.t_margin)
 
-            if self._is_test_selected("gics_compliance"):
+            # Even with no grouped results, check if there's GICS data in self.results
+            if self._is_test_selected("gics_compliance") and self.results:
                 self._render_gics_compliance_overview()
 
             self._add_header("Compliance Overview")
@@ -1127,6 +1128,7 @@ class ComplianceReportPDF(BaseReportPDF):
             self.pdf.add_page()
         else:
             self.pdf.set_y(self.pdf.t_margin)
+
 
         summary_metrics = [
             ("Cash", lambda data: self._format_currency(self._get_summary_value(data, "cash_value"))),
@@ -1476,13 +1478,26 @@ class ComplianceReportPDF(BaseReportPDF):
             ("Rule 12d3", rule_12d3_metrics, "12d3", None),
         ]
 
-        for title, metrics, footnote, skip_labels in sections:
+        for idx, (title, metrics, footnote, skip_labels) in enumerate(sections):
             self._render_metric_section(
                 title,
                 metrics,
                 footnote_key=footnote,
                 skip_fail_highlight_labels=skip_labels,
             )
+
+            # Inject GICS overview immediately AFTER Summary Metrics
+            if idx == 0 and self._is_test_selected("gics_compliance"):
+                has_gics_data = any(
+                    isinstance(payload, dict) and "gics_compliance" in payload
+                    for (fund, date), payload in self.results.items()
+                )
+                if has_gics_data:
+                    # Space before GICS block
+                    self.pdf.ln(4)
+                    self._render_gics_compliance_overview()
+                    # Space after GICS block
+                    self.pdf.ln(8)
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -2279,33 +2294,27 @@ class ComplianceReportPDF(BaseReportPDF):
         self._draw_footnotes_section("illiquid")
 
     def _render_gics_compliance_overview(self) -> None:
-        """Render the Excel-like GICS_Compliance summary as a PDF table (no calculations)."""
-        # Headers aligned to ComplianceReport.process_gics_compliance() summary_columns
+        """Render the Excel-like GICS_Compliance summary as a wrapped PDF table (no calculations)."""
         headers = [
             "Date",
             "Fund",
-            "Overall GICS Compliance",
-            "Industry Exceeds 25%",
-            "Industry Group Exceeds 25%",
-            "Index Industry Exceeds 25%?",
-            "Index Industry Group Exceeds 25%?",
-            "Can Fund exceed 25% if Index does?",
-            "Exceptions to Conc Policy",
+            "Overall",  # was: Overall GICS Compliance
+            "Ind >25%",  # was: Industry Exceeds 25%
+            "IndGrp >25%",  # was: Industry Group Exceeds 25%
+            "Idx Ind >25%",  # was: Index Industry Exceeds 25%?
+            "Idx IndGrp >25%",  # was: Index Industry Group Exceeds 25%?
+            "Fund>25% if Idx?",  # was: Can Fund exceed 25% if Index does?
+            "Exceptions",  # was: Exceptions to Conc Policy
         ]
 
-        # Collect rows from flattened results (keyed by (fund, date))
         rows: list[list[str]] = []
-        # Keep ordering stable by fund then date
         for (fund_name, date_str), payload in sorted(
-            self.results.items(), key=lambda kv: (kv[0][0], kv[0][1])
+                self.results.items(), key=lambda kv: (kv[0][0], kv[0][1])
         ):
             gics = (payload or {}).get("gics_compliance")
             if not isinstance(gics, dict):
                 continue
 
-            # Excel logic parity:
-            # "Industry Exceeds 25%" and "Industry Group Exceeds 25%"
-            # are TRUE when the fund actually exceeds (so negate the "within limit" flags)
             industry_exceeds = not bool(gics.get("industry_exceeds_25", True))
             industry_group_exceeds = not bool(gics.get("industry_group_exceeds_25", True))
 
@@ -2313,11 +2322,10 @@ class ComplianceReportPDF(BaseReportPDF):
             index_industry_exceeds = len(exceeding_index.get("GICS_INDUSTRY_NAME", {}) or {}) > 0
             index_industry_group_exceeds = len(exceeding_index.get("GICS_INDUSTRY_GROUP_NAME", {}) or {}) > 0
 
-            # Keep the same “can exceed” and “exceptions” display as Excel
-            can_exceed = "Yes" if str(fund_name).upper() in {"KNG", "FDND"} else "No"
-            exceptions = "Information Technology Sector" if str(fund_name).upper() == "TDVI" else ""
+            fund_upper = str(fund_name).upper()
+            can_exceed = "Yes" if fund_upper in {"KNG", "FDND"} else "No"
+            exceptions = "Information Technology Sector" if fund_upper == "TDVI" else ""
 
-            # Nice, human-friendly date
             try:
                 date_disp = datetime.fromisoformat(date_str).date()
             except Exception:
@@ -2338,24 +2346,88 @@ class ComplianceReportPDF(BaseReportPDF):
         if not rows:
             return
 
-        # Page management + header
-        if self.pdf.get_y() > (self.pdf.h - self.pdf.b_margin - 40):
-            self.pdf.add_page()
-        self._print_test_header("GICS Compliance (Summary)")
+        # Measure text widths for headers and rows, then compute comfortable column widths.
+        usable = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
 
-        # Slightly wider first columns improves readability
-        usable_width = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
-        col_widths = [
-            min(28, usable_width * 0.10),   # Date
-            min(22, usable_width * 0.08),   # Fund
-            min(40, usable_width * 0.15),   # Overall
-            *[min(28, usable_width * 0.10)] * 6,  # the middle Yes/No columns
-            min(44, usable_width * 0.17),   # Exceptions
-        ]
+        # Measure with same fonts you'll use to draw the table
+        self.pdf.set_font("Arial", "B", 7)
+        hdr_w = [self.pdf.get_string_width(h) for h in headers]
+        self.pdf.set_font("Arial", "", 7)
+        row_w = [0.0] * len(headers)
+        for r in rows:
+            for i, val in enumerate(r):
+                row_w[i] = max(row_w[i], self.pdf.get_string_width(str(val) if val is not None else ""))
 
+        # Base width = max(header, row) + padding
+        PADDING = 8.0  # a little extra breathing room
+        MIN_W = 20.0  # don't go narrower than this
+        col_widths = [max(MIN_W, hw, rw) + PADDING for hw, rw in zip(hdr_w, row_w)]
+
+        total = sum(col_widths)
+        if total > usable:
+            # Too wide -> shrink proportionally (simple + robust)
+            scale = usable / total if total else 1.0
+            col_widths = [w * scale for w in col_widths]
+        else:
+            # Extra room -> give remainder to the last column (Exceptions)
+            col_widths[-1] += (usable - total)
+
+        # Now draw as usual (no overlap)
         self._draw_table(headers, rows, col_widths=col_widths, row_height=6)
         self._draw_footnotes_section("gics")
         self.pdf.ln(4)
+
+    def _draw_wrapped_table(
+        self,
+        headers: list[str],
+        rows: list[list[str]],
+        *,
+        col_widths: list[float],
+        line_height: float = 5.2,
+        header_fill=(230, 230, 230),
+    ) -> None:
+        if not headers or not rows:
+            return
+
+        # Header
+        self.pdf.set_font("Arial", "B", 8)
+        self.pdf.set_fill_color(*header_fill)
+        for w, h in zip(col_widths, headers):
+            self.pdf.multi_cell(w, line_height, self._sanitize_text(h), border=1, align="C", fill=True, ln=3, max_line_height=line_height)
+            self.pdf.set_xy(self.pdf.get_x(), self.pdf.get_y())  # keep
+        self.pdf.ln(0.5)
+
+        # Rows
+        self.pdf.set_font("Arial", "", 7)
+        for row in rows:
+            x_start = self.pdf.get_x()
+            y_start = self.pdf.get_y()
+
+            # First pass: render each cell with MultiCell and track row height
+            cell_heights = []
+            x = x_start
+            y = y_start
+            for i, text in enumerate(row):
+                self.pdf.set_xy(x, y)
+                # Render cell to compute height
+                self.pdf.multi_cell(
+                    col_widths[i],
+                    line_height,
+                    self._sanitize_text(str(text) if text is not None else ""),
+                    border=1,
+                    align="L" if i not in (0, 2) else "C",  # center Date & Overall a bit
+                    ln=3,
+                    max_line_height=line_height,
+                )
+                cell_heights.append(self.pdf.get_y() - y)
+                x += col_widths[i]
+                self.pdf.set_xy(x, y)
+
+            # Move to the tallest cell end for the next row
+            row_height = max(cell_heights) if cell_heights else line_height
+            self.pdf.set_xy(x_start, y_start + row_height)
+
+
 
 
 

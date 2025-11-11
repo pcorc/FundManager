@@ -386,41 +386,41 @@ if __name__ == "__main__":
     # }
     # raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
 
-    # RUNTIME_OVERRIDES = {
-    #     "analysis_type": "eod",
-    #     "as_of_date": "2025-11-06",
-    #     #"funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'],
-    #     "funds": ["TDVI", "DOGG"],
-    #     "previous_date": "2025-11-05",
-    #     "eod_reports": ["compliance"],
-    #     "compliance_tests": [
-    #         "gics_compliance",
-    #         "prospectus_80pct_policy",
-    #         "diversification_40act_check",
-    #         "diversification_IRS_check",
-    #         "diversification_IRC_check",
-    #         "max_15pct_illiquid_sai",
-    #         "real_estate_check",
-    #         "commodities_check",
-    #         "twelve_d1a_other_inv_cos",
-    #         "twelve_d2_insurance_cos",
-    #         "twelve_d3_sec_biz",
-    #     ],
-    #     "create_pdf": True,
-    #     "output_dir": "./outputs",
-    # }
-    # raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
-
     RUNTIME_OVERRIDES = {
         "analysis_type": "eod",
         "as_of_date": "2025-11-06",
-        "previous_date": "2025-11-05",  # optional; defaults to prior business day if omitted
-        "funds": ["TDVI"],  # omit to process all registered funds
-        "eod_reports": ["reconciliation", "nav"],
+        #"funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'],
+        "funds": ["TDVI", "DOGG"],
+        "previous_date": "2025-11-05",
+        "eod_reports": ["compliance"],
+        "compliance_tests": [
+            "gics_compliance",
+            "prospectus_80pct_policy",
+            "diversification_40act_check",
+            "diversification_IRS_check",
+            "diversification_IRC_check",
+            "max_15pct_illiquid_sai",
+            "real_estate_check",
+            "commodities_check",
+            "twelve_d1a_other_inv_cos",
+            "twelve_d2_insurance_cos",
+            "twelve_d3_sec_biz",
+        ],
         "create_pdf": True,
         "output_dir": "./outputs",
     }
     raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
+
+    # RUNTIME_OVERRIDES = {
+    #     "analysis_type": "eod",
+    #     "as_of_date": "2025-11-06",
+    #     "previous_date": "2025-11-05",  # optional; defaults to prior business day if omitted
+    #     "funds": ["TDVI"],  # omit to process all registered funds
+    #     "eod_reports": ["reconciliation", "nav"],
+    #     "create_pdf": True,
+    #     "output_dir": "./outputs",
+    # }
+    # raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
 
     # Example: run the same configuration for a list of explicit business dates.
     # MULTI_DAY_OVERRIDES = {
