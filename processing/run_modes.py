@@ -123,6 +123,7 @@ def run_eod_mode(
     nav_payload = _extract_payload(results, "nav_results")
 
     artefacts: MutableMapping[str, object] = {}
+    gics_mapping = getattr(data_store, "gics_mapping", None)
 
     if "compliance" in params.operations and compliance_payload:
         artefacts["compliance"] = build_compliance_reports(
@@ -130,6 +131,7 @@ def run_eod_mode(
             report_date=params.trade_date,
             output_dir=str(output_dir),
             test_functions=params.compliance_tests or None,
+            gics_mapping=gics_mapping,
             create_pdf=params.create_pdf,
         )
 
@@ -186,6 +188,8 @@ def run_trading_mode(
     )
 
     ex_post_compliance_report = None
+    gics_mapping_ex_post = getattr(ex_post_store, "gics_mapping", None)
+
     if post_payload:
         ex_post_compliance_report = build_compliance_reports(
             results_ex_post,
@@ -193,6 +197,7 @@ def run_trading_mode(
             output_dir=str(output_dir),
             file_name_prefix="compliance_results_expost",
             test_functions=params.compliance_tests or None,
+            gics_mapping=gics_mapping_ex_post,
             create_pdf=params.create_pdf,
         )
 
@@ -225,6 +230,8 @@ def run_eod_range_mode(
     results_by_date: "OrderedDict[date, ProcessingResults]" = OrderedDict()
     daily_artefacts: "OrderedDict[str, Mapping[str, object]]" = OrderedDict()
 
+    latest_gics_mapping = None
+
     for trade_date in _iter_business_days(start_date, end_date):
         previous_date = _previous_business_day(trade_date)
         data_store = loader.load_all_data_for_date(
@@ -232,6 +239,8 @@ def run_eod_range_mode(
             previous_date=previous_date,
             analysis_type="eod",
         )
+        latest_gics_mapping = getattr(data_store, "gics_mapping", None)
+
 
         day_results = _run_operations(
             registry,
@@ -258,6 +267,7 @@ def run_eod_range_mode(
                 report_date=trade_date,
                 output_dir=str(output_dir),
                 test_functions=compliance_tests or None,
+                gics_mapping=latest_gics_mapping,
                 create_pdf=create_pdf,
             )
 
@@ -279,6 +289,7 @@ def run_eod_range_mode(
             results_by_date.items(),
             output_dir=str(output_dir),
             test_functions=compliance_tests or None,
+            gics_mapping=latest_gics_mapping,
             create_pdf=create_pdf,
         )
 

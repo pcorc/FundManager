@@ -21,11 +21,15 @@ class BulkDataStore:
     # Metadata about what we loaded
     loaded_funds: Set[str] = None
     loaded_data_types: Set[str] = None
+    gics_mapping: Optional[pd.DataFrame] = None
+
 
     def __post_init__(self):
         self.fund_data = {}
         self.loaded_funds = set()
         self.loaded_data_types = set()
+        self.gics_mapping = pd.DataFrame()
+
 
 
 class BulkDataLoader:
@@ -85,6 +89,7 @@ class BulkDataLoader:
         )
         self._normalise_loaded_holdings(data_store)
 
+        data_store.gics_mapping = self._load_gics_mapping()
 
         # Ensure every fund has an entry even if a data set was empty
         for fund_name in all_funds.keys():
@@ -92,6 +97,39 @@ class BulkDataLoader:
 
         self.logger.info(f"Bulk loaded data for {len(data_store.loaded_funds)} funds")
         return data_store
+
+    def _load_gics_mapping(self) -> pd.DataFrame:
+        mapper_table = getattr(self.base_cls.classes, "gics_mapper", None)
+        if mapper_table is None:
+            self.logger.debug("gics_mapper table is not reflected; skipping GICS mapping load")
+            return pd.DataFrame()
+
+        try:
+            query = self.session.query(
+                mapper_table.GICS_SECTOR_NAME,
+                mapper_table.GICS_INDUSTRY_GROUP_NAME,
+                mapper_table.GICS_INDUSTRY_NAME,
+            ).distinct()
+            df = pd.read_sql(query.statement, self.session.bind)
+        except Exception as exc:
+            self.logger.warning("Failed to load GICS mapping: %s", exc)
+            return pd.DataFrame()
+
+        if df.empty:
+            return df
+
+        # Ensure consistent column casing/ordering for downstream lookups
+        expected_columns = [
+            "GICS_SECTOR_NAME",
+            "GICS_INDUSTRY_GROUP_NAME",
+            "GICS_INDUSTRY_NAME",
+        ]
+        missing = [col for col in expected_columns if col not in df.columns]
+        if missing:
+            self.logger.warning(
+                "GICS mapping missing expected columns: %s", ", ".join(missing)
+            )
+        return df
 
     def _bulk_load_custodian_holdings(
         self,

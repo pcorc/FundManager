@@ -136,6 +136,12 @@ def _create_summary_sheet(workbook: Workbook, data: Mapping[str, Any]) -> None:
     row = _append_compliance_changes_table(sheet, data, summary, start_row=row)
     _append_fund_summary_metrics_table(sheet, data, start_row=row + 2)
 
+def _update_width(width_tracker: Dict[int, int], col_idx: int, value: object) -> None:
+    """Update the width tracker for a column with the length of a value."""
+    text = "" if value is None else str(value)
+    current = width_tracker.get(col_idx, 0)
+    width_tracker[col_idx] = max(current, len(text))
+
 def _append_fund_summary_metrics_table(
     sheet, data: Mapping[str, Any], *, start_row: int
 ) -> int:
@@ -153,11 +159,7 @@ def _append_fund_summary_metrics_table(
 
     populated = False
     row = start_row
-
-    def _update_width(col_idx: int, value: object) -> None:
-        text = "" if value is None else str(value)
-        current = width_tracker.get(col_idx, 0)
-        width_tracker[col_idx] = max(current, len(text))
+    width_tracker: Dict[int, int] = {}  # Initialize width tracker
 
     for fund_name, fund_data in sorted(funds.items()):
         summary_metrics = fund_data.get("summary_metrics", {}) or {}
@@ -167,13 +169,13 @@ def _append_fund_summary_metrics_table(
         if not ex_ante and not ex_post:
             continue
 
-            _update_width(1, "Fund Summary Metrics")
-            row += 1
-            populated = True
+        # Update width for the section header
+        _update_width(width_tracker, 1, "Fund Summary Metrics")
+        populated = True
 
         sheet[f"A{row}"] = f"Fund Summary Metrics - {fund_name}"
         sheet[f"A{row}"].font = Font(size=11, bold=True)
-        _update_width(1, f"Fund Summary Metrics - {fund_name}")
+        _update_width(width_tracker, 1, f"Fund Summary Metrics - {fund_name}")
         row += 1
 
         headers = ["Metric", "Ex-Ante", "Ex-Post", "Delta"]
@@ -184,7 +186,7 @@ def _append_fund_summary_metrics_table(
                 start_color="DDDDDD", end_color="DDDDDD", fill_type="solid"
             )
             cell.alignment = Alignment(horizontal="center")
-            _update_width(col, header)
+            _update_width(width_tracker, col, header)
         row += 1
 
         wrote_row = False
@@ -207,10 +209,10 @@ def _append_fund_summary_metrics_table(
             delta_cell.number_format = "#,##0.00"
             delta_cell.alignment = Alignment(horizontal="right")
 
-            _update_width(1, label)
-            _update_width(2, f"{ante_value:,.2f}")
-            _update_width(3, f"{post_value:,.2f}")
-            _update_width(4, f"{delta:,.2f}")
+            _update_width(width_tracker, 1, label)
+            _update_width(width_tracker, 2, f"{ante_value:,.2f}")
+            _update_width(width_tracker, 3, f"{post_value:,.2f}")
+            _update_width(width_tracker, 4, f"{delta:,.2f}")
 
             row += 1
             wrote_row = True
@@ -218,11 +220,12 @@ def _append_fund_summary_metrics_table(
         if wrote_row:
             row += 2
 
-        if populated:
-            for col_idx, width in width_tracker.items():
-                column = get_column_letter(col_idx)
-                adjusted_width = min(max(width + 2, 14), 60)
-                sheet.column_dimensions[column].width = adjusted_width
+    # Apply the calculated column widths
+    if populated:
+        for col_idx, width in width_tracker.items():
+            column = get_column_letter(col_idx)
+            adjusted_width = min(max(width + 2, 14), 60)
+            sheet.column_dimensions[column].width = adjusted_width
 
     return row
 
