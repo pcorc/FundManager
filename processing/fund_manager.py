@@ -130,6 +130,7 @@ class FundManager:
             basket=fund_data_dict.get('basket', pd.DataFrame()),
             index=fund_data_dict.get('index', pd.DataFrame()),
             overlap=fund_data_dict.get('overlap', pd.DataFrame()),
+            fund_name=fund_name,
         )
 
         # Populate previous holdings (T-1) if available
@@ -155,6 +156,7 @@ class FundManager:
             basket=fund_data_dict.get('basket_t1', pd.DataFrame()),
             index=fund_data_dict.get('index_t1', pd.DataFrame()),
             overlap=fund_data_dict.get('overlap_t1', pd.DataFrame()),
+            fund_name=fund_name,
         )
 
         # Populate additional data

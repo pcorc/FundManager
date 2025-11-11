@@ -285,6 +285,61 @@ class BulkDataLoader:
                     continue
 
                 try:
+                    # CRITICAL: Process each fund separately for treasury to ensure no cross-contamination
+                    if config_key == 'vest_treasury_holdings':
+                        for fund in funds:
+                            # Check if fund actually has treasury
+                            if not fund.mapping_data.get('has_treasury', False):
+                                # Store empty DataFrames for funds without treasury
+                                self._store_fund_data(
+                                    data_store, fund.name, payload_key, pd.DataFrame()
+                                )
+                                if previous_date is not None:
+                                    self._store_fund_data(
+                                        data_store, fund.name, payload_key_t1, pd.DataFrame()
+                                    )
+                                continue
+
+                            # Query treasury data for this specific fund only
+                            try:
+                                fund_data = self._vest_treasury_holdings(
+                                    table,
+                                    [fund],  # Pass only this fund
+                                    target_date,
+                                    previous_date,
+                                    analysis_type,
+                                )
+
+                                # Split into current and previous
+                                current, previous = self._split_current_previous(
+                                    fund_data,
+                                    'date',  # We know this column exists
+                                    target_date,
+                                    previous_date,
+                                )
+
+                                # Store the data
+                                self._store_fund_data(
+                                    data_store, fund.name, payload_key, current
+                                )
+                                if previous_date is not None:
+                                    self._store_fund_data(
+                                        data_store, fund.name, payload_key_t1, previous
+                                    )
+                            except Exception as exc:
+                                self.logger.warning(
+                                    "Failed to load treasury for fund %s: %s",
+                                    fund.name, exc
+                                )
+                                # Store empty DataFrames on error
+                                self._store_fund_data(
+                                    data_store, fund.name, payload_key, pd.DataFrame()
+                                )
+                                if previous_date is not None:
+                                    self._store_fund_data(
+                                        data_store, fund.name, payload_key_t1, pd.DataFrame()
+                                    )
+
                     if config_key == 'vest_equity_holdings':
                         all_data = self._query_vest_equity_holdings(
                             table,
@@ -301,40 +356,9 @@ class BulkDataLoader:
                             previous_date,
                             analysis_type,
                         )
-                    elif config_key == 'vest_treasury_holdings':
-                        all_data = self._vest_treasury_holdings(
-                            table,
-                            funds,
-                            target_date,
-                            previous_date,
-                            analysis_type,
-                        )
-                    else:
-                        date_column = getattr(table, 'date', None)
-                        query = self.session.query(table)
-                        if date_column is not None:
-                            query = self._apply_date_filter(
-                                query, date_column, target_date, previous_date
-                            )
-                        all_data = pd.read_sql(query.statement, self.session.bind)
 
-                        if analysis_type:
-                            analysis_column = next(
-                                (
-                                    column
-                                    for column in all_data.columns
-                                    if column.lower() == 'analysis_type'
-                                ),
-                                None,
-                            )
-                            if analysis_column:
-                                mask = (
-                                        all_data[analysis_column]
-                                        .astype(str)
-                                        .str.lower()
-                                        == analysis_type.lower()
-                                )
-                                all_data = all_data.loc[mask].copy()
+                    else:
+                        continue
 
                     for fund in funds:
                         fund_name = fund.name
@@ -441,32 +465,54 @@ class BulkDataLoader:
                 ),
             )
 
-        date_column = getattr(table, 'date', None)
-        if date_column is not None:
-            query = self._apply_date_filter(
-                query, date_column, target_date, previous_date
-            )
+        # date_column = getattr(table, 'date', None)
+        # if date_column is not None:
+        #     query = self._apply_date_filter(
+        #         query, date_column, target_date, previous_date
+        #     )
 
-        fund_column = self._get_table_column(
-            table,
-            'fund',
-            'fund_ticker',
-            'account',
-        )
-        fund_aliases = self._collect_fund_aliases(funds)
-        if fund_column is not None and fund_aliases:
-            query = query.filter(fund_column.in_(fund_aliases))
+        # fund_column = self._get_table_column(
+        #     table,
+        #     'fund',
+        #     'fund_ticker',
+        #     'account',
+        # )
+        # fund_aliases = self._collect_fund_aliases(funds)
+        # if fund_column is not None and fund_aliases:
+        #     query = query.filter(fund_column.in_(fund_aliases))
+
+        # if analysis_type:
+        #     analysis_column = getattr(table, 'analysis_type')
+        #     if analysis_column is not None:
+        #         query = query.filter(
+        #             func.lower(func.trim(analysis_column))
+        #             == analysis_type.lower()
+        #         )
+        #
+        # df = pd.read_sql(query.statement, self.session.bind)
+
+        # Simple date filter - we know there's always a 'date' column
+        if previous_date is not None:
+            query = query.filter(
+                table.date.in_([target_date, previous_date])
+            )
+        else:
+            query = query.filter(table.date == target_date)
+
+        # Simple fund filter - we know there's always a 'fund' column
+        fund_names = [f.name for f in funds]
+        query = query.filter(table.fund.in_(fund_names))
 
         if analysis_type:
-            analysis_column = getattr(table, 'analysis_type')
-            if analysis_column is not None:
-                query = query.filter(
-                    func.lower(func.trim(analysis_column))
-                    == analysis_type.lower()
-                )
+            query = query.filter(
+                func.lower(func.trim(table.analysis_type)) == analysis_type.lower()
+            )
 
         df = pd.read_sql(query.statement, self.session.bind)
-        df['equity_market_value'] = df['nav_shares'] * df['price']
+        shares_series = self._resolve_shares_series(df, analysis_type=analysis_type)
+
+        price_series = pd.to_numeric(df['price'], errors='coerce').fillna(0.0)
+        df['equity_market_value'] = shares_series * price_series
 
         return df
 
@@ -503,31 +549,54 @@ class BulkDataLoader:
                 bbg_equity_table, underlying_column == bbg_equity_table.TICKER
             )
 
-        date_column = getattr(table, 'date', None)
-        if date_column is not None:
-            query = self._apply_date_filter(
-                query, date_column, target_date, previous_date
+        # date_column = getattr(table, 'date', None)
+        # if date_column is not None:
+        #     query = self._apply_date_filter(
+        #         query, date_column, target_date, previous_date
+        #     )
+        #
+        # fund_column = getattr(table, 'fund', None)
+        # fund_aliases = self._collect_fund_aliases(funds)
+        # if fund_column is not None and fund_aliases:
+        #     query = query.filter(fund_column.in_(fund_aliases))
+        #
+        # if analysis_type:
+        #     analysis_column = getattr(table, 'analysis_type', None)
+        #     if analysis_column is not None:
+        #         query = query.filter(
+        #             func.lower(func.trim(analysis_column))
+        #             == analysis_type.lower()
+        #         )
+
+        # Simple date filter - we know there's always a 'date' column
+        if previous_date is not None:
+            query = query.filter(
+                table.date.in_([target_date, previous_date])
+            )
+        else:
+            query = query.filter(table.date == target_date)
+
+        fund_names = [f.name for f in funds]
+        query = query.filter(table.fund.in_(fund_names))
+
+        # Apply analysis type filter if specified
+        if analysis_type:
+            query = query.filter(
+                func.lower(func.trim(table.analysis_type)) == analysis_type.lower()
             )
 
-        fund_column = getattr(table, 'fund', None)
-        fund_aliases = self._collect_fund_aliases(funds)
-        if fund_column is not None and fund_aliases:
-            query = query.filter(fund_column.in_(fund_aliases))
-
-        if analysis_type:
-            analysis_column = getattr(table, 'analysis_type', None)
-            if analysis_column is not None:
-                query = query.filter(
-                    func.lower(func.trim(analysis_column))
-                    == analysis_type.lower()
-                )
-
         df = pd.read_sql(query.statement, self.session.bind)
-        df[['price', 'nav_shares', 'delta']] = df[['price', 'nav_shares', 'delta']].apply(pd.to_numeric, errors='coerce')
-        df['option_notional_value'] = df['equity_underlying_price'] * df['nav_shares'] * 100
-        df['option_market_value'] = df['price'] * df['nav_shares'] * 100
-        df['option_delta_adjusted_notional'] = df['equity_underlying_price'] * df['nav_shares'] * df['delta'] * 100
-        df['option_delta_adjusted_market_value'] = df['price'] * df['nav_shares'] * df['delta'] * 100
+        shares_series = self._resolve_shares_series(df, analysis_type=analysis_type)
+
+        # Get price and delta
+        price_series = pd.to_numeric(df.get('price', 0.0), errors='coerce').fillna(0.0)
+        delta_series = pd.to_numeric(df.get('delta', 0.0), errors='coerce').fillna(0.0)
+        underlying_price = pd.to_numeric(df['equity_underlying_price'], errors='coerce').fillna(0.0)
+
+        df['option_notional_value'] = underlying_price * shares_series * 100
+        df['option_market_value'] = price_series * shares_series * 100
+        df['option_delta_adjusted_notional'] = underlying_price * shares_series * delta_series * 100
+        df['option_delta_adjusted_market_value'] = price_series * shares_series * delta_series * 100
 
         return df
 
@@ -541,33 +610,55 @@ class BulkDataLoader:
     ) -> pd.DataFrame:
         query = self.session.query(table)
 
-        date_column = getattr(table, 'date', None)
-        if date_column is not None:
-            query = self._apply_date_filter(
-                query,
-                date_column,
-                target_date,
-                previous_date,
+        # date_column = getattr(table, 'date', None)
+        # if date_column is not None:
+        #     query = self._apply_date_filter(
+        #         query,
+        #         date_column,
+        #         target_date,
+        #         previous_date,
+        #     )
+        #
+        # fund_column =  getattr(table, 'fund', None)
+        # fund_aliases = self._collect_fund_aliases(funds)
+        # if fund_column is not None and fund_aliases:
+        #     query = query.filter(fund_column.in_(fund_aliases))
+        #
+        # if analysis_type:
+        #     analysis_column = getattr(table, 'analysis_type')
+        #     if analysis_column is not None:
+        #         query = query.filter(
+        #             func.lower(func.trim(analysis_column))
+        #             == analysis_type.lower(),
+        #         )
+
+        # Simple date filter - we know there's always a 'date' column
+        if previous_date is not None:
+            query = query.filter(
+                table.date.in_([target_date, previous_date])
+            )
+        else:
+            query = query.filter(table.date == target_date)
+
+        # CRITICAL: Simple fund filter - we know there's always a 'fund' column
+        fund_names = [f.name for f in funds]
+        query = query.filter(table.fund.in_(fund_names))
+
+        # Apply analysis type filter if specified
+        if analysis_type:
+            query = query.filter(
+                func.lower(func.trim(table.analysis_type)) == analysis_type.lower()
             )
 
-        fund_column =  getattr(table, 'fund', None)
-        fund_aliases = self._collect_fund_aliases(funds)
-        if fund_column is not None and fund_aliases:
-            query = query.filter(fund_column.in_(fund_aliases))
-
-        if analysis_type:
-            analysis_column = getattr(table, 'analysis_type')
-            if analysis_column is not None:
-                query = query.filter(
-                    func.lower(func.trim(analysis_column))
-                    == analysis_type.lower(),
-                )
-
         df = pd.read_sql(query.statement, self.session.bind)
+        # Additional safety: double-check fund filtering in pandas
+        if not df.empty and 'fund' in df.columns:
+            df = df[df['fund'].isin(fund_names)].copy()
 
-        if analysis_type and 'analysis_type' in df.columns:
-            mask = df['analysis_type'].astype(str).str.lower() == analysis_type.lower()
-            df = df.loc[mask].copy()
+        shares_series = self._resolve_shares_series(df, analysis_type=analysis_type)
+        price_series = pd.to_numeric(df['price'], errors='coerce').fillna(0.0)
+        df['treasury_market_value'] = shares_series * price_series
+
 
         return df
 
@@ -1704,6 +1795,31 @@ class BulkDataLoader:
 
         return self.session.query(table)
 
+    def _get_numeric_series(self, df: pd.DataFrame, *column_names: str) -> Tuple[pd.Series, bool]:
+        """
+        Try to extract a numeric series from DataFrame using the first available column.
+
+        Args:
+            df: DataFrame to extract from
+            *column_names: Column names to try in order of preference
+
+        Returns:
+            Tuple of (Series, found_flag):
+            - Series: The numeric series if found, or Series of 0.0 if not
+            - bool: True if a column was found, False otherwise
+        """
+        if df.empty:
+            return pd.Series(0.0, index=df.index, dtype=float), False
+
+        for column_name in column_names:
+            if column_name in df.columns:
+                # Found the column, convert to numeric
+                series = pd.to_numeric(df[column_name], errors='coerce').fillna(0.0)
+                return series, True
+
+        # No column found, return zeros with False flag
+        return pd.Series(0.0, index=df.index, dtype=float), False
+
     def _get_mapping_value(self, mapping: Dict, *keys: str) -> Optional[str]:
         for key in keys:
             value = mapping.get(key)
@@ -1735,12 +1851,10 @@ class BulkDataLoader:
             mapping = getattr(fund, 'mapping_data', {}) or {}
             for key in (
                 'fund',
-                'fund_name',
                 'fund_ticker',
                 'portfolio',
                 'account',
                 'account_number',
-                'account_number_custodian',
             ):
                 value = mapping.get(key)
                 if isinstance(value, str) and value and value != 'NULL':
@@ -1837,7 +1951,7 @@ class BulkDataLoader:
             return df
 
         lower_columns = {col.lower(): col for col in df.columns}
-        for candidate in ('fund', 'fund_ticker', 'ticker', 'account'):
+        for candidate in ('fund', 'fund_ticker', 'account'):
             if candidate in lower_columns:
                 column = lower_columns[candidate]
                 value = fund_name

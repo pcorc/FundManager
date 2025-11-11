@@ -58,7 +58,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_flex_option": False,
         "flex_option_type": None,
         "has_otc": False,
-        "has_treasury": True,
+        "has_treasury": False,
     },
     "FGSI": {
         "custodian_equity_holdings": "bny_us_holdings_v2",
@@ -85,7 +85,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_flex_option": False,
         "flex_option_type": None,
         "has_otc": False,
-        "has_treasury": True,
+        "has_treasury": False,
     },
     "FTCSH": {
         "custodian_equity_holdings": "bny_vit_holdings",
@@ -252,7 +252,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_flex_option": False,
         "flex_option_type": None,
         "has_otc": False,
-        "has_treasury": True,
+        "has_treasury": False,
     },
     "KNGIX": {
         "custodian_equity_holdings": "bny_us_holdings_v2",
@@ -279,7 +279,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_flex_option": False,
         "flex_option_type": None,
         "has_otc": False,
-        "has_treasury": True,
+        "has_treasury": False,
     },
     "P20127": {
         "custodian_equity_holdings": "umb_cef_px",
@@ -590,7 +590,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_flex_option": False,
         "flex_option_type": None,
         "has_otc": False,
-        "has_treasury": True,
+        "has_treasury": False,
     },
     "SDVD": {
         "custodian_equity_holdings": "bny_us_holdings_v2",
@@ -617,7 +617,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_flex_option": False,
         "flex_option_type": None,
         "has_otc": False,
-        "has_treasury": True,
+        "has_treasury": False,
     },
     "TDVI": {
         "custodian_equity_holdings": "bny_us_holdings_v2",
@@ -644,7 +644,7 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "has_flex_option": False,
         "flex_option_type": None,
         "has_otc": False,
-        "has_treasury": True,
+        "has_treasury": False,
     },
     "TR2B1": {
         "custodian_equity_holdings": "umb_cef_px",

@@ -353,6 +353,14 @@ def _coerce_date(value: object, field_name: str) -> date:
 
 
 if __name__ == "__main__":
+
+    # 'KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',  'FTCSH'
+    # 'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2',
+    #  'FTCSH'
+    # ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'], #
+
+
+
     RUNTIME_OVERRIDES = {
         "analysis_type": "trading_compliance",
         "as_of_date": "2025-11-07",
@@ -379,12 +387,6 @@ if __name__ == "__main__":
         "output_dir": "./outputs",
     }
     raise SystemExit(main(overrides=RUNTIME_OVERRIDES))
-
-    # 'KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG',  'FTCSH'
-    # 'P20127', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2',
-    #  'FTCSH'
-    # ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'], #
-
 
     # RUNTIME_OVERRIDES = {
     #     "analysis_type": "eod",

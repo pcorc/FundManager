@@ -61,6 +61,7 @@ class FundSnapshot:
         basket: Optional[pd.DataFrame] = None,
         index: Optional[pd.DataFrame] = None,
         overlap: Optional[pd.DataFrame] = None,
+        fund_name: Optional[str] = None,
     ) -> None:
         self.vest = vest if isinstance(vest, FundHoldings) else FundHoldings()
         self.custodian = (
@@ -71,6 +72,8 @@ class FundSnapshot:
         self.expenses = float(expenses or 0.0)
         self.total_assets = float(total_assets or 0.0)
         self.total_net_assets = float(total_net_assets or 0.0)
+        self.fund_name = fund_name
+
         self.total_equity_value = self._compute_equity_value()
         self.total_option_value = self._compute_option_value()
         self.total_option_delta_adjusted_notional = (
@@ -84,26 +87,52 @@ class FundSnapshot:
             overlap if isinstance(overlap, pd.DataFrame) else pd.DataFrame()
         )
 
-    @staticmethod
-    def _frame_value_sum(frame: pd.DataFrame, columns: Sequence[str]) -> Optional[float]:
+    def _filter_frame_by_fund(self, frame: pd.DataFrame) -> pd.DataFrame:
+        """Filter DataFrame to only include rows for this fund."""
+        if not isinstance(frame, pd.DataFrame) or frame.empty:
+            return frame
+
+        # If no fund_name set, return as-is (backward compatibility)
+        if not self.fund_name:
+            return frame
+
+        # If fund column exists, filter by it
+        if 'fund' in frame.columns:
+            return frame[frame['fund'] == self.fund_name].copy()
+
+        # No fund column means data should already be filtered
+        return frame
+
+
+    def _frame_value_sum(self, frame: pd.DataFrame, columns: Sequence[str]) -> Optional[float]:
         if not isinstance(frame, pd.DataFrame) or frame.empty:
             return None
 
+        # Filter frame by fund if needed
+        filtered_frame = self._filter_frame_by_fund(frame)
+        if filtered_frame.empty:
+            return None
+
         for column in columns:
-            if column in frame.columns:
-                series = pd.to_numeric(frame[column], errors="coerce").dropna()
+            if column in filtered_frame.columns:
+                series = pd.to_numeric(filtered_frame[column], errors="coerce").dropna()
                 if not series.empty:
                     return float(series.sum())
         return None
 
-    @staticmethod
-    def _price_quantity_sum(frame: pd.DataFrame, multiplier: float = 1.0) -> Optional[float]:
+
+    def _price_quantity_sum(self, frame: pd.DataFrame, multiplier: float = 1.0) -> Optional[float]:
         if not isinstance(frame, pd.DataFrame) or frame.empty:
             return None
 
-        if {"price", "quantity"}.issubset(frame.columns):
-            price = pd.to_numeric(frame["price"], errors="coerce").fillna(0.0)
-            quantity = pd.to_numeric(frame["quantity"], errors="coerce").fillna(0.0)
+        # Filter frame by fund if needed
+        filtered_frame = self._filter_frame_by_fund(frame)
+        if filtered_frame.empty:
+            return None
+
+        if {"price", "quantity"}.issubset(filtered_frame.columns):
+            price = pd.to_numeric(filtered_frame["price"], errors="coerce").fillna(0.0)
+            quantity = pd.to_numeric(filtered_frame["quantity"], errors="coerce").fillna(0.0)
             if not price.empty and not quantity.empty:
                 return float((price * quantity * multiplier).sum())
         return None
@@ -146,7 +175,9 @@ class FundSnapshot:
         return 0.0
 
     def _compute_treasury_value(self) -> float:
+        """Compute treasury value with proper fund filtering."""
         for frame in (self.vest.treasury, self.custodian.treasury):
+            # CRITICAL: Filter frame to ensure we only sum this fund's treasury
             value = self._frame_value_sum(
                 frame, ["treasury_market_value", "market_value", "net_market_value"]
             )
