@@ -1,38 +1,107 @@
-"""Convenience helpers for generating NAV reconciliation artefacts."""
+"""Convenience helpers for generating NAV and holdings reconciliation artefacts."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from processing.fund_manager import ProcessingResults
 from reporting.nav_recon_reporting import (
     GeneratedNAVReconciliationReport,
+    generate_daily_operations_pdf,
     generate_nav_reconciliation_reports,
+    generate_reconciliation_summary_pdf,
+)
+from reporting.reconciliation_reporting import (
+    GeneratedReconciliationReport,
+    generate_reconciliation_reports,
 )
 
 
+@dataclass
+class GeneratedReconciliationArtefacts:
+    """Bundle of holdings/NAV reconciliation outputs."""
+
+    holdings: Optional[GeneratedReconciliationReport]
+    nav: Optional[GeneratedNAVReconciliationReport]
+    combined_reconciliation_pdf: Optional[str]
+    full_summary_pdf: Optional[str]
+
+
+def _extract_results(
+    results: ProcessingResults | None,
+    attribute: str,
+) -> Mapping[str, Any]:
+    if results is None:
+        return {}
+    payload: dict[str, Any] = {}
+    for fund_name, fund_result in results.fund_results.items():
+        value = getattr(fund_result, attribute, None)
+        if value:
+            payload[fund_name] = value
+    return payload
+
+
 def build_nav_reconciliation_reports(
-    results: ProcessingResults,
-    report_date: date | datetime | str,
-    output_dir: str,
+    results: ProcessingResults | None = None,
+    report_date: date | datetime | str = None,
+    output_dir: str = "",
     *,
     create_pdf: bool = True,
-) -> Optional[GeneratedNAVReconciliationReport]:
-    """Build NAV reconciliation Excel/PDF outputs from processed results."""
+    holdings_results: Mapping[str, Any] | None = None,
+    nav_results: Mapping[str, Any] | None = None,
+    compliance_results: Mapping[str, Any] | None = None,
+) -> Optional[GeneratedReconciliationArtefacts]:
+    """Build holdings/NAV reconciliation artefacts using provided payloads."""
 
-    nav_payload = {
-        fund_name: fund_result.nav_results
-        for fund_name, fund_result in results.fund_results.items()
-        if fund_result.nav_results
-    }
+    derived_holdings: Mapping[str, Any] = holdings_results or _extract_results(results, "reconciliation_results")
+    derived_nav: Mapping[str, Any] = nav_results or _extract_results(results, "nav_results")
+    derived_compliance: Mapping[str, Any] = compliance_results or _extract_results(results, "compliance_results")
 
-    if not nav_payload:
+    if not derived_holdings and not derived_nav:
         return None
 
-    return generate_nav_reconciliation_reports(
-        nav_payload,
-        report_date,
-        output_dir,
-        create_pdf=create_pdf,
+    holdings_report: Optional[GeneratedReconciliationReport] = None
+    if derived_holdings:
+        holdings_report = generate_reconciliation_reports(
+            derived_holdings,
+            report_date,
+            output_dir,
+            create_pdf=create_pdf,
+        )
+
+    nav_report: Optional[GeneratedNAVReconciliationReport] = None
+    if derived_nav:
+        nav_report = generate_nav_reconciliation_reports(
+            derived_nav,
+            report_date,
+            output_dir,
+            create_pdf=create_pdf,
+        )
+
+    combined_pdf: Optional[str] = None
+    if create_pdf:
+        combined_pdf = generate_reconciliation_summary_pdf(
+            derived_holdings,
+            derived_nav,
+            report_date,
+            output_dir,
+        )
+
+    full_summary_pdf: Optional[str] = None
+    if create_pdf:
+        full_summary_pdf = generate_daily_operations_pdf(
+            derived_compliance,
+            derived_holdings,
+            derived_nav,
+            report_date,
+            output_dir,
+        )
+
+    return GeneratedReconciliationArtefacts(
+        holdings=holdings_report,
+        nav=nav_report,
+        combined_reconciliation_pdf=combined_pdf,
+        full_summary_pdf=full_summary_pdf,
     )

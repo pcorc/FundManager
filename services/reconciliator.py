@@ -162,8 +162,39 @@ class Reconciliator:
         df_crrd = self.fund.cr_rd_data
 
         # Set quantities based on analysis type
-        df_oms['quantity'] = self._get_quantity_column(df_oms)
-        df_oms1['quantity'] = self._get_quantity_column(df_oms1)
+        df_oms['_vest_quantity'] = self._get_quantity_column(df_oms)
+        df_oms1['_vest_quantity'] = self._get_quantity_column(df_oms1)
+
+        if 'shares_cust' not in df_cust.columns:
+            for candidate in [
+                'quantity',
+                'shares',
+                'share_qty',
+                'position',
+                'qty',
+            ]:
+                if candidate in df_cust.columns:
+                    df_cust['shares_cust'] = df_cust[candidate]
+                    break
+            else:
+                df_cust['shares_cust'] = pd.Series(dtype=float)
+
+        if 'shares_cust' not in df_cust1.columns:
+            for candidate in [
+                'quantity',
+                'shares',
+                'share_qty',
+                'position',
+                'qty',
+            ]:
+                if candidate in df_cust1.columns:
+                    df_cust1['shares_cust'] = df_cust1[candidate]
+                    break
+            else:
+                df_cust1['shares_cust'] = pd.Series(dtype=float)
+
+        df_cust['shares_cust'] = self._coerce_numeric_series(df_cust.get('shares_cust', pd.Series(dtype=float)))
+        df_cust1['shares_cust'] = self._coerce_numeric_series(df_cust1.get('shares_cust', pd.Series(dtype=float)))
 
         if 'equity_ticker' not in df_oms.columns or 'equity_ticker' not in df_cust.columns:
             self.results['custodian_equity'] = ReconciliationResult(
@@ -200,9 +231,19 @@ class Reconciliator:
             df['cr_rd'] = 0
 
         # Adjusted shares & base discrepancy
+        df['vest_quantity'] = self._coerce_numeric_series(
+            df.get('_vest_quantity')
+            if '_vest_quantity' in df.columns
+            else df.get('quantity_vest', df.get('quantity', pd.Series(0.0, index=df.index)))
+        )
+        df['shares_cust'] = self._coerce_numeric_series(df.get('shares_cust', pd.Series(0.0, index=df.index, dtype=float)))
         df['adjusted_cust_shares'] = df['shares_cust'].fillna(0) + df['qty_sign_adj']
         df['final_adjusted_shares'] = df['adjusted_cust_shares'] + df['cr_rd']
-        df['final_discrepancy'] = df['quantity'].fillna(0) - df['final_adjusted_shares']
+        df['final_discrepancy'] = df['vest_quantity'] - df['final_adjusted_shares']
+        df['quantity'] = df['vest_quantity']
+
+        if '_vest_quantity' in df.columns:
+            df.drop(columns=['_vest_quantity'], inplace=True)
 
         # Identify mismatches
         mask_missing = df['in_vest'] != df['in_cust']
@@ -404,6 +445,47 @@ class Reconciliator:
                                  f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
                                  row['price_diff'])
 
+    def _emit_option_summary_rows(
+        self,
+        df_issues: pd.DataFrame,
+        price_disc_T: pd.DataFrame,
+        price_disc_T1: pd.DataFrame,
+    ) -> None:
+        """Emit summary rows for option reconciliation results."""
+
+        if isinstance(df_issues, pd.DataFrame):
+            for _, row in df_issues.iterrows():
+                dtype = row.get('discrepancy_type', 'Unknown')
+                desc = row.get('breakdown', '')
+                discrepancy_value = row.get('trade_discrepancy')
+                if discrepancy_value is None:
+                    discrepancy_value = row.get('discrepancy', 'N/A')
+                value = discrepancy_value if dtype == 'Quantity Mismatch' else 'N/A'
+                self.add_summary_row(
+                    f"Custodian Option: {dtype}",
+                    row.get('optticker', ''),
+                    desc,
+                    value,
+                )
+
+        if isinstance(price_disc_T, pd.DataFrame):
+            for _, row in price_disc_T.iterrows():
+                self.add_summary_row(
+                    "Custodian Option Price (T)",
+                    row.get('optticker', ''),
+                    f"{row.get('price_vest', 0):.2f} vs {row.get('price_cust', 0):.2f}",
+                    row.get('price_diff', 'N/A'),
+                )
+
+        if isinstance(price_disc_T1, pd.DataFrame):
+            for _, row in price_disc_T1.iterrows():
+                self.add_summary_row(
+                    "Custodian Option Price (T-1)",
+                    row.get('optticker', ''),
+                    f"{row.get('price_vest', 0):.2f} vs {row.get('price_cust', 0):.2f}",
+                    row.get('price_diff', 'N/A'),
+                )
+
     def reconcile_custodian_option(self):
         """Reconcile custodian options using Fund object data"""
         # Get data from Fund object
@@ -598,7 +680,23 @@ class Reconciliator:
             return
 
         # Set quantities for T-1
-        df_oms1['quantity'] = self._get_quantity_column(df_oms1)
+        df_oms1['_vest_quantity'] = self._get_quantity_column(df_oms1)
+
+        if 'shares_cust' not in df_cust1.columns:
+            for candidate in [
+                'quantity',
+                'shares',
+                'share_qty',
+                'position',
+                'qty',
+            ]:
+                if candidate in df_cust1.columns:
+                    df_cust1['shares_cust'] = df_cust1[candidate]
+                    break
+            else:
+                df_cust1['shares_cust'] = pd.Series(dtype=float)
+
+        df_cust1['shares_cust'] = self._coerce_numeric_series(df_cust1.get('shares_cust', pd.Series(dtype=float)))
 
         # Merge T-1 data
         df1 = pd.merge(df_oms1, df_cust1, on='equity_ticker', how='outer',
@@ -608,7 +706,18 @@ class Reconciliator:
         df1.drop(columns=['_merge'], inplace=True)
 
         # Calculate T-1 discrepancies (no trades/corporate actions for T-1)
-        df1['discrepancy'] = df1['quantity'].fillna(0) - df1.get('shares_cust', 0).fillna(0)
+        # Calculate T-1 discrepancies (no trades/corporate actions for T-1)
+        df1['vest_quantity'] = self._coerce_numeric_series(
+            df1.get('_vest_quantity')
+            if '_vest_quantity' in df1.columns
+            else df1.get('quantity_vest', df1.get('quantity', pd.Series(0.0, index=df1.index)))
+        )
+        df1['shares_cust'] = self._coerce_numeric_series(df1.get('shares_cust', pd.Series(0.0, index=df1.index, dtype=float)))
+        df1['discrepancy'] = df1['vest_quantity'] - df1['shares_cust']
+        df1['quantity'] = df1['vest_quantity']
+
+        if '_vest_quantity' in df1.columns:
+            df1.drop(columns=['_vest_quantity'], inplace=True)
 
         # Identify T-1 mismatches
         mask_missing_t1 = df1['in_vest'] != df1['in_cust']

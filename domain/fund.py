@@ -372,6 +372,17 @@ class Fund:
         dividends = getattr(self.data, "dividends", 0.0)
         return self._extract_numeric_value(dividends, ["dividend", "dividends", "amount", "value"])
 
+    def get_expenses(self, analysis_date: str) -> float:
+        """Return expenses for the requested analysis date."""
+
+        current = getattr(self.data, "current", None)
+        if current is None:
+            return 0.0
+        try:
+            return float(getattr(current, "expenses", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
     def get_distributions(self, analysis_date: str) -> float:
         """Return distributions paid on the analysis date."""
 
@@ -481,3 +492,47 @@ class Fund:
             return self._calculate_equity_gl(current_date, prior_date)
         elif asset_class == 'options':
             return self._calculate_options_gl(current_date, prior_date)
+        elif asset_class == 'flex_options':
+            return self._calculate_flex_options_gl(current_date, prior_date)
+        elif asset_class == 'treasury':
+            return self._calculate_treasury_gl(current_date, prior_date)
+        return GainLossResult()
+
+    @staticmethod
+    def _build_gain_loss_result(current_value, previous_value) -> GainLossResult:
+        try:
+            current_float = float(current_value or 0.0)
+        except (TypeError, ValueError):
+            current_float = 0.0
+
+        try:
+            previous_float = float(previous_value or 0.0)
+        except (TypeError, ValueError):
+            previous_float = 0.0
+
+        difference = current_float - previous_float
+        return GainLossResult(raw_gl=difference, adjusted_gl=difference)
+
+    def _calculate_equity_gl(self, current_date: str, prior_date: str) -> GainLossResult:
+        current_snapshot = getattr(self.data, "current", None)
+        previous_snapshot = getattr(self.data, "previous", None)
+        current_value = getattr(current_snapshot, "total_equity_value", 0.0) if current_snapshot else 0.0
+        previous_value = getattr(previous_snapshot, "total_equity_value", 0.0) if previous_snapshot else 0.0
+        return self._build_gain_loss_result(current_value, previous_value)
+
+    def _calculate_options_gl(self, current_date: str, prior_date: str) -> GainLossResult:
+        current_snapshot = getattr(self.data, "current", None)
+        previous_snapshot = getattr(self.data, "previous", None)
+        current_value = getattr(current_snapshot, "total_option_value", 0.0) if current_snapshot else 0.0
+        previous_value = getattr(previous_snapshot, "total_option_value", 0.0) if previous_snapshot else 0.0
+        return self._build_gain_loss_result(current_value, previous_value)
+
+    def _calculate_flex_options_gl(self, current_date: str, prior_date: str) -> GainLossResult:
+        return GainLossResult()
+
+    def _calculate_treasury_gl(self, current_date: str, prior_date: str) -> GainLossResult:
+        current_snapshot = getattr(self.data, "current", None)
+        previous_snapshot = getattr(self.data, "previous", None)
+        current_value = getattr(current_snapshot, "total_treasury_value", 0.0) if current_snapshot else 0.0
+        previous_value = getattr(previous_snapshot, "total_treasury_value", 0.0) if previous_snapshot else 0.0
+        return self._build_gain_loss_result(current_value, previous_value)

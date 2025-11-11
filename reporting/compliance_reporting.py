@@ -1485,6 +1485,7 @@ class ComplianceReportPDF(BaseReportPDF):
         metrics: Iterable[Tuple[str, Any]],
         *,
         footnote_key: Optional[str] = None,
+        skip_fail_highlight_labels: Optional[Iterable[str]] = None,
     ) -> None:
         metrics = list(metrics)
         if not metrics:
