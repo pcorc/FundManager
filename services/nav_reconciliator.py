@@ -2,49 +2,90 @@
 from __future__ import annotations
 from typing import Dict
 from domain.fund import Fund, GainLossResult
+# import logging
+# from utilities.logger import setup_logger
+# import datetime
+from config.fund_definitions import DIVERSIFIED_FUNDS, PRIVATE_FUNDS, CLOSED_END_FUNDS
+
 
 class NAVReconciliator:
-    """Lightweight coordinator for NAV reconciliation."""
-
-    def __init__(self, fund: Fund, analysis_date: str, prior_date: str) -> None:
-        self.fund = fund
+    def __init__(self, session, fund_name: str, fund_data: dict, analysis_date, prior_date,
+                 analysis_type=None, fund=None, socgen_custodian=None):
+        self.session = session
+        self.fund_name = fund_name
+        self.fund_data = fund_data
+        self.holdings_price_breaks = self.fund_data.get("holdings_price_breaks", {})
         self.analysis_date = analysis_date
         self.prior_date = prior_date
-        self.results: Dict[str, Dict] = {}
+        self.analysis_type = analysis_type
+        # Fix: Initialize logger properly
+        self.logger = logging.getLogger(f"NAVReconciliator_{fund_name}")
+        self.results = {}
+        self.summary = {}
+        self.fund = fund
+        self.socgen_custodian = socgen_custodian
 
-    def run_nav_reconciliation(self) -> Dict[str, Dict]:
-        """Compute expected NAV using fund-level data and return the breakdown."""
-        equity_gl = self.fund.calculate_gain_loss(self.analysis_date, self.prior_date, "equity")
-        options_gl = self.fund.calculate_gain_loss(self.analysis_date, self.prior_date, "options")
-        flex_gl = self.fund.calculate_gain_loss(self.analysis_date, self.prior_date, "flex_options")
-        treasury_gl = self.fund.calculate_gain_loss(self.analysis_date, self.prior_date, "treasury")
+    def run_nav_reconciliation(self):
+        """Main reconciliation orchestrator - with special handling for assignment/expiration days"""
+        self.logger.info(f"Starting NAV reconciliation for {self.fund_name}")
 
-        dividends = self.fund.get_dividends(self.analysis_date)
-        expenses = self.fund.get_expenses(self.analysis_date)
-        distributions = self.fund.get_distributions(self.analysis_date)
-        flows_adjustment = self.fund.get_flows_adjustment(self.analysis_date, self.prior_date)
+        # 2. Check if this is an option settlement/assignment date FIRST
+        is_assignment_day = self._is_option_settlement_date(self.analysis_date)
 
-        summary = self._calculate_expected_nav(
-            equity_gl,
-            options_gl,
-            flex_gl,
-            treasury_gl,
-            dividends,
-            expenses,
-            distributions,
-            flows_adjustment,
+        # 3. Calculate G/L by asset type
+        equity_gl_raw, equity_gl_adj = self._calculate_equity_gl()
+
+        # 4. Handle options differently based on whether it's an assignment day
+        assignment_gl = 0.0
+        option_gl_raw = 0.0
+        option_gl_adj = 0.0
+
+        if is_assignment_day:
+            # Calculate assignment P&L for expired options
+            assignment_gl = self.process_assignments(self.prior_date)
+            # Calculate gain/loss on new options rolled into
+            rolled_option_gl = self._calculate_rolled_option_gl()
+            option_gl_raw = rolled_option_gl
+            option_gl_adj = option_gl_raw
+        else:
+            # Normal day - calculate option G/L the standard way
+            option_gl_raw, option_gl_adj = self._calculate_option_gl()
+
+        # 5. Calculate other asset types
+        flex_gl_raw, flex_gl_adj = self._calculate_flex_option_gl()
+        treasury_gl_raw, treasury_gl_adj = self._calculate_treasury_gl()
+
+        # 6. Calculate other components
+        dividends = self._calculate_dividends()
+        expenses = self._calculate_expenses()
+        adjusted_beg_tna = self._calculate_t1_flows_adjustment()
+        distributions = self._calculate_distributions()
+
+        # 7. Calculate expected vs actual NAV
+        results = self._calculate_nav_comparison(
+            equity_gl_adj, option_gl_adj, flex_gl_adj,
+            treasury_gl_adj, assignment_gl,
+            dividends, expenses, distributions, adjusted_beg_tna
         )
 
-        self.results = {
-            "summary": summary,
-            "detailed_calculations": {
-                "equity": equity_gl.details,
-                "options": options_gl.details,
-                "flex_options": flex_gl.details,
-                "treasury": treasury_gl.details,
-            },
+        # 8. CRITICAL: Add detailed calculations to results
+        results['detailed_calculations'] = {
+            'equity_details': getattr(self, 'equity_details', pd.DataFrame()),
+            'option_details': getattr(self, 'option_details', pd.DataFrame()),
+            'flex_details': getattr(self, 'flex_details', pd.DataFrame()),
+            'treasury_details': getattr(self, 'treasury_details', pd.DataFrame()),
         }
-        return self.results
+
+        # Add raw data for debugging
+        results['raw_equity'] = self.fund_data.get('equity_holdings', pd.DataFrame())
+        results['raw_option'] = self.fund_data.get('options_holdings', pd.DataFrame())
+
+        # 9. Store results
+        self.results = results
+        self.summary = self._build_summary(results)
+
+        self._log_completion(results)
+        return self.results, self.summary
 
     def _calculate_expected_nav(
         self,

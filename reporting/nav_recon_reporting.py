@@ -87,171 +87,494 @@ class NAVReconciliationExcelReport:
         workbook.save(self.output_path)
 
     # ------------------------------------------------------------------
-    def _create_fund_sheet(
-        self,
-        workbook: Workbook,
-        fund_name: str,
-        payload: Mapping[str, Any],
-    ) -> None:
-        sheet_name = self._unique_sheet_name(fund_name)
-        worksheet = workbook.create_sheet(sheet_name)
+    # Key changes needed in NAVReconciliationReport class
 
-        summary = payload.get("summary", {}) or {}
-        details = payload.get("details", {}) or {}
+    def _create_fund_sheet(self, wb, fund_name, nav_data, date_str):
+        """Create detailed sheet for a fund with formulas."""
+        ws = wb.create_sheet(fund_name[:31])  # Excel sheet names limited to 31 chars
 
-        worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=8)
-        title_cell = worksheet.cell(row=1, column=1, value=f"{fund_name} - NAV Reconciliation")
-        title_cell.font = self.title_font
-        title_cell.alignment = Alignment(horizontal="center")
+        # Title
+        ws.merge_cells('A1:C1')
+        ws['A1'] = f"{fund_name} - NAV Reconciliation - {date_str}"
+        ws['A1'].font = self.title_font
+        ws['A1'].alignment = Alignment(horizontal='center')
 
-        # Predetermine summary row layout
-        prior_nav_row = 3
-        dividends_row = prior_nav_row + 1
-        expenses_row = prior_nav_row + 2
-        section_header_row = prior_nav_row + 3
-        component_start_row = section_header_row + 1
+        # SECTION 1: Summary Calculations with formulas
+        row = 3
+        ws.cell(row=row, column=1, value="NAV CALCULATION SUMMARY").font = self.header_font
+        row += 2
 
-        component_rows: Dict[str, int] = {}
-        for index, (component_key, _) in enumerate(self.COMPONENTS):
-            component_rows[component_key] = component_start_row + index
+        # Beginning TNA
+        ws.cell(row=row, column=1, value="Beginning TNA (T-1)")
+        ws.cell(row=row, column=3, value=nav_data.get('Beginning TNA', 0)).number_format = self.number_format
+        beg_tna_row = row
+        row += 1
 
-        net_gain_row = component_start_row + len(self.COMPONENTS)
-        distributions_row = net_gain_row + 2
-        flow_row = distributions_row + 1
-        expected_nav_row = flow_row + 1
-        cust_nav_row = expected_nav_row + 1
-        variance_row = cust_nav_row + 1
-        detail_start_row = variance_row + 3
+        # Adjusted Beginning TNA
+        ws.cell(row=row, column=1, value="Adjusted Beginning TNA")
+        ws.cell(row=row, column=3, value=nav_data.get('Adjusted Beginning TNA', nav_data.get('Beginning TNA', 0))).number_format = self.number_format
+        adj_beg_tna_row = row
+        row += 2
 
-        # Build detail sections first to capture total cells
-        component_totals: Dict[str, Dict[str, Any]] = {}
-        next_row = detail_start_row
-        for component_key, display_name in self.COMPONENTS:
-            section_info = self._add_component_detail_section(
-                worksheet,
-                next_row,
-                display_name,
-                ensure_dataframe(details.get(component_key)),
-            )
-            component_totals[component_key] = section_info
-            next_row = section_info["end_row"] + 2
+        # Gain/Loss Components
+        ws.cell(row=row, column=1, value="Gain/Loss Components:").font = self.subheader_font
+        row += 1
 
-        # Summary labels and formulas
-        self._write_summary_row(
-            worksheet,
-            prior_nav_row,
-            "Beginning NAV (T-1)",
-            self._coerce_float(summary.get("prior_nav")),
-            number_format=self.currency_format,
-        )
+        # Store starting row for components
+        summary_components_row = row
 
-        self._write_summary_row(
-            worksheet,
-            dividends_row,
-            "Dividends",
-            self._coerce_float(summary.get("dividends")),
-            number_format=self.currency_format,
-        )
+        # Define component rows (we'll conditionally add them)
+        components_to_add = []
 
-        self._write_summary_row(
-            worksheet,
-            expenses_row,
-            "Expenses",
-            self._coerce_float(summary.get("expenses")),
-            number_format=self.currency_format,
-        )
+        # Always add equity
+        components_to_add.append({
+            'name': 'Equity G/L',
+            'value': nav_data.get('Equity G/L', 0),
+            'adjusted_name': 'Equity G/L (Adjusted)',
+            'adjusted_value': nav_data.get('Equity G/L Adj', nav_data.get('Equity G/L', 0))
+        })
 
-        header_cell = worksheet.cell(row=section_header_row, column=1, value="Gain/Loss by Asset Class")
-        header_cell.font = self.subheader_font
+        # Add option if non-zero
+        option_gl = nav_data.get('Option G/L', 0)
+        if abs(option_gl) > 0.01:
+            components_to_add.append({
+                'name': 'Option G/L',
+                'value': option_gl,
+                'adjusted_name': 'Option G/L (Adjusted)',
+                'adjusted_value': nav_data.get('Option G/L Adj', option_gl)
+            })
 
-        component_cells: list[str] = []
-        for component_key, display_name in self.COMPONENTS:
-            row_number = component_rows[component_key]
-            cell = worksheet.cell(row=row_number, column=1, value=f"  {display_name} G/L")
-            cell.font = self.body_font
-            total_cell = component_totals.get(component_key, {}).get("adjusted_total")
-            value_cell = worksheet.cell(row=row_number, column=3)
-            if total_cell:
-                value_cell.value = f"={total_cell}"
-            else:
-                value_cell.value = 0.0
-            value_cell.number_format = self.currency_format
-            component_cells.append(f"C{row_number}")
+        # Add flex option if non-zero
+        flex_gl = nav_data.get('Flex Option G/L', 0)
+        if abs(flex_gl) > 0.01:
+            components_to_add.append({
+                'name': 'Flex Option G/L',
+                'value': flex_gl,
+                'adjusted_name': 'Flex Option G/L (Adjusted)',
+                'adjusted_value': nav_data.get('Flex Option G/L Adj', flex_gl)
+            })
 
-        net_gain_cell = worksheet.cell(row=net_gain_row, column=1, value="Net Gain/Loss")
-        net_gain_cell.font = self.subheader_font
-        net_gain_value_cell = worksheet.cell(row=net_gain_row, column=3)
-        if component_cells:
-            net_gain_value_cell.value = f"={' + '.join(component_cells)}" if len(component_cells) > 1 else f"={component_cells[0]}"
+        # Add treasury if non-zero
+        treasury_gl = nav_data.get('Treasury G/L', 0)
+        if abs(treasury_gl) > 0.01:
+            components_to_add.append({
+                'name': 'Treasury G/L',
+                'value': treasury_gl,
+                'adjusted_name': None,  # Treasury doesn't have adjusted version
+                'adjusted_value': None
+            })
+
+        # Add assignment if non-zero
+        assignment_gl = nav_data.get('Assignment G/L', 0)
+        if abs(assignment_gl) > 0.01:
+            components_to_add.append({
+                'name': 'Assignment G/L',
+                'value': assignment_gl,
+                'adjusted_name': None,
+                'adjusted_value': None
+            })
+
+        # Add other if non-zero
+        other = nav_data.get('Other', 0)
+        if abs(other) > 0.01:
+            components_to_add.append({
+                'name': 'Other',
+                'value': other,
+                'adjusted_name': None,
+                'adjusted_value': None
+            })
+
+        # Now write the components
+        component_rows = {}
+        for comp in components_to_add:
+            ws.cell(row=row, column=1, value=f"  {comp['name']}")
+            ws.cell(row=row, column=3, value=comp['value']).number_format = self.number_format
+            component_rows[comp['name']] = row
+            row += 1
+
+            if comp.get('adjusted_name'):
+                ws.cell(row=row, column=1, value=f"  {comp['adjusted_name']}")
+                ws.cell(row=row, column=3, value=comp['adjusted_value']).number_format = self.number_format
+                component_rows[comp['adjusted_name']] = row
+                row += 1
+
+        row += 1  # Skip a row
+
+        # Expenses (always show)
+        ws.cell(row=row, column=1, value="Expenses")
+        expenses_value = -abs(nav_data.get('Accruals', 0))  # Ensure negative
+        ws.cell(row=row, column=3, value=expenses_value).number_format = self.number_format
+        expenses_row = row
+        row += 1
+
+        # Dividends (show if non-zero)
+        dividends = nav_data.get('Dividends', 0)
+        if abs(dividends) > 0.01:
+            ws.cell(row=row, column=1, value="Dividends")
+            ws.cell(row=row, column=3, value=dividends).number_format = self.number_format
+            dividends_row = row
+            row += 1
+
+        # Distributions (show if non-zero)
+        distributions = nav_data.get('Distributions', 0)
+        if abs(distributions) > 0.01:
+            ws.cell(row=row, column=1, value="Distributions")
+            ws.cell(row=row, column=3, value=-abs(distributions)).number_format = self.number_format
+            distributions_row = row
+            row += 1
+
+        row += 1  # Skip a row
+
+        # Expected TNA
+        ws.cell(row=row, column=1, value="Expected TNA").font = self.subheader_font
+        ws.cell(row=row, column=3, value=nav_data.get('Expected TNA', 0)).number_format = self.number_format
+        expected_tna_row = row
+        row += 1
+
+        # Custodian TNA
+        ws.cell(row=row, column=1, value="Custodian TNA").font = self.subheader_font
+        ws.cell(row=row, column=3, value=nav_data.get('Custodian TNA', 0)).number_format = self.number_format
+        cust_tna_row = row
+        row += 1
+
+        # TNA Difference
+        ws.cell(row=row, column=1, value="TNA Difference")
+        ws.cell(row=row, column=3, value=nav_data.get('TNA Diff ($)', 0)).number_format = self.number_format
+        tna_diff_row = row
+        row += 2
+
+        # Shares Outstanding
+        ws.cell(row=row, column=1, value="Shares Outstanding")
+        ws.cell(row=row, column=3, value=nav_data.get('Shares Outstanding', 0)).number_format = '#,##0'
+        shares_row = row
+        row += 2
+
+        # Expected NAV
+        ws.cell(row=row, column=1, value="Expected NAV").font = self.subheader_font
+        ws.cell(row=row, column=3, value=nav_data.get('Expected NAV', 0)).number_format = self.number_format_4
+        expected_nav_row = row
+        row += 1
+
+        # Custodian NAV
+        ws.cell(row=row, column=1, value="Custodian NAV").font = self.subheader_font
+        ws.cell(row=row, column=3, value=nav_data.get('Custodian NAV', 0)).number_format = self.number_format_4
+        cust_nav_row = row
+        row += 1
+
+        # NAV Difference
+        ws.cell(row=row, column=1, value="NAV Difference")
+        ws.cell(row=row, column=3, value=nav_data.get('NAV Diff ($)', 0)).number_format = self.number_format_4
+        nav_diff_row = row
+        row += 2
+
+        # NAV Good indicators
+        ws.cell(row=row, column=1, value="NAV Good (2 decimal)")
+        nav_good_2 = nav_data.get('NAV Good (2 Digit)', False)
+        ws.cell(row=row, column=3, value='PASS' if nav_good_2 else 'FAIL')
+        if nav_good_2:
+            ws.cell(row=row, column=3).fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
         else:
-            net_gain_value_cell.value = self._coerce_float(summary.get("net_gain"))
-        net_gain_value_cell.number_format = self.currency_format
+            ws.cell(row=row, column=3).fill = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")
+        row += 1
 
-        worksheet.cell(row=net_gain_row + 1, column=1)  # spacer row for readability
+        ws.cell(row=row, column=1, value="NAV Good (4 decimal)")
+        nav_good_4 = nav_data.get('NAV Good (4 Digit)', False)
+        ws.cell(row=row, column=3, value='PASS' if nav_good_4 else 'FAIL')
+        if nav_good_4:
+            ws.cell(row=row, column=3).fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
+        else:
+            ws.cell(row=row, column=3).fill = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")
 
-        self._write_summary_row(
-            worksheet,
-            distributions_row,
-            "Distributions",
-            self._coerce_float(summary.get("distributions")),
-            number_format=self.currency_format,
-        )
+        # Add detail sections
+        detail_start_row = row + 5
 
-        self._write_summary_row(
-            worksheet,
-            flow_row,
-            "Flow Adjustment",
-            self._coerce_float(summary.get("flows_adjustment")),
-            number_format=self.currency_format,
-        )
+        # Get detailed calculations from nav_data
+        detailed_calcs = nav_data.get('detailed_calculations', {})
 
-        expected_nav_cell = worksheet.cell(row=expected_nav_row, column=1, value="Expected NAV")
-        expected_nav_cell.font = self.subheader_font
-        expected_nav_value = worksheet.cell(row=expected_nav_row, column=3)
-        expected_nav_value.value = (
-            f"=C{prior_nav_row}+C{net_gain_row}+C{dividends_row}-C{expenses_row}-C{distributions_row}+C{flow_row}"
-        )
-        expected_nav_value.number_format = self.nav_format
+        # Add equity details if available
+        equity_details = detailed_calcs.get('equity_details', pd.DataFrame())
+        if not equity_details.empty:
+            self._add_equity_details_section(ws, detail_start_row, 1, equity_details)
+            detail_start_row = self._get_last_row(ws) + 3
 
-        self._write_summary_row(
-            worksheet,
-            cust_nav_row,
-            "Custodian NAV",
-            self._coerce_float(summary.get("current_nav")),
-            number_format=self.nav_format,
-            bold=True,
-        )
+        # Add option details if available and non-zero
+        option_details = detailed_calcs.get('option_details', pd.DataFrame())
+        if not option_details.empty:
+            self._add_option_details_section(ws, detail_start_row, 1, option_details)
+            detail_start_row = self._get_last_row(ws) + 3
 
-        variance_cell = worksheet.cell(row=variance_row, column=1, value="Variance")
-        variance_cell.font = self.subheader_font
-        variance_value = worksheet.cell(row=variance_row, column=3)
-        variance_value.value = f"=C{cust_nav_row}-C{expected_nav_row}"
-        variance_value.number_format = self.nav_format
+        # Add flex option details if available and non-zero
+        flex_details = detailed_calcs.get('flex_details', pd.DataFrame())
+        if not flex_details.empty:
+            self._add_flex_details_section(ws, detail_start_row, 1, flex_details)
+            detail_start_row = self._get_last_row(ws) + 3
 
-        # Store references for the summary worksheet
-        cell_refs = {
-            "sheet_name": sheet_name,
-            "prior_nav": f"C{prior_nav_row}",
-            "dividends": f"C{dividends_row}",
-            "expenses": f"C{expenses_row}",
-            "distributions": f"C{distributions_row}",
-            "flow_adjustment": f"C{flow_row}",
-            "expected_nav": f"C{expected_nav_row}",
-            "cust_nav": f"C{cust_nav_row}",
-            "variance": f"C{variance_row}",
-            "net_gain": f"C{net_gain_row}",
-            "components": {
-                component_key: f"C{component_rows[component_key]}"
-                for component_key, _ in self.COMPONENTS
-            },
-        }
-        self._sheet_refs[fund_name] = cell_refs
-
-        # Formatting tweaks
+        # Auto-fit columns
         for col in range(1, 12):
-            worksheet.column_dimensions[get_column_letter(col)].width = 16
+            ws.column_dimensions[get_column_letter(col)].width = 12
 
-        worksheet.freeze_panes = f"A{detail_start_row}"
+        ws.freeze_panes = 'A4'
+
+    def _add_equity_details_section(self, ws, start_row, start_col, equity_details):
+        """Add equity details section showing only holdings with G/L."""
+        ws.cell(row=start_row, column=start_col, value="EQUITY GAIN/LOSS DETAIL").font = self.header_font
+
+        if equity_details.empty:
+            ws.cell(row=start_row + 2, column=start_col, value="No equity holdings")
+            return
+
+        # Headers
+        headers = [
+            'Ticker', 'Qty T-1', 'Qty T',
+            'Price T-1', 'Price T',
+            'G/L'
+        ]
+
+        header_row = start_row + 2
+        for i, header in enumerate(headers):
+            cell = ws.cell(row=header_row, column=start_col + i, value=header)
+            cell.font = self.subheader_font
+            cell.alignment = Alignment(horizontal='center')
+
+        # Data rows
+        data_row = header_row + 1
+        first_data_row = data_row
+
+        for _, row in equity_details.iterrows():
+            col = start_col
+
+            # Ticker
+            ws.cell(row=data_row, column=col, value=row.get('ticker', '')).alignment = Alignment(horizontal='left')
+            col += 1
+
+            # Quantities
+            ws.cell(row=data_row, column=col, value=row.get('quantity_t1', 0)).number_format = '#,##0'
+            col += 1
+            ws.cell(row=data_row, column=col, value=row.get('quantity_t', 0)).number_format = '#,##0'
+            col += 1
+
+            # Prices (use adjusted if available)
+            price_t1 = row.get('price_t1_adj', row.get('price_t1_raw', 0))
+            price_t = row.get('price_t_adj', row.get('price_t_raw', 0))
+
+            ws.cell(row=data_row, column=col, value=price_t1).number_format = self.number_format
+            col += 1
+            ws.cell(row=data_row, column=col, value=price_t).number_format = self.number_format
+            col += 1
+
+            # G/L
+            gl = row.get('gl_adjusted', row.get('gl', 0))
+            cell = ws.cell(row=data_row, column=col, value=gl)
+            cell.number_format = self.number_format
+
+            # Highlight negative G/L
+            if gl < 0:
+                cell.font = Font(color="FF0000")
+
+            data_row += 1
+
+        # Add total row
+        if data_row > first_data_row:
+            last_data_row = data_row - 1
+            total_row = data_row + 1
+
+            ws.cell(row=total_row, column=start_col, value="TOTAL").font = self.subheader_font
+
+            # Sum formula for G/L
+            gl_col = start_col + 5
+            total_formula = f"=SUM({get_column_letter(gl_col)}{first_data_row}:{get_column_letter(gl_col)}{last_data_row})"
+            ws.cell(row=total_row, column=gl_col, value=total_formula).number_format = self.number_format
+
+    def _add_option_details_section(self, ws, start_row, start_col, option_details):
+        """Add option details section showing only holdings with G/L."""
+        ws.cell(row=start_row, column=start_col, value="OPTION GAIN/LOSS DETAIL").font = self.header_font
+
+        if option_details.empty:
+            ws.cell(row=start_row + 2, column=start_col, value="No option holdings")
+            return
+
+        # Headers
+        headers = [
+            'Ticker', 'Qty T-1', 'Qty T',
+            'Price T-1', 'Price T',
+            'G/L'
+        ]
+
+        header_row = start_row + 2
+        for i, header in enumerate(headers):
+            cell = ws.cell(row=header_row, column=start_col + i, value=header)
+            cell.font = self.subheader_font
+            cell.alignment = Alignment(horizontal='center')
+
+        # Data rows
+        data_row = header_row + 1
+        first_data_row = data_row
+
+        for _, row in option_details.iterrows():
+            col = start_col
+
+            # Ticker
+            ws.cell(row=data_row, column=col, value=row.get('ticker', '')).alignment = Alignment(horizontal='left')
+            col += 1
+
+            # Quantities
+            ws.cell(row=data_row, column=col, value=row.get('quantity_t1', 0)).number_format = '#,##0'
+            col += 1
+            ws.cell(row=data_row, column=col, value=row.get('quantity_t', 0)).number_format = '#,##0'
+            col += 1
+
+            # Prices
+            price_t1 = row.get('price_t1_adj', row.get('price_t1_raw', 0))
+            price_t = row.get('price_t_adj', row.get('price_t_raw', 0))
+
+            ws.cell(row=data_row, column=col, value=price_t1).number_format = self.number_format
+            col += 1
+            ws.cell(row=data_row, column=col, value=price_t).number_format = self.number_format
+            col += 1
+
+            # G/L
+            gl = row.get('gl_adjusted', row.get('gl', 0))
+            cell = ws.cell(row=data_row, column=col, value=gl)
+            cell.number_format = self.number_format
+
+            # Highlight negative G/L
+            if gl < 0:
+                cell.font = Font(color="FF0000")
+
+            data_row += 1
+
+        # Add total row
+        if data_row > first_data_row:
+            last_data_row = data_row - 1
+            total_row = data_row + 1
+
+            ws.cell(row=total_row, column=start_col, value="TOTAL").font = self.subheader_font
+
+            # Sum formula for G/L
+            gl_col = start_col + 5
+            total_formula = f"=SUM({get_column_letter(gl_col)}{first_data_row}:{get_column_letter(gl_col)}{last_data_row})"
+            ws.cell(row=total_row, column=gl_col, value=total_formula).number_format = self.number_format
+
+    def _add_flex_details_section(self, ws, start_row, start_col, flex_details):
+        """Add flex option details section."""
+        ws.cell(row=start_row, column=start_col, value="FLEX OPTION GAIN/LOSS DETAIL").font = self.header_font
+
+        if flex_details.empty:
+            ws.cell(row=start_row + 2, column=start_col, value="No flex option holdings")
+            return
+
+        # Same structure as regular options
+        self._add_option_details_section(ws, start_row, start_col, flex_details)
+
+    def _get_last_row(self, ws):
+        """Get the last row with data in the worksheet."""
+        return ws.max_row
+
+    def _extract_equity_details(self, nav_data):
+        """Extract equity details from nav_data with fallback logic."""
+        # First try detailed_calculations - this is the primary source
+        if 'detailed_calculations' in nav_data:
+            detailed_calcs = nav_data['detailed_calculations']
+            if isinstance(detailed_calcs, dict) and 'equity_details' in detailed_calcs:
+                equity_df = detailed_calcs['equity_details']
+                if isinstance(equity_df, pd.DataFrame) and not equity_df.empty:
+                    return equity_df.to_dict('records')
+                elif isinstance(equity_df, list):
+                    return equity_df
+
+        # Fallback to raw_equity if detailed_calculations not available
+        if 'raw_equity' in nav_data:
+            raw_df = nav_data['raw_equity']
+            if isinstance(raw_df, pd.DataFrame) and not raw_df.empty:
+                # Convert raw data to expected format
+                details = []
+                for _, row in raw_df.iterrows():
+                    details.append({
+                        'ticker': row.get('equity_ticker', row.get('ticker', '')),
+                        'quantity_t1': row.get('quantity_t1', 0),
+                        'quantity_t': row.get('quantity_t', row.get('quantity', 0)),
+                        'price_t1_raw': row.get('price_t1', 0),
+                        'price_t_raw': row.get('price_t', 0),
+                        'price_t1_adj': row.get('price_t1_adj', row.get('price_t1', 0)),
+                        'price_t_adj': row.get('price_t_adj', row.get('price_t', 0))
+                    })
+                return details
+
+        return []
+
+    def _extract_option_details(self, nav_data):
+        """Extract option details (non-flex) from nav_data."""
+        # First try detailed_calculations
+        if 'detailed_calculations' in nav_data:
+            detailed_calcs = nav_data['detailed_calculations']
+            if isinstance(detailed_calcs, dict) and 'option_details' in detailed_calcs:
+                option_df = detailed_calcs['option_details']
+                if isinstance(option_df, pd.DataFrame) and not option_df.empty:
+                    return option_df.to_dict('records')
+                elif isinstance(option_df, list):
+                    return option_df
+
+        # Fallback to raw_option if detailed_calculations not available
+        if 'raw_option' in nav_data:
+            raw_df = nav_data['raw_option']
+            if isinstance(raw_df, pd.DataFrame) and not raw_df.empty:
+                # Filter out flex options
+                if 'optticker' in raw_df.columns:
+                    non_flex = raw_df[~raw_df['optticker'].str.contains('SPX|XSP', na=False)]
+                else:
+                    non_flex = raw_df
+
+                details = []
+                for _, row in non_flex.iterrows():
+                    details.append({
+                        'ticker': row.get('optticker', row.get('ticker', '')),
+                        'quantity_t1': row.get('quantity_t1', 0),
+                        'quantity_t': row.get('quantity_t', row.get('quantity', 0)),
+                        'price_t1_raw': row.get('price_t1', 0),
+                        'price_t_raw': row.get('price_t', 0),
+                        'price_t1_adj': row.get('price_t1_adj', row.get('price_t1', 0)),
+                        'price_t_adj': row.get('price_t_adj', row.get('price_t', 0))
+                    })
+                return details
+
+        return []
+
+    def _extract_flex_details(self, nav_data):
+        """Extract flex option details from nav_data."""
+        # First try detailed_calculations
+        if 'detailed_calculations' in nav_data:
+            detailed_calcs = nav_data['detailed_calculations']
+            if isinstance(detailed_calcs, dict) and 'flex_details' in detailed_calcs:
+                flex_df = detailed_calcs['flex_details']
+                if isinstance(flex_df, pd.DataFrame) and not flex_df.empty:
+                    return flex_df.to_dict('records')
+                elif isinstance(flex_df, list):
+                    return flex_df
+
+        # Fallback to raw_option filtered for flex
+        if 'raw_option' in nav_data:
+            raw_df = nav_data['raw_option']
+            if isinstance(raw_df, pd.DataFrame) and not raw_df.empty:
+                # Filter for flex options only
+                if 'optticker' in raw_df.columns:
+                    flex_only = raw_df[raw_df['optticker'].str.contains('SPX|XSP', na=False)]
+                else:
+                    flex_only = pd.DataFrame()
+
+                details = []
+                for _, row in flex_only.iterrows():
+                    details.append({
+                        'ticker': row.get('optticker', row.get('ticker', '')),
+                        'quantity_t1': row.get('quantity_t1', 0),
+                        'quantity_t': row.get('quantity_t', row.get('quantity', 0)),
+                        'price_t1_raw': row.get('price_t1', 0),
+                        'price_t_raw': row.get('price_t', 0),
+                        'price_t1_adj': row.get('price_t1_adj', row.get('price_t1', 0)),
+                        'price_t_adj': row.get('price_t_adj', row.get('price_t', 0))
+                    })
+                return details
+
+        return []
 
     # ------------------------------------------------------------------
     def _write_summary_row(
@@ -729,37 +1052,41 @@ class DailyOperationsSummaryPDF(BaseReportPDF):
         self.output()
 
 
-def generate_nav_reconciliation_reports(
-    results: Mapping[str, Any],
-    report_date: date | datetime | str,
-    output_dir: str,
-    *,
-    file_name_prefix: str = "nav_reconciliation_results",
-    create_pdf: bool = True,
-) -> GeneratedNAVReconciliationReport:
-    """Generate Excel and PDF NAV reconciliation reports."""
+def generate_nav_reconciliation_reports(reconciliation_results, date_str, excel_path):
+    """
+    Generate NAV reconciliation reports in Excel format.
 
-    normalized = normalize_nav_payload(results)
-    if not normalized:
-        return GeneratedNAVReconciliationReport(None, None)
+    Args:
+        reconciliation_results: Dict with structure {date_str: {fund_name: nav_results}}
+        date_str: Date string for the report
+        excel_path: Path where the Excel file will be saved
+    """
+    # Normalize the data structure for the report
+    normalized = reconciliation_results
 
-    date_str = normalize_report_date(report_date)
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
+    # Create a summary list (if needed)
+    recon_summary = []
+    for date, funds in reconciliation_results.items():
+        for fund_name, nav_data in funds.items():
+            if isinstance(nav_data, dict):
+                summary_item = {
+                    'fund': fund_name,
+                    'date': date,
+                    'nav_good_2': nav_data.get('NAV Good (2 Digit)', False),
+                    'nav_good_4': nav_data.get('NAV Good (4 Digit)', False),
+                    'nav_diff': nav_data.get('NAV Diff ($)', 0)
+                }
+                recon_summary.append(summary_item)
 
-    excel_path = output_path / f"{file_name_prefix}_{date_str}.xlsx"
-    pdf_path = output_path / f"{file_name_prefix}_{date_str}.pdf"
+    # Create the Excel report with all 4 required arguments
+    NAVReconciliationReport(
+        reconciliation_results=normalized,
+        recon_summary=recon_summary,
+        date=date_str,
+        file_path_excel=excel_path
+    )
 
-    NAVReconciliationExcelReport(normalized, date_str, excel_path)
-
-    pdf_result: Optional[str] = None
-    if create_pdf:
-        pdf = NAVReconciliationPDF(str(pdf_path), date_str, normalized)
-        pdf.render()
-        pdf_result = str(pdf_path)
-
-    return GeneratedNAVReconciliationReport(str(excel_path), pdf_result)
-
+    return excel_path
 
 def generate_reconciliation_summary_pdf(
     reconciliation_results: Mapping[str, Any],
