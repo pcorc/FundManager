@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any, Mapping, Optional
+from pathlib import Path
 
 from processing.fund_manager import ProcessingResults
 from reporting.nav_recon_reporting import (
@@ -22,7 +23,6 @@ from reporting.reconciliation_reporting import (
 @dataclass
 class GeneratedReconciliationArtefacts:
     """Bundle of holdings/NAV reconciliation outputs."""
-
     holdings: Optional[GeneratedReconciliationReport]
     nav: Optional[GeneratedNAVReconciliationReport]
     combined_reconciliation_pdf: Optional[str]
@@ -30,8 +30,8 @@ class GeneratedReconciliationArtefacts:
 
 
 def _extract_results(
-    results: ProcessingResults | None,
-    attribute: str,
+        results: ProcessingResults | None,
+        attribute: str,
 ) -> Mapping[str, Any]:
     if results is None:
         return {}
@@ -44,14 +44,14 @@ def _extract_results(
 
 
 def build_nav_reconciliation_reports(
-    results: ProcessingResults | None = None,
-    report_date: date | datetime | str = None,
-    output_dir: str = "",
-    *,
-    create_pdf: bool = True,
-    holdings_results: Mapping[str, Any] | None = None,
-    nav_results: Mapping[str, Any] | None = None,
-    compliance_results: Mapping[str, Any] | None = None,
+        results: ProcessingResults | None = None,
+        report_date: date | datetime | str = None,
+        output_dir: str = "",
+        *,
+        create_pdf: bool = True,
+        holdings_results: Mapping[str, Any] | None = None,
+        nav_results: Mapping[str, Any] | None = None,
+        compliance_results: Mapping[str, Any] | None = None,
 ) -> Optional[GeneratedReconciliationArtefacts]:
     """Build holdings/NAV reconciliation artefacts using provided payloads."""
 
@@ -73,11 +73,25 @@ def build_nav_reconciliation_reports(
 
     nav_report: Optional[GeneratedNAVReconciliationReport] = None
     if derived_nav:
-        nav_report = generate_nav_reconciliation_reports(
-            derived_nav,
-            report_date,
-            output_dir,
-            create_pdf=create_pdf,
+        # Build the Excel path
+        excel_path = str(Path(output_dir) / f"nav_reconciliation_{report_date}.xlsx")
+
+        # Call generate_nav_reconciliation_reports with correct signature
+        excel_output = generate_nav_reconciliation_reports(
+            derived_nav,  # reconciliation_results
+            str(report_date),  # date_str
+            excel_path  # excel_path
+        )
+
+        pdf_output = None
+        if create_pdf:
+            # Generate PDF if requested - this would be a separate function
+            # You might need to implement a PDF generation for NAV reports
+            pass
+
+        nav_report = GeneratedNAVReconciliationReport(
+            excel_path=excel_output,
+            pdf_path=pdf_output
         )
 
     combined_pdf: Optional[str] = None

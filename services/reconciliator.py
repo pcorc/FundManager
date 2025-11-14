@@ -28,11 +28,72 @@ class ReconciliationResult:
 class Reconciliator:
     def __init__(self, fund_name, fund_data, analysis_type=None):
         self.fund_name = fund_name
-        self.fund_data = fund_data  # CRITICAL: Store fund_data as instance attribute
+        self.fund_data = fund_data
         self.analysis_type = analysis_type
         self.results = {}
         self.logger = logging.getLogger(f"Reconciliator_{fund_name}")
         self.is_etf = fund_name not in PRIVATE_FUNDS and fund_name not in CLOSED_END_FUNDS
+        self.fund = fund_data.get('fund_object') if isinstance(fund_data, dict) else None
+        self.holdings_price_breaks = fund_data.get("holdings_price_breaks", {}) if isinstance(fund_data, dict) else {}
+        self.summary_rows = []  # Initialize summary_rows list
+        self.has_sg_equity = self._check_sg_equity()  # Add property check
+
+    def run_all_reconciliations(self):
+        """Run all reconciliations using Fund object data"""
+        recon_funcs = [
+            ("custodian_equity", self.reconcile_custodian_equity),
+            ("custodian_equity_t1", self.reconcile_custodian_equity_t1),
+            ("custodian_option", self.reconcile_custodian_option),
+            ("custodian_option_t1", self.reconcile_custodian_option_t1),
+            ("custodian_treasury", self.reconcile_custodian_treasury),  # ← ADD THIS
+            ("custodian_treasury_t1", self.reconcile_custodian_treasury_t1),  # ← ADD THIS
+            ("index_equity", self.reconcile_index_equity),
+        ]
+
+        # Only run SG if not end-of-day
+        if self.analysis_type != "eod":
+            recon_funcs.append(("sg_option", self.reconcile_sg_option))
+            if self.has_sg_equity:
+                recon_funcs.append(("sg_equity", self.reconcile_sg_equity))
+
+        for name, func in recon_funcs:
+            try:
+                func()
+            except Exception as e:
+                self.logger.error(f"Error in {name} reconciliation: {e}", exc_info=True)
+
+        self._build_equity_details()
+
+    def get_summary(self) -> Dict:
+        """Returns simplified counts without resolution tracking"""
+        summary = {}
+
+        recon_keys = {
+            "index_equity": ["holdings_discrepancies", "price_discrepancies_T", "price_discrepancies_T1"],
+            "custodian_equity": ["final_recon", "price_discrepancies_T", "price_discrepancies_T1"],
+            "custodian_equity_t1": ["final_recon"],
+            "custodian_option": ["final_recon", "regular_options", "flex_options",
+                                 "price_discrepancies_T", "price_discrepancies_T1"],
+            "custodian_option_t1": ["final_recon", "regular_options", "flex_options"],
+        }
+
+        if self.analysis_type != "eod":
+            recon_keys["sg_option"] = ["final_recon", "price_discrepancies"]
+            if self.has_sg_equity:
+                recon_keys["sg_equity"] = ["final_recon", "price_discrepancies"]
+
+        for recon_type, keys in recon_keys.items():
+            result = self.results.get(recon_type)
+            if result:
+                counts = {}
+                for k in keys:
+                    df = getattr(result, k, pd.DataFrame())
+                    counts[k] = len(df) if hasattr(df, "shape") else 0
+                summary[recon_type] = counts
+            else:
+                summary[recon_type] = {k: 0 for k in keys}
+
+        return summary
 
     def _set_internal_quantity_column(self, df_internal):
         """
@@ -233,9 +294,7 @@ class Reconciliator:
                 df2["gl_adj"] = (df2["price_t"] - df2.get("price_t1", 0)) * df2[qty_col] * multiplier
 
         return df2
-    # ------------------------------------------------------------------
-    # Snapshot helpers
-    # ------------------------------------------------------------------
+
     def _current_snapshot(self) -> FundSnapshot:
         snapshot = getattr(self.fund, "data", None)
         if snapshot is None or getattr(snapshot, "current", None) is None:
@@ -269,32 +328,6 @@ class Reconciliator:
             target = component
         frame = getattr(target, attribute, pd.DataFrame())
         return frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame()
-
-    def run_all_reconciliations(self):
-        """Run all reconciliations using Fund object data"""
-        recon_funcs = [
-            ("custodian_equity", self.reconcile_custodian_equity),
-            ("custodian_equity_t1", self.reconcile_custodian_equity_t1),
-            ("custodian_option", self.reconcile_custodian_option),
-            ("custodian_option_t1", self.reconcile_custodian_option_t1),
-            ("custodian_treasury", self.reconcile_custodian_treasury),  # ← ADD THIS
-            ("custodian_treasury_t1", self.reconcile_custodian_treasury_t1),  # ← ADD THIS
-            ("index_equity", self.reconcile_index_equity),
-        ]
-
-        # Only run SG if not end-of-day
-        if self.analysis_type != "eod":
-            recon_funcs.append(("sg_option", self.reconcile_sg_option))
-            if self.has_sg_equity:
-                recon_funcs.append(("sg_equity", self.reconcile_sg_equity))
-
-        for name, func in recon_funcs:
-            try:
-                func()
-            except Exception as e:
-                self.logger.error(f"Error in {name} reconciliation: {e}", exc_info=True)
-
-        self._build_equity_details()
 
     def _get_quantity_column(self, holdings_df: pd.DataFrame) -> pd.Series:
         """
@@ -458,13 +491,13 @@ class Reconciliator:
         # Combine T and T1 price discrepancies for backward compatibility
         price_combined = pd.concat([price_disc_T, price_disc_T1], ignore_index=True).drop_duplicates()
 
-        self.results['custodian_equity'] = {
-            'raw_recon': df.loc[mask_qty & (df['final_discrepancy'].abs() > 0.01)].reset_index(drop=True),
-            'final_recon': df_issues.reset_index(drop=True),
-            'price_discrepancies': price_combined.reset_index(drop=True),
-            'price_discrepancies_T': price_disc_T.reset_index(drop=True),
-            'price_discrepancies_T1': price_disc_T1.reset_index(drop=True),
-        }
+        self.results['custodian_equity'] = ReconciliationResult(
+            raw_recon=df.loc[mask_qty & (df['final_discrepancy'].abs() > 0.01)].reset_index(drop=True),
+            final_recon=df_issues.reset_index(drop=True),
+            price_discrepancies_T=price_disc_T.reset_index(drop=True),
+            price_discrepancies_T1=price_disc_T1.reset_index(drop=True),
+            merged_data=df.copy()
+        )
 
         # 9) emit summary rows
         for _, row in df_issues.iterrows():
@@ -586,46 +619,6 @@ class Reconciliator:
                                  f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
                                  row['price_diff'])
 
-    def _emit_option_summary_rows(
-        self,
-        df_issues: pd.DataFrame,
-        price_disc_T: pd.DataFrame,
-        price_disc_T1: pd.DataFrame,
-    ) -> None:
-        """Emit summary rows for option reconciliation results."""
-
-        if isinstance(df_issues, pd.DataFrame):
-            for _, row in df_issues.iterrows():
-                dtype = row.get('discrepancy_type', 'Unknown')
-                desc = row.get('breakdown', '')
-                discrepancy_value = row.get('trade_discrepancy')
-                if discrepancy_value is None:
-                    discrepancy_value = row.get('discrepancy', 'N/A')
-                value = discrepancy_value if dtype == 'Quantity Mismatch' else 'N/A'
-                self.add_summary_row(
-                    f"Custodian Option: {dtype}",
-                    row.get('optticker', ''),
-                    desc,
-                    value,
-                )
-
-        if isinstance(price_disc_T, pd.DataFrame):
-            for _, row in price_disc_T.iterrows():
-                self.add_summary_row(
-                    "Custodian Option Price (T)",
-                    row.get('optticker', ''),
-                    f"{row.get('price_vest', 0):.2f} vs {row.get('price_cust', 0):.2f}",
-                    row.get('price_diff', 'N/A'),
-                )
-
-        if isinstance(price_disc_T1, pd.DataFrame):
-            for _, row in price_disc_T1.iterrows():
-                self.add_summary_row(
-                    "Custodian Option Price (T-1)",
-                    row.get('optticker', ''),
-                    f"{row.get('price_vest', 0):.2f} vs {row.get('price_cust', 0):.2f}",
-                    row.get('price_diff', 'N/A'),
-                )
 
     def reconcile_custodian_option(self):
         """Reconcile custodian options using Fund object data"""
@@ -746,37 +739,6 @@ class Reconciliator:
             return price_discrepancies.reset_index(drop=True)
         return pd.DataFrame()
 
-    def get_summary(self) -> Dict:
-        """Returns simplified counts without resolution tracking"""
-        summary = {}
-
-        recon_keys = {
-            "index_equity": ["holdings_discrepancies", "price_discrepancies_T", "price_discrepancies_T1"],
-            "custodian_equity": ["final_recon", "price_discrepancies_T", "price_discrepancies_T1"],
-            "custodian_equity_t1": ["final_recon"],
-            "custodian_option": ["final_recon", "regular_options", "flex_options",
-                                 "price_discrepancies_T", "price_discrepancies_T1"],
-            "custodian_option_t1": ["final_recon", "regular_options", "flex_options"],
-        }
-
-        if self.analysis_type != "eod":
-            recon_keys["sg_option"] = ["final_recon", "price_discrepancies"]
-            if self.has_sg_equity:
-                recon_keys["sg_equity"] = ["final_recon", "price_discrepancies"]
-
-        for recon_type, keys in recon_keys.items():
-            result = self.results.get(recon_type)
-            if result:
-                counts = {}
-                for k in keys:
-                    df = getattr(result, k, pd.DataFrame())
-                    counts[k] = len(df) if hasattr(df, "shape") else 0
-                summary[recon_type] = counts
-            else:
-                summary[recon_type] = {k: 0 for k in keys}
-
-        return summary
-
     def add_summary_row(self, test_name: str, ticker: str, description: str, value):
         """Capture summary rows without emitting them to the logger."""
 
@@ -788,9 +750,6 @@ class Reconciliator:
                 "value": value,
             }
         )
-
-    # Keep your existing _build_equity_details, get_detailed_calculations methods
-    # but update them to use self.fund instead of self.fund_data
 
     def reconcile_custodian_equity_t1(self):
         """Reconcile custodian equity for T-1 date (simpler version)"""
@@ -892,8 +851,8 @@ class Reconciliator:
     def reconcile_custodian_option_t1(self):
         """Reconcile custodian options for T-1 date"""
         # Get T-1 data
-        df_oms1 = self.fund.previous_options_holdings.copy()
-        df_cust1 = self.fund.previous_custodian_option_holdings.copy()
+        df_oms1 = self.fund_data.get('t1_options_holdings', pd.DataFrame()).copy()
+        df_cust1 = self.fund_data.get('t1_custodian_option_holdings', pd.DataFrame()).copy()
 
         if df_oms1.empty and df_cust1.empty:
             self.results['custodian_option_t1'] = ReconciliationResult(
@@ -1001,8 +960,8 @@ class Reconciliator:
 
     def reconcile_custodian_treasury(self):
         """Reconcile custodian treasury holdings for current date"""
-        df_oms = self.fund.treasury_holdings.copy()
-        df_cust = self.fund.custodian_treasury_holdings.copy()
+        df_oms = self.fund_data.get('treasury_holdings', pd.DataFrame()).copy()
+        df_cust = self.fund_data.get('custodian_treasury_holdings', pd.DataFrame()).copy()
 
         if df_oms.empty and df_cust.empty:
             self.results['custodian_treasury'] = ReconciliationResult(
@@ -1268,8 +1227,8 @@ class Reconciliator:
             'custodian_current': self._current_frame('equity', source='custodian'),
             'vest_previous': self._previous_frame('equity', source='vest'),
             'custodian_previous': self._previous_frame('equity', source='custodian'),
-            'trades': self.fund.equity_trades.copy(),
-            'corporate_actions': self.fund.cr_rd_data.copy(),
+            'trades': self.fund_data.get('equity_trades', pd.DataFrame()).copy(),
+            'corporate_actions': self.fund_data.get('cr_rd_data', pd.DataFrame()).copy(),
         }
 
         reconciliation_outputs = {
@@ -1291,33 +1250,117 @@ class Reconciliator:
             'reconciliations': reconciliation_outputs,
         }
 
-    def _get_weight_series(self, df: pd.DataFrame, preferred_columns: Optional[list[str]] = None) -> Optional[pd.Series]:
-        columns = list(preferred_columns or []) + [
-            "start_wgt",
-            "weight",
-            "fund_weight",
-            "portfolio_weight",
-        ]
+    def _check_sg_equity(self) -> bool:
+        """Check if this fund has SG equity data"""
+        sg_equity = self.fund_data.get('sg_equity', pd.DataFrame()) if isinstance(self.fund_data, dict) else pd.DataFrame()
+        return not sg_equity.empty
 
-        for column in columns:
-            if column in df.columns:
-                series = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
-                total = series.sum()
-                if total != 0 and total != 1:
-                    series = series / total
-                return series
 
-        if {"price", "quantity"}.issubset(df.columns):
-            prices = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
-            quantities = pd.to_numeric(df["quantity"], errors="coerce").fillna(0.0)
-            market_values = prices * quantities
-            total_mv = market_values.sum()
-            if total_mv:
-                return market_values / total_mv
-        elif "market_value" in df.columns:
-            market_values = pd.to_numeric(df["market_value"], errors="coerce").fillna(0.0)
-            total_mv = market_values.sum()
-            if total_mv:
-                return market_values / total_mv
+    def reconcile_sg_option(self):
+        """Reconcile SocGen options (for ex-ante/ex-post only)"""
+        df_oms = self.fund_data.get('vest_option', pd.DataFrame())
+        df_sg = self.fund_data.get('sg_option', pd.DataFrame())
 
-        return None
+        if df_oms.empty or df_sg.empty:
+            self.results['sg_option'] = ReconciliationResult(
+                raw_recon=pd.DataFrame(),
+                final_recon=pd.DataFrame(),
+                price_discrepancies_T=pd.DataFrame(),
+                price_discrepancies_T1=pd.DataFrame(),
+                merged_data=pd.DataFrame()
+            )
+            return
+
+        # Normalize option tickers if needed
+        df_oms, df_sg = normalize_option_pair(df_oms, df_sg, logger=self.logger)
+
+        # Merge data
+        df = pd.merge(df_oms, df_sg, on='optticker', how='outer',
+                      suffixes=('_vest', '_sg'))
+
+        # Identify discrepancies
+        df['in_vest'] = df['quantity_vest'].notnull()
+        df['in_sg'] = df['quantity_sg'].notnull()
+        df['quantity_diff'] = df['quantity_vest'].fillna(0) - df['quantity_sg'].fillna(0)
+
+        # Filter for issues
+        mask_missing = df['in_vest'] != df['in_sg']
+        mask_qty = df['in_vest'] & df['in_sg'] & (df['quantity_diff'].abs() > 0.01)
+        df_issues = df.loc[mask_missing | mask_qty].copy()
+
+        # Calculate price discrepancies
+        price_disc = pd.DataFrame()
+        if {'price_vest', 'price_sg'}.issubset(df.columns):
+            df['price_diff'] = (df['price_vest'] - df['price_sg']).abs()
+            price_disc = df.loc[df['price_diff'] > 0.01,
+            ['optticker', 'price_vest', 'price_sg', 'price_diff']]
+
+        self.results['sg_option'] = ReconciliationResult(
+            raw_recon=df.loc[mask_qty].reset_index(drop=True),
+            final_recon=df_issues.reset_index(drop=True),
+            price_discrepancies_T=price_disc.reset_index(drop=True),
+            price_discrepancies_T1=pd.DataFrame(),
+            merged_data=df.copy()
+        )
+
+        # Add summary rows
+        for _, row in df_issues.iterrows():
+            self.add_summary_row("SG Option Discrepancy",
+                                 row['optticker'],
+                                 f"Vest: {row.get('quantity_vest', 0)}, SG: {row.get('quantity_sg', 0)}",
+                                 row['quantity_diff'])
+
+
+    def reconcile_sg_equity(self):
+        """Reconcile SocGen equity (for ex-ante/ex-post only)"""
+        df_oms = self.fund_data.get('vest_equity', pd.DataFrame())
+        df_sg = self.fund_data.get('sg_equity', pd.DataFrame())
+
+        if df_oms.empty or df_sg.empty:
+            self.results['sg_equity'] = ReconciliationResult(
+                raw_recon=pd.DataFrame(),
+                final_recon=pd.DataFrame(),
+                price_discrepancies_T=pd.DataFrame(),
+                price_discrepancies_T1=pd.DataFrame(),
+                merged_data=pd.DataFrame()
+            )
+            return
+
+        # Normalize equity tickers
+        df_oms, df_sg = normalize_equity_pair(df_oms, df_sg, logger=self.logger)
+
+        # Merge data
+        df = pd.merge(df_oms, df_sg, on='equity_ticker', how='outer',
+                      suffixes=('_vest', '_sg'))
+
+        # Identify discrepancies
+        df['in_vest'] = df['quantity_vest'].notnull()
+        df['in_sg'] = df['quantity_sg'].notnull()
+        df['quantity_diff'] = df['quantity_vest'].fillna(0) - df['quantity_sg'].fillna(0)
+
+        # Filter for issues
+        mask_missing = df['in_vest'] != df['in_sg']
+        mask_qty = df['in_vest'] & df['in_sg'] & (df['quantity_diff'].abs() > 0.01)
+        df_issues = df.loc[mask_missing | mask_qty].copy()
+
+        # Calculate price discrepancies
+        price_disc = pd.DataFrame()
+        if {'price_vest', 'price_sg'}.issubset(df.columns):
+            df['price_diff'] = (df['price_vest'] - df['price_sg']).abs()
+            price_disc = df.loc[df['price_diff'] > 0.01,
+            ['equity_ticker', 'price_vest', 'price_sg', 'price_diff']]
+
+        self.results['sg_equity'] = ReconciliationResult(
+            raw_recon=df.loc[mask_qty].reset_index(drop=True),
+            final_recon=df_issues.reset_index(drop=True),
+            price_discrepancies_T=price_disc.reset_index(drop=True),
+            price_discrepancies_T1=pd.DataFrame(),
+            merged_data=df.copy()
+        )
+
+        # Add summary rows
+        for _, row in df_issues.iterrows():
+            self.add_summary_row("SG Equity Discrepancy",
+                                 row['equity_ticker'],
+                                 f"Vest: {row.get('quantity_vest', 0)}, SG: {row.get('quantity_sg', 0)}",
+                                 row['quantity_diff'])

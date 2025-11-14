@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Dict
 from domain.fund import Fund, GainLossResult
-# import logging
+import logging
 # from utilities.logger import setup_logger
 # import datetime
 from config.fund_definitions import DIVERSIFIED_FUNDS, PRIVATE_FUNDS, CLOSED_END_FUNDS

@@ -31,7 +31,6 @@ class FundResult:
 @dataclass
 class ProcessingResults:
     """Container for the outcome of the daily operations."""
-
     fund_results: Dict[str, FundResult]
     summary: Dict[str, Any]
 
@@ -47,7 +46,7 @@ class FundManager:
         self.available_funds = list(data_store.loaded_funds)
 
     def run_daily_operations(
-        self, operations: List[str], *, compliance_tests: Optional[Sequence[str]] = None
+            self, operations: List[str], *, compliance_tests: Optional[Sequence[str]] = None
     ) -> ProcessingResults:
         """Run specified operations for ALL funds using cached data"""
         results: Dict[str, FundResult] = {}
@@ -76,15 +75,13 @@ class FundManager:
 
                 # Run requested operations
                 if 'compliance' in operations:
-                    fund_result.compliance_results = self._run_compliance(
-                        fund, tests
-                    )
+                    fund_result.compliance_results = self._run_compliance(fund, tests)
 
                 if 'reconciliation' in operations:
-                    fund_result.reconciliation_results = self._run_reconciliation(fund)
+                    fund_result.reconciliation_results = self._run_reconciliation(fund, fund_name)
 
                 if 'nav_reconciliation' in operations:
-                    fund_result.nav_results = self._run_nav_reconciliation(fund)
+                    fund_result.nav_results = self._run_nav_reconciliation(fund, fund_name)
 
                 summary["processed_funds"] += 1
 
@@ -100,6 +97,100 @@ class FundManager:
         summary["total_funds"] = len(results)
         return ProcessingResults(fund_results=results, summary=summary)
 
+    def _run_compliance(self, fund: Fund, tests: List[str]) -> Dict[str, Any]:
+        """Run compliance checks"""
+        try:
+            checker = ComplianceChecker(
+                fund=fund,
+                analysis_date=self.data_store.date,
+                analysis_type=self.analysis_type,
+            )
+
+            # Run selected compliance tests
+            fund_results = checker.run_compliance(tests)
+            fund_results["fund_object"] = fund
+            return fund_results
+
+        except Exception as e:
+            self.logger.error(f"Compliance error for {fund.name}: {e}")
+            return {'errors': [str(e)], 'violations': []}
+
+    def _run_nav_reconciliation(self, fund: Fund, fund_name: str) -> Dict[str, Any]:
+        """Run NAV reconciliation using your existing NAVReconciliator"""
+        try:
+            # Determine prior date
+            prior_date = self._get_prior_date(self.data_store.date)
+
+            # Get fund data from data store
+            fund_data_dict = self.data_store.fund_data.get(fund_name, {})
+
+            # NAVReconciliator expects positional arguments: session, fund_name, fund_data, analysis_date, prior_date
+            nav_reconciliator = NAVReconciliator(
+                self.data_store.session,  # session
+                fund_name,  # fund_name
+                fund_data_dict,  # fund_data dictionary
+                self.data_store.date,  # analysis_date
+                prior_date,  # prior_date
+                analysis_type=self.analysis_type,  # optional kwargs
+                fund=fund,  # optional kwargs
+                socgen_custodian=getattr(self.data_store, 'socgen_custodian', None)  # optional kwargs
+            )
+
+            return nav_reconciliator.run_nav_reconciliation()
+
+        except Exception as e:
+            self.logger.error(f"NAV reconciliation error for {fund_name}: {e}")
+            return {'errors': [str(e)], 'differences': []}
+
+    def _run_reconciliation(self, fund: Fund, fund_name: str) -> Dict[str, Any]:
+        """Run reconciliation"""
+        try:
+            # Get fund data from data store
+            fund_data_dict = self.data_store.fund_data.get(fund_name, {})
+
+            # Reconciliator expects positional arguments: fund_name, fund_data, analysis_type
+            reconciliator = Reconciliator(
+                fund_name,  # fund_name
+                fund_data_dict,  # fund_data
+                self.analysis_type  # analysis_type (optional)
+            )
+
+            reconciliator.run_all_reconciliations()
+            summary = reconciliator.get_summary()
+
+            detail_payload: Dict[str, Dict[str, Any]] = {}
+            for name, result in reconciliator.results.items():
+                sections: Dict[str, Any] = {}
+                for attr in [
+                    "raw_recon",
+                    "final_recon",
+                    "price_discrepancies_T",
+                    "price_discrepancies_T1",
+                    "merged_data",
+                    "regular_options",
+                    "flex_options",
+                ]:
+                    value = getattr(result, attr, None)
+                    if value is not None:
+                        sections[attr] = value
+                detail_payload[name] = sections
+
+            return {
+                "summary": summary,
+                "details": detail_payload,
+            }
+        except Exception as e:
+            self.logger.error(f"Reconciliation error for {fund_name}: {e}")
+            return {'errors': [str(e)], 'breaks': []}
+
+    def _get_prior_date(self, current_date):
+        """Get the prior business date"""
+        from datetime import timedelta
+        prior = current_date - timedelta(days=1)
+        # Skip weekends
+        while prior.weekday() >= 5:  # Saturday = 5, Sunday = 6
+            prior = prior - timedelta(days=1)
+        return prior
 
     def _create_fund_from_bulk_data(self, fund_name: str, fund_config) -> Fund:
         """Create a Fund instance populated with bulk data"""
@@ -123,18 +214,13 @@ class FundManager:
             ),
             cash=self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
             nav=self._extract_nav_per_share(fund_data_dict.get('nav', pd.DataFrame())),
-            expenses=self._extract_expenses(fund_data_dict.get('nav', pd.DataFrame())),
-            total_assets=self._extract_custodian_total_assets(fund_data_dict),
-            total_net_assets=self._extract_custodian_total_net_assets(fund_data_dict),
+            expenses=self._extract_expense_value(fund_data_dict.get('expenses', pd.DataFrame())),
             flows=self._extract_flow_value(fund_data_dict.get('flows', pd.DataFrame())),
-            basket=fund_data_dict.get('basket', pd.DataFrame()),
-            index=fund_data_dict.get('index', pd.DataFrame()),
-            overlap=fund_data_dict.get('overlap', pd.DataFrame()),
-            fund_name=fund_name,
+            custodian_total_assets=self._extract_custodian_total_assets(fund_data_dict),
         )
 
-        # Populate previous holdings (T-1) if available
-        fund_data.previous = FundSnapshot(
+        # Populate T-1 snapshot
+        fund_data.t1 = FundSnapshot(
             vest=FundHoldings(
                 equity=fund_data_dict.get('vest_equity_t1', pd.DataFrame()),
                 options=fund_data_dict.get('vest_option_t1', pd.DataFrame()),
@@ -147,16 +233,23 @@ class FundManager:
             ),
             cash=self._extract_cash_value(fund_data_dict.get('cash_t1', pd.DataFrame())),
             nav=self._extract_nav_per_share(fund_data_dict.get('nav_t1', pd.DataFrame())),
-            expenses=self._extract_expenses(fund_data_dict.get('nav_t1', pd.DataFrame())),
-            total_assets=self._extract_custodian_total_assets(fund_data_dict, nav_key='nav_t1'),
-            total_net_assets=self._extract_custodian_total_net_assets(
-                fund_data_dict, nav_key='nav_t1'
-            ),
+            expenses=self._extract_expense_value(fund_data_dict.get('expenses_t1', pd.DataFrame())),
             flows=self._extract_flow_value(fund_data_dict.get('flows_t1', pd.DataFrame())),
-            basket=fund_data_dict.get('basket_t1', pd.DataFrame()),
-            index=fund_data_dict.get('index_t1', pd.DataFrame()),
-            overlap=fund_data_dict.get('overlap_t1', pd.DataFrame()),
-            fund_name=fund_name,
+            custodian_total_assets=self._extract_custodian_total_assets(fund_data_dict, nav_key='nav_t1'),
+        )
+
+        # Populate index data
+        fund_data.index = FundHoldings(
+            equity=fund_data_dict.get('index', pd.DataFrame()),
+            options=pd.DataFrame(),
+            treasury=pd.DataFrame(),
+        )
+
+        # Populate T-1 index data
+        fund_data.t1_index = FundHoldings(
+            equity=fund_data_dict.get('index_t1', pd.DataFrame()),
+            options=pd.DataFrame(),
+            treasury=pd.DataFrame(),
         )
 
         # Populate additional data
@@ -202,232 +295,34 @@ class FundManager:
         self.logger.warning("No cash value column found")
         return 0.0
 
+    def _extract_nav_per_share(self, nav_source, custodian_type=None):
+        """Extract NAV per share from either a mapping or direct DataFrame."""
+        # Implementation depends on your data structure
+        if isinstance(nav_source, pd.DataFrame) and not nav_source.empty:
+            nav_columns = ['nav_per_share', 'nav', 'net_asset_value']
+            for col in nav_columns:
+                if col in nav_source.columns:
+                    return nav_source[col].iloc[0] if len(nav_source) > 0 else 0.0
+        return 0.0
+
+    def _extract_expense_value(self, expense_data: pd.DataFrame) -> float:
+        """Extract expense value"""
+        if expense_data.empty:
+            return 0.0
+
+        expense_columns = ['expense_amount', 'expenses', 'amount', 'value']
+        for col in expense_columns:
+            if col in expense_data.columns:
+                return expense_data[col].sum()
+        return 0.0
 
     def _extract_flow_value(self, flows_data: pd.DataFrame) -> float:
         """Extract net flows value from the provided DataFrame."""
-
-        if not isinstance(flows_data, pd.DataFrame) or flows_data.empty:
+        if flows_data.empty:
             return 0.0
 
-        flow_columns = ['net_flow', 'flow', 'flows', 'net_flows', 'amount', 'value']
-        for column in flow_columns:
-            if column in flows_data.columns:
-                series = pd.to_numeric(flows_data[column], errors='coerce').fillna(0.0)
-                if not series.empty:
-                    return float(series.sum())
-
-        numeric_columns = flows_data.select_dtypes(include=['number']).columns
-        if len(numeric_columns):
-            return float(flows_data[numeric_columns[0]].fillna(0.0).sum())
-
-        self.logger.debug("Unable to determine flows value from provided data")
-        return 0.0
-
-    def _extract_custodian_total_net_assets(
-            self, fund_data_dict: Dict, *, nav_key: str = 'nav'
-    ) -> float:
-        """Extract total net assets from custodian NAV data"""
-        nav_data = fund_data_dict.get(nav_key, pd.DataFrame())
-        if nav_data.empty:
-            return 0.0
-
-        # Look for custodian net assets
-        net_columns = ['net_assets', 'total_net_assets', 'nav', 'net_asset_value']
-        for col in net_columns:
-            if col in nav_data.columns:
-                return nav_data[col].sum()
-
-        self.logger.warning("No custodian total net assets found")
-        return 0.0
-
-    def _extract_expenses(self, fund_data_dict: dict, custodian_type=None) -> float:
-        """Extract NAV per share using known field name from your custodian"""
-        if isinstance(fund_data_dict, dict):
-            nav_data = fund_data_dict.get('custodian_nav', pd.DataFrame())
-        else:
-            nav_data = fund_data_dict
-
-        if not isinstance(nav_data, pd.DataFrame) or nav_data.empty:
-            return 0.0
-
-        row = nav_data.iloc[0]
-
-        # Custodian-specific column mapping
-        custodian_columns = {
-            'bny': 'expenses',
-            'umb': 'expenses',
-            'socgen': 'expenses'  # if you have SocGen
-        }
-
-        # If we know the custodian, try their specific column first
-        if custodian_type and custodian_type in custodian_columns:
-            custodian_col = custodian_columns[custodian_type]
-            if custodian_col in row and pd.notna(row[custodian_col]):
-                try:
-                    return float(row[custodian_col])
-                except (ValueError, TypeError):
-                    pass
-
-        # Fallback: try all common column names
-        for col in ['expenses']:
-            if col in row and pd.notna(row[col]):
-                try:
-                    return float(row[col])
-                except (ValueError, TypeError):
-                    continue
-
-        return 0.0
-
-
-    def _get_prior_date(self, current_date: Any) -> str:
-        """Get prior business date - you might want to improve this"""
-        from datetime import datetime, timedelta, date as date_cls
-
-    def _run_compliance(self, fund: Fund, tests: Sequence[str]) -> Dict[str, Any]:
-        """Run compliance checks"""
-        try:
-            compliance_checker = ComplianceChecker(
-                session=None,
-                funds={fund.name: fund},
-                date=self.data_store.date,
-                base_cls=None,
-                analysis_type=self.analysis_type,
-            )
-            requested = list(tests) if tests else None
-            results = compliance_checker.run_compliance_tests(requested)
-            fund_results = dict(results.get(fund.name, {}) or {})
-
-            if "summary_metrics" not in fund_results:
-                fund_results["summary_metrics"] = compliance_checker.calculate_summary_metrics(fund)
-
-            current_snapshot = getattr(fund.data, "current", None)
-            fund_results.setdefault(
-                "fund_current_totals",
-                {
-                    "cash_value": float(getattr(current_snapshot, "cash", 0.0) or 0.0),
-                    "equity_market_value": float(
-                        getattr(current_snapshot, "total_equity_value", 0.0) or 0.0
-                    ),
-                    "option_delta_adjusted_notional": float(
-                        getattr(
-                            current_snapshot,
-                            "total_option_delta_adjusted_notional",
-                            0.0,
-                        )
-                        or 0.0
-                    ),
-                    "option_market_value": float(
-                        getattr(current_snapshot, "total_option_value", 0.0) or 0.0
-                    ),
-                    "treasury": float(
-                        getattr(current_snapshot, "total_treasury_value", 0.0) or 0.0
-                    ),
-                    "total_assets": float(
-                        getattr(current_snapshot, "total_assets", 0.0) or 0.0
-                    ),
-                    "total_net_assets": float(
-                        getattr(current_snapshot, "total_net_assets", 0.0) or 0.0
-                    ),
-                },
-            )
-
-            # Preserve the analysed fund so downstream reports can access
-            # holdings and other contextual information without reloading data.
-            fund_results["fund_object"] = fund
-
-            return fund_results
-        except Exception as e:
-            self.logger.error(f"Compliance error for {fund.name}: {e}")
-            return {'errors': [str(e)], 'violations': []}
-
-    def _run_nav_reconciliation(self, fund: Fund) -> Dict[str, Any]:
-        """Run NAV reconciliation using your existing NAVReconciliator"""
-        try:
-            # Determine prior date
-            prior_date = self._get_prior_date(self.data_store.date)
-
-            # Your NAVReconciliator expects Fund instance and dates
-            nav_reconciliator = NAVReconciliator(
-                fund=fund,
-                analysis_date=self.data_store.date,
-                prior_date=prior_date
-            )
-
-            return nav_reconciliator.run_nav_reconciliation()
-
-        except Exception as e:
-            self.logger.error(f"NAV reconciliation error for {fund.name}: {e}")
-            return {'errors': [str(e)], 'differences': []}
-
-    def _run_reconciliation(self, fund: Fund) -> Dict[str, Any]:
-        """Run reconciliation"""
-        try:
-            reconciliator = Reconciliator(
-                fund=fund,
-                analysis_type=self.analysis_type
-            )
-            reconciliator.run_all_reconciliations()
-            summary = reconciliator.get_summary()
-
-            detail_payload: Dict[str, Dict[str, Any]] = {}
-            for name, result in reconciliator.results.items():
-                sections: Dict[str, Any] = {}
-                for attr in [
-                    "raw_recon",
-                    "final_recon",
-                    "price_discrepancies_T",
-                    "price_discrepancies_T1",
-                    "merged_data",
-                    "regular_options",
-                    "flex_options",
-                ]:
-                    value = getattr(result, attr, None)
-                    if value is not None:
-                        sections[attr] = value
-                detail_payload[name] = sections
-
-            return {
-                "summary": summary,
-                "details": detail_payload,
-            }
-        except Exception as e:
-            self.logger.error(f"Reconciliation error for {fund.name}: {e}")
-            return {'errors': [str(e)], 'breaks': []}
-
-    def _extract_nav_per_share(self, nav_source, custodian_type=None):
-        """Extract NAV per share from either a mapping or direct DataFrame."""
-        if isinstance(nav_source, dict):
-            nav_data = nav_source.get('custodian_nav', pd.DataFrame())
-        else:
-            nav_data = nav_source
-
-        if not isinstance(nav_data, pd.DataFrame) or nav_data.empty:
-            return 0.0
-
-        row = nav_data.iloc[0]
-
-        # Custodian-specific column mapping
-        custodian_columns = {
-            'bny': 'nav',
-            'umb': 'cntnetvalue',
-            'socgen': 'nav_per_share'  # if you have SocGen
-        }
-
-        # If we know the custodian, try their specific column first
-        if custodian_type and custodian_type in custodian_columns:
-            custodian_col = custodian_columns[custodian_type]
-            if custodian_col in row and pd.notna(row[custodian_col]):
-                try:
-                    return float(row[custodian_col])
-                except (ValueError, TypeError):
-                    pass
-
-        # Fallback: try all common column names
-        for col in ['nav_per_share', 'nav', 'cntnetvalue', 'navps']:
-            if col in row and pd.notna(row[col]):
-                try:
-                    return float(row[col])
-                except (ValueError, TypeError):
-                    continue
-
+        flow_columns = ['net_flows', 'flows', 'amount', 'value']
+        for col in flow_columns:
+            if col in flows_data.columns:
+                return flows_data[col].sum()
         return 0.0
