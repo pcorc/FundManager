@@ -1,6 +1,7 @@
 # management/fund_manager.py
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
+from datetime import date, datetime, timedelta
 import pandas as pd
 import logging
 
@@ -185,8 +186,20 @@ class FundManager:
 
     def _get_prior_date(self, current_date):
         """Get the prior business date"""
-        from datetime import timedelta
-        prior = current_date - timedelta(days=1)
+
+        if isinstance(current_date, pd.Timestamp):
+            current = current_date.to_pydatetime().date()
+        elif isinstance(current_date, datetime):
+            current = current_date.date()
+        elif isinstance(current_date, date):
+            current = current_date
+        else:
+            try:
+                current = pd.Timestamp(current_date).date()
+            except Exception:
+                current = datetime.fromisoformat(str(current_date)).date()
+
+        prior = current - timedelta(days=1)
         # Skip weekends
         while prior.weekday() >= 5:  # Saturday = 5, Sunday = 6
             prior = prior - timedelta(days=1)

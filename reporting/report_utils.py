@@ -148,9 +148,18 @@ def summarise_reconciliation_breaks(normalized_results: Mapping[str, Dict[str, A
     totals: Dict[str, int] = {}
     for fund_payload in normalized_results.values():
         summary = fund_payload.get("summary", {})
+        if not isinstance(summary, Mapping):
+            continue
         for recon_type, metrics in summary.items():
+            if isinstance(metrics, Mapping):
+                values = metrics.values()
+            elif isinstance(metrics, Iterable) and not isinstance(metrics, (str, bytes)):
+                values = metrics
+            else:
+                values = [metrics]
+
             total_breaks = 0
-            for value in (metrics or {}).values():
+            for value in values:
                 if isinstance(value, numbers.Number):
                     total_breaks += int(value)
             totals[recon_type] = totals.get(recon_type, 0) + total_breaks

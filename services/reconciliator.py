@@ -37,6 +37,8 @@ class Reconciliator:
         self.holdings_price_breaks = fund_data.get("holdings_price_breaks", {}) if isinstance(fund_data, dict) else {}
         self.summary_rows = []  # Initialize summary_rows list
         self.has_sg_equity = self._check_sg_equity()  # Add property check
+        # Container populated by the detail builders that feed PDF/Excel outputs
+        self._detailed_calculations: Dict[str, Dict[str, pd.DataFrame]] = {}
 
     def run_all_reconciliations(self):
         """Run all reconciliations using Fund object data"""
@@ -51,10 +53,10 @@ class Reconciliator:
         ]
 
         # Only run SG if not end-of-day
-        if self.analysis_type != "eod":
-            recon_funcs.append(("sg_option", self.reconcile_sg_option))
-            if self.has_sg_equity:
-                recon_funcs.append(("sg_equity", self.reconcile_sg_equity))
+        # if self.analysis_type != "eod":
+        #     recon_funcs.append(("sg_option", self.reconcile_sg_option))
+        #     if self.has_sg_equity:
+        #         recon_funcs.append(("sg_equity", self.reconcile_sg_equity))
 
         for name, func in recon_funcs:
             try:
@@ -131,11 +133,11 @@ class Reconciliator:
 
         # Get the dataframes
         nav_today = self.fund_data.get("nav", pd.DataFrame())
-        nav_prior = self.fund_data.get("t1_nav", pd.DataFrame())
-        eq_today = self.fund_data.get("equity_holdings", pd.DataFrame())
-        eq_prior = self.fund_data.get("t1_equity_holdings", pd.DataFrame())
-        opt_today = self.fund_data.get("options_holdings", pd.DataFrame())
-        opt_prior = self.fund_data.get("t1_options_holdings", pd.DataFrame())
+        nav_prior = self.fund_data.get("nav_t1", pd.DataFrame())
+        eq_today = self.fund_data.get("vest_equity", pd.DataFrame())
+        eq_prior = self.fund_data.get("vest_equity_t1", pd.DataFrame())
+        opt_today = self.fund_data.get("vest_option", pd.DataFrame())
+        opt_prior = self.fund_data.get("vest_option_t1", pd.DataFrame())
 
         # Get expense ratio
         expense_rat = self.fund_data.get("expense_ratio", 0.0)
@@ -267,6 +269,7 @@ class Reconciliator:
             'analysis_date': getattr(self, 'analysis_date', None),
             'prior_date': getattr(self, 'prior_date', None)
         }
+        detailed_data['detailed_calculations'] = dict(self._detailed_calculations)
 
         return detailed_data
 
@@ -382,11 +385,11 @@ class Reconciliator:
     def reconcile_custodian_equity(self):
         # 1) Load today & prior data
         df_oms = self._set_internal_quantity_column(
-            self.fund_data.get('equity_holdings', pd.DataFrame()))
-        df_cust = self.fund_data.get('custodian_equity_holdings', pd.DataFrame())
+            self.fund_data.get('vest_equity', pd.DataFrame()))
+        df_cust = self.fund_data.get('custodian_equity', pd.DataFrame())
         df_oms1 = self._set_internal_quantity_column(
-            self.fund_data.get('t1_equity_holdings', pd.DataFrame()))
-        df_cust1 = self.fund_data.get('t1_custodian_equity_holdings', pd.DataFrame())
+            self.fund_data.get('vest_equity_t1', pd.DataFrame()))
+        df_cust1 = self.fund_data.get('custodian_equity_t1', pd.DataFrame())
         df_trades = self.fund_data.get('trades_data', pd.DataFrame())
         df_crrd = self.fund_data.get('cr_rd_data', pd.DataFrame())
 
@@ -529,8 +532,8 @@ class Reconciliator:
             return
 
         # Get data from fund_data dictionary (not self.fund_data)
-        df_oms = self.fund_data.get('equity_holdings', pd.DataFrame())
-        df_index = self.fund_data.get('index_holdings', pd.DataFrame())
+        df_oms = self.fund_data.get('vest_equity', pd.DataFrame())
+        df_index = self._payload_frame('index', 'index_holdings')
 
         # Check if data is available
         if df_oms.empty or df_index.empty:
@@ -984,8 +987,8 @@ class Reconciliator:
     def reconcile_custodian_option_t1(self):
         """Reconcile custodian options for T-1 date"""
         # Get T-1 data
-        df_oms1 = self.fund_data.get('t1_options_holdings', pd.DataFrame()).copy()
-        df_cust1 = self.fund_data.get('t1_custodian_option_holdings', pd.DataFrame()).copy()
+        df_oms1 = self._payload_frame('vest_option_t1', 't1_options_holdings').copy()
+        df_cust1 = self._payload_frame('custodian_option_t1', 't1_custodian_option_holdings').copy()
 
         if df_oms1.empty and df_cust1.empty:
             self.results['custodian_option_t1'] = ReconciliationResult(
@@ -1093,8 +1096,8 @@ class Reconciliator:
 
     def reconcile_custodian_treasury(self):
         """Reconcile custodian treasury holdings for current date"""
-        df_oms = self.fund_data.get('treasury_holdings', pd.DataFrame()).copy()
-        df_cust = self.fund_data.get('custodian_treasury_holdings', pd.DataFrame()).copy()
+        df_oms = self._payload_frame('vest_treasury', 'treasury_holdings').copy()
+        df_cust = self._payload_frame('custodian_treasury', 'custodian_treasury_holdings').copy()
 
         if df_oms.empty and df_cust.empty:
             self.results['custodian_treasury'] = ReconciliationResult(
