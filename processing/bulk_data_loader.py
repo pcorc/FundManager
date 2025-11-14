@@ -1692,7 +1692,7 @@ class BulkDataLoader:
                 table.price_base.label('price'),
                 table.traded_market_value_base.label('market_value'),
             ).filter(
-                    table.asset_group.notin_(['O', 'UN', 'ME', 'MM', 'CA', 'TI', 'B'])
+                    table.asset_group.notin_(['O', 'UN', 'ME', 'MM', 'CA', 'TI', 'B', 'CU'])
             )
             return query
 
@@ -1711,7 +1711,7 @@ class BulkDataLoader:
                 table.security_cins.label('cusip'),
                 table.maturity_date.label('maturity_date'),
             ).filter(
-                    table.asset_group.notin_(['S', 'FS', 'UN', 'ME', 'MM', 'CA', 'B', 'TI'])
+                    table.asset_group.notin_(['S', 'FS', 'UN', 'ME', 'MM', 'CA', 'B', 'TI', 'CU'])
                 ).filter(maturity_column >= min_date)
 
             return query

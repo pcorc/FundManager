@@ -97,6 +97,16 @@ class Reconciliator:
 
         return summary
 
+    def _payload_frame(self, *keys: str) -> pd.DataFrame:
+        """Return the first DataFrame within ``fund_data`` matching ``keys``."""
+
+        for key in keys:
+            value = self.fund_data.get(key)
+            if isinstance(value, pd.DataFrame):
+                return value
+
+        return pd.DataFrame()
+
     def _set_internal_quantity_column(self, df_internal):
         """
         Sets df_internal['quantity'] based on self.analysis_type:
@@ -298,40 +308,6 @@ class Reconciliator:
 
         return df2
 
-    def _current_snapshot(self) -> FundSnapshot:
-        snapshot = getattr(self.fund, "data", None)
-        if snapshot is None or getattr(snapshot, "current", None) is None:
-            return FundSnapshot()
-        return snapshot.current
-
-    def _previous_snapshot(self) -> FundSnapshot:
-        snapshot = getattr(self.fund, "data", None)
-        if snapshot is None or getattr(snapshot, "previous", None) is None:
-            return FundSnapshot()
-        return snapshot.previous
-
-    def _current_frame(self, attribute: str, *, source: Optional[str] = None) -> pd.DataFrame:
-        snapshot = self._current_snapshot()
-        target = snapshot
-        if source is not None:
-            component = getattr(snapshot, source, None)
-            if not isinstance(component, FundHoldings):
-                return pd.DataFrame()
-            target = component
-        frame = getattr(target, attribute, pd.DataFrame())
-        return frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame()
-
-    def _previous_frame(self, attribute: str, *, source: Optional[str] = None) -> pd.DataFrame:
-        snapshot = self._previous_snapshot()
-        target = snapshot
-        if source is not None:
-            component = getattr(snapshot, source, None)
-            if not isinstance(component, FundHoldings):
-                return pd.DataFrame()
-            target = component
-        frame = getattr(target, attribute, pd.DataFrame())
-        return frame.copy() if isinstance(frame, pd.DataFrame) else pd.DataFrame()
-
     def _get_quantity_column(self, holdings_df: pd.DataFrame) -> pd.Series:
         """
         Get appropriate quantity column based on analysis type.
@@ -384,11 +360,9 @@ class Reconciliator:
 
     def reconcile_custodian_equity(self):
         # 1) Load today & prior data
-        df_oms = self._set_internal_quantity_column(
-            self.fund_data.get('vest_equity', pd.DataFrame()))
+        df_oms = self.fund_data.get('vest_equity', pd.DataFrame())
         df_cust = self.fund_data.get('custodian_equity', pd.DataFrame())
-        df_oms1 = self._set_internal_quantity_column(
-            self.fund_data.get('vest_equity_t1', pd.DataFrame()))
+        df_oms1 = self.fund_data.get('vest_equity_t1', pd.DataFrame())
         df_cust1 = self.fund_data.get('custodian_equity_t1', pd.DataFrame())
         df_trades = self.fund_data.get('trades_data', pd.DataFrame())
         df_crrd = self.fund_data.get('cr_rd_data', pd.DataFrame())
@@ -522,109 +496,8 @@ class Reconciliator:
                                  f"{row['price_vest']} vs {row['price_cust']}",
                                  row['price_diff'])
 
-    def reconcile_index_equity(self):
-        # Check for special fund first
-        if self.fund_name == "DOGG":
-            self.results['index_equity'] = {
-                'holdings_discrepancies': pd.DataFrame(),
-                'significant_diffs': pd.DataFrame()
-            }
-            return
-
-        # Get data from fund_data dictionary (not self.fund_data)
-        df_oms = self.fund_data.get('vest_equity', pd.DataFrame())
-        df_index = self._payload_frame('index', 'index_holdings')
-
-        # Check if data is available
-        if df_oms.empty or df_index.empty:
-            self.results['index_equity'] = {
-                'holdings_discrepancies': pd.DataFrame(),
-                'significant_diffs': pd.DataFrame()
-            }
-            return
-
-        # Merge with outer join to capture all securities
-        df = pd.merge(df_oms, df_index, on='equity_ticker', how='outer', suffixes=('_vest', '_index'), indicator=True)
-
-        # Add in_vest and in_index flags
-        df['in_vest'] = df['start_wgt'].notnull()
-        df['in_index'] = df['weight_index'].notnull()
-
-        # Calculate weight difference for all securities
-        df['wgt_diff'] = (df['start_wgt'].fillna(0) - df['weight_index'].fillna(0)).abs()
-
-        # Holdings discrepancies - now includes weight information
-        holdings_disc = df[df['in_vest'] != df['in_index']][
-            ['equity_ticker', 'in_vest', 'in_index', 'start_wgt', 'weight_index', 'wgt_diff']
-        ].copy()
-
-        # Fill NaN weights with 0 for cleaner display
-        holdings_disc['start_wgt'] = holdings_disc['start_wgt'].fillna(0)
-        holdings_disc['weight_index'] = holdings_disc['weight_index'].fillna(0)
-
-        # Significant weight differences (for securities in both)
-        sig = df[df['wgt_diff'].gt(0.001) & df['in_vest'] & df['in_index']][
-            ['equity_ticker', 'start_wgt', 'weight_index', 'wgt_diff']
-        ].copy()
-
-        self.results['index_equity'] = {
-            'holdings_discrepancies': holdings_disc,
-            'significant_diffs': sig
-        }
-
-        # Add summary rows
-        for _, row in holdings_disc.iterrows():
-            note = 'Missing in OMS' if not row['in_vest'] else 'Missing in Index'
-            weight_info = f"OMS: {row['start_wgt']:.4f}, Index: {row['weight_index']:.4f}"
-            self.add_summary_row('Index Equity', row['equity_ticker'], f"{note} - {weight_info}", row['wgt_diff'])
-
-        for _, row in sig.iterrows():
-            weight_info = f"OMS: {row['start_wgt']:.4f}, Index: {row['weight_index']:.4f}"
-            self.add_summary_row('Index Weight Diff', row['equity_ticker'], f"Weight diff - {weight_info}", row['wgt_diff'])
-
-    def _calculate_price_discrepancies(self, df: pd.DataFrame, ticker_col: str) -> pd.DataFrame:
-        """Calculate price discrepancies between vest and custodian"""
-        if {'price_vest', 'price_cust'}.issubset(df.columns):
-            df_price = df.copy()
-            df_price['price_diff'] = (df_price['price_vest'] - df_price['price_cust']).abs()
-            price_discrepancies = df_price.loc[
-                df_price['price_diff'] > 0.005,
-                [ticker_col, 'price_vest', 'price_cust', 'price_diff']
-            ].copy()
-
-            # Apply small price overrides
-            small_mask = df_price['price_diff'].lt(1)
-            df_price.loc[small_mask, 'price_vest'] = df_price.loc[small_mask, 'price_cust']
-
-            return price_discrepancies.reset_index(drop=True)
-        return pd.DataFrame()
-
-    def _emit_equity_summary_rows(self, df_issues: pd.DataFrame,
-                                  price_disc_T: pd.DataFrame,
-                                  price_disc_T1: pd.DataFrame):
-        """Emit summary rows for equity reconciliation"""
-        for _, row in df_issues.iterrows():
-            dtype = row['discrepancy_type']
-            desc = row.get('breakdown', '')
-            val = row['final_discrepancy'] if dtype == 'Quantity Mismatch' else 'N/A'
-            self.add_summary_row(f"Custodian Equity: {dtype}",
-                                 row['equity_ticker'], desc, val)
-
-        for _, row in price_disc_T.iterrows():
-            self.add_summary_row("Custodian Equity Price (T)",
-                                 row['equity_ticker'],
-                                 f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
-                                 row['price_diff'])
-
-        for _, row in price_disc_T1.iterrows():
-            self.add_summary_row("Custodian Equity Price (T-1)",
-                                 row['equity_ticker'],
-                                 f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
-                                 row['price_diff'])
-
     def reconcile_custodian_option(self):
         """Reconcile custodian options using Fund object data"""
-        from utilities.ticker_utils import normalize_option_pair
 
         # Initialize empty result early for error cases
         empty_result = ReconciliationResult(
@@ -635,11 +508,11 @@ class Reconciliator:
             merged_data=pd.DataFrame()
         )
 
-        # Step 1: Get data from Fund object
-        df_oms = self._current_frame('options', source='vest')
-        df_cust = self._current_frame('options', source='custodian')
-        df_oms1 = self._previous_frame('options', source='vest')
-        df_cust1 = self._previous_frame('options', source='custodian')
+        df_oms = self.fund_data.get('vest_option', pd.DataFrame())
+        df_cust = self.fund_data.get('custodian_option', pd.DataFrame())
+        df_oms1 = self.fund_data.get('vest_option_t1', pd.DataFrame())
+        df_cust1 = self.fund_data.get('custodian_option_t1', pd.DataFrame())
+        df_trades = self.fund_data.get('trades_data', pd.DataFrame())
 
         # Step 2: Check if all dataframes are empty
         if df_oms.empty and df_cust.empty:
@@ -829,6 +702,106 @@ class Reconciliator:
                 f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
                 row['price_diff']
             )
+
+    def reconcile_index_equity(self):
+        # Check for special fund first
+        if self.fund_name == "DOGG":
+            self.results['index_equity'] = {
+                'holdings_discrepancies': pd.DataFrame(),
+                'significant_diffs': pd.DataFrame()
+            }
+            return
+
+        # Get data from fund_data dictionary (not self.fund_data)
+        df_oms = self.fund_data.get('vest_equity', pd.DataFrame())
+        df_index = self._payload_frame('index', 'index_holdings')
+
+        # Check if data is available
+        if df_oms.empty or df_index.empty:
+            self.results['index_equity'] = {
+                'holdings_discrepancies': pd.DataFrame(),
+                'significant_diffs': pd.DataFrame()
+            }
+            return
+
+        # Merge with outer join to capture all securities
+        df = pd.merge(df_oms, df_index, on='equity_ticker', how='outer', suffixes=('_vest', '_index'), indicator=True)
+
+        # Add in_vest and in_index flags
+        df['in_vest'] = df['nav_wgt_begin'].notnull()
+        df['in_index'] = df['weight_index'].notnull()
+
+        # Calculate weight difference for all securities
+        df['wgt_diff'] = (df['nav_wgt_begin'].fillna(0) - df['weight_index'].fillna(0)).abs()
+
+        # Holdings discrepancies - now includes weight information
+        holdings_disc = df[df['in_vest'] != df['in_index']][
+            ['equity_ticker', 'in_vest', 'in_index', 'nav_wgt_begin', 'weight_index', 'wgt_diff']
+        ].copy()
+
+        # Fill NaN weights with 0 for cleaner display
+        holdings_disc['nav_wgt_begin'] = holdings_disc['nav_wgt_begin'].fillna(0)
+        holdings_disc['weight_index'] = holdings_disc['weight_index'].fillna(0)
+
+        # Significant weight differences (for securities in both)
+        sig = df[df['wgt_diff'].gt(0.001) & df['in_vest'] & df['in_index']][
+            ['equity_ticker', 'nav_wgt_begin', 'weight_index', 'wgt_diff']
+        ].copy()
+
+        self.results['index_equity'] = {
+            'holdings_discrepancies': holdings_disc,
+            'significant_diffs': sig
+        }
+
+        # Add summary rows
+        for _, row in holdings_disc.iterrows():
+            note = 'Missing in OMS' if not row['in_vest'] else 'Missing in Index'
+            weight_info = f"OMS: {row['nav_wgt_begin']:.4f}, Index: {row['weight_index']:.4f}"
+            self.add_summary_row('Index Equity', row['equity_ticker'], f"{note} - {weight_info}", row['wgt_diff'])
+
+        for _, row in sig.iterrows():
+            weight_info = f"OMS: {row['nav_wgt_begin']:.4f}, Index: {row['weight_index']:.4f}"
+            self.add_summary_row('Index Weight Diff', row['equity_ticker'], f"Weight diff - {weight_info}", row['wgt_diff'])
+
+    def _calculate_price_discrepancies(self, df: pd.DataFrame, ticker_col: str) -> pd.DataFrame:
+        """Calculate price discrepancies between vest and custodian"""
+        if {'price_vest', 'price_cust'}.issubset(df.columns):
+            df_price = df.copy()
+            df_price['price_diff'] = (df_price['price_vest'] - df_price['price_cust']).abs()
+            price_discrepancies = df_price.loc[
+                df_price['price_diff'] > 0.005,
+                [ticker_col, 'price_vest', 'price_cust', 'price_diff']
+            ].copy()
+
+            # Apply small price overrides
+            small_mask = df_price['price_diff'].lt(1)
+            df_price.loc[small_mask, 'price_vest'] = df_price.loc[small_mask, 'price_cust']
+
+            return price_discrepancies.reset_index(drop=True)
+        return pd.DataFrame()
+
+    def _emit_equity_summary_rows(self, df_issues: pd.DataFrame,
+                                  price_disc_T: pd.DataFrame,
+                                  price_disc_T1: pd.DataFrame):
+        """Emit summary rows for equity reconciliation"""
+        for _, row in df_issues.iterrows():
+            dtype = row['discrepancy_type']
+            desc = row.get('breakdown', '')
+            val = row['final_discrepancy'] if dtype == 'Quantity Mismatch' else 'N/A'
+            self.add_summary_row(f"Custodian Equity: {dtype}",
+                                 row['equity_ticker'], desc, val)
+
+        for _, row in price_disc_T.iterrows():
+            self.add_summary_row("Custodian Equity Price (T)",
+                                 row['equity_ticker'],
+                                 f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
+                                 row['price_diff'])
+
+        for _, row in price_disc_T1.iterrows():
+            self.add_summary_row("Custodian Equity Price (T-1)",
+                                 row['equity_ticker'],
+                                 f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
+                                 row['price_diff'])
 
     def _calculate_option_price_discrepancies(self, df: pd.DataFrame, period: str) -> pd.DataFrame:
         """Calculate option price discrepancies with FLEX filtering"""
