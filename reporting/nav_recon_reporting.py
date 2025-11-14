@@ -61,7 +61,9 @@ class NAVReconciliationExcelReport:
         self.currency_format = "#,##0.00"
         self.nav_format = "#,##0.0000"
         self.integer_format = "#,##0"
-
+        self.number_format = '#,##0.00'
+        self.number_format_4 = '#,##0.0000'
+        self.percent_format = '0.00%'
         self._sheet_names: set[str] = set()
         self._sheet_refs: Dict[str, Dict[str, Any]] = {}
 
@@ -77,7 +79,8 @@ class NAVReconciliationExcelReport:
         for fund_name, payload in sorted(self.results.items()):
             if not payload:
                 continue
-            self._create_fund_sheet(workbook, fund_name, payload)
+            # Add self.report_date as the 4th argument
+            self._create_fund_sheet(workbook, fund_name, payload, self.report_date)  # <-- FIX: Added self.report_date
 
         summary_ws = self._create_summary_sheet(workbook)
         if summary_ws is not None:
@@ -1061,29 +1064,38 @@ def generate_nav_reconciliation_reports(reconciliation_results, date_str, excel_
         date_str: Date string for the report
         excel_path: Path where the Excel file will be saved
     """
-    # Normalize the data structure for the report
-    normalized = reconciliation_results
+    from pathlib import Path
 
-    # Create a summary list (if needed)
-    recon_summary = []
-    for date, funds in reconciliation_results.items():
-        for fund_name, nav_data in funds.items():
-            if isinstance(nav_data, dict):
-                summary_item = {
-                    'fund': fund_name,
-                    'date': date,
-                    'nav_good_2': nav_data.get('NAV Good (2 Digit)', False),
-                    'nav_good_4': nav_data.get('NAV Good (4 Digit)', False),
-                    'nav_diff': nav_data.get('NAV Diff ($)', 0)
-                }
-                recon_summary.append(summary_item)
+    # Extract the funds data for the specific date
+    # The NAVReconciliationExcelReport expects {fund_name: nav_data} structure
+    if isinstance(reconciliation_results, dict):
+        # Check if it's nested with dates
+        if date_str in reconciliation_results:
+            # Extract funds for the specific date
+            normalized = reconciliation_results[date_str]
+        else:
+            # Maybe it's already {fund: data} without date nesting
+            # Check if the first value is a dict with NAV data
+            first_key = next(iter(reconciliation_results.keys())) if reconciliation_results else None
+            if first_key and isinstance(reconciliation_results[first_key], dict):
+                # Check if it looks like NAV data (has expected keys)
+                first_value = reconciliation_results[first_key]
+                if any(key in first_value for key in ['NAV Good (2 Digit)', 'NAV Good (4 Digit)', 'NAV Diff ($)', 'Expected NAV', 'Custodian NAV']):
+                    # It's already {fund: nav_data}
+                    normalized = reconciliation_results
+                else:
+                    # It's {date: {fund: data}}, take the first/only date's data
+                    normalized = reconciliation_results.get(first_key, {})
+            else:
+                normalized = reconciliation_results
+    else:
+        normalized = {}
 
-    # Create the Excel report with all 4 required arguments
-    NAVReconciliationReport(
-        reconciliation_results=normalized,
-        recon_summary=recon_summary,
-        date=date_str,
-        file_path_excel=excel_path
+    # Create the Excel report using NAVReconciliationExcelReport
+    NAVReconciliationExcelReport(
+        results=normalized,  # {fund_name: nav_data}
+        report_date=date_str,  # Date string
+        output_path=Path(excel_path)  # Path object
     )
 
     return excel_path

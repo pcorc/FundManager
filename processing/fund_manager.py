@@ -216,7 +216,7 @@ class FundManager:
             nav=self._extract_nav_per_share(fund_data_dict.get('nav', pd.DataFrame())),
             expenses=self._extract_expense_value(fund_data_dict.get('expenses', pd.DataFrame())),
             flows=self._extract_flow_value(fund_data_dict.get('flows', pd.DataFrame())),
-            custodian_total_assets=self._extract_custodian_total_assets(fund_data_dict),
+            total_net_assets=self._extract_total_net_assets(fund_data_dict),  # NEW
         )
 
         # Populate T-1 snapshot
@@ -235,7 +235,7 @@ class FundManager:
             nav=self._extract_nav_per_share(fund_data_dict.get('nav_t1', pd.DataFrame())),
             expenses=self._extract_expense_value(fund_data_dict.get('expenses_t1', pd.DataFrame())),
             flows=self._extract_flow_value(fund_data_dict.get('flows_t1', pd.DataFrame())),
-            custodian_total_assets=self._extract_custodian_total_assets(fund_data_dict, nav_key='nav_t1'),
+            total_net_assets=self._extract_total_net_assets(fund_data_dict, nav_key='nav_t1'),  # NEW
         )
 
         # Populate index data
@@ -265,21 +265,40 @@ class FundManager:
 
         return fund
 
-    def _extract_custodian_total_assets(
+    def _extract_total_net_assets(
             self, fund_data_dict: Dict, *, nav_key: str = 'nav'
     ) -> float:
-        """Extract total assets from custodian NAV data"""
+        """Extract total net assets from custodian NAV data"""
         nav_data = fund_data_dict.get(nav_key, pd.DataFrame())
         if nav_data.empty:
             return 0.0
 
-        # Look for custodian total assets
-        asset_columns = ['total_assets', 'gross_assets', 'assets', 'total_assets_value']
-        for col in asset_columns:
+        # Look for total net assets columns
+        tna_columns = ['total_net_assets', 'net_assets', 'tna', 'net_assets_value']
+        for col in tna_columns:
             if col in nav_data.columns:
                 return nav_data[col].sum()
 
-        self.logger.warning("No custodian total assets found")
+        # If no TNA column found, log warning but don't fail
+        self.logger.debug("No total net assets column found in NAV data")
+        return 0.0
+
+    def _extract_total_assets(
+            self, fund_data_dict: Dict, *, nav_key: str = 'nav'
+    ) -> float:
+        """Extract total net assets from custodian NAV data"""
+        nav_data = fund_data_dict.get(nav_key, pd.DataFrame())
+        if nav_data.empty:
+            return 0.0
+
+        # Look for total net assets columns
+        tna_columns = ['total_assets']
+        for col in tna_columns:
+            if col in nav_data.columns:
+                return nav_data[col].sum()
+
+        # If no TNA column found, log warning but don't fail
+        self.logger.debug("No total net assets column found in NAV data")
         return 0.0
 
     def _extract_cash_value(self, cash_data: pd.DataFrame) -> float:
