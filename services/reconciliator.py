@@ -97,16 +97,6 @@ class Reconciliator:
 
         return summary
 
-    def _payload_frame(self, *keys: str) -> pd.DataFrame:
-        """Return the first DataFrame within ``fund_data`` matching ``keys``."""
-
-        for key in keys:
-            value = self.fund_data.get(key)
-            if isinstance(value, pd.DataFrame):
-                return value
-
-        return pd.DataFrame()
-
     def _set_internal_quantity_column(self, df_internal):
         """
         Sets df_internal['quantity'] based on self.analysis_type:
@@ -496,6 +486,103 @@ class Reconciliator:
                                  f"{row['price_vest']} vs {row['price_cust']}",
                                  row['price_diff'])
 
+    def reconcile_custodian_equity_t1(self):
+        """Reconcile custodian equity for T-1 date (simpler version)"""
+        # Get T-1 data from Fund object
+        df_oms1 = self.fund_data.get('vest_equity_t1', pd.DataFrame()).copy()
+        df_cust1 = self.fund_data.get('custodian_equity_t1', pd.DataFrame()).copy()
+
+        if df_oms1.empty or df_cust1.empty:
+            self.results['custodian_equity_t1'] = ReconciliationResult(
+                raw_recon=pd.DataFrame(),
+                final_recon=pd.DataFrame(),
+                price_discrepancies_T=pd.DataFrame(),
+                price_discrepancies_T1=pd.DataFrame(),
+                merged_data=pd.DataFrame()
+            )
+            return
+
+        # Set quantities for T-1
+        df_oms1['_vest_quantity'] = self._get_quantity_column(df_oms1)
+
+        if 'shares_cust' not in df_cust1.columns:
+            for candidate in [
+                'quantity',
+                'shares',
+                'share_qty',
+                'position',
+                'qty',
+            ]:
+                if candidate in df_cust1.columns:
+                    df_cust1['shares_cust'] = df_cust1[candidate]
+                    break
+            else:
+                df_cust1['shares_cust'] = pd.Series(dtype=float)
+
+        df_cust1['shares_cust'] = self._coerce_numeric_series(df_cust1.get('shares_cust', pd.Series(dtype=float)))
+
+        # Merge T-1 data
+        df1 = pd.merge(df_oms1, df_cust1, on='equity_ticker', how='outer',
+                       suffixes=('_vest', '_cust'), indicator=True)
+        df1['in_vest'] = df1['_merge'] != 'right_only'
+        df1['in_cust'] = df1['_merge'] != 'left_only'
+        df1.drop(columns=['_merge'], inplace=True)
+
+        # Calculate T-1 discrepancies (no trades/corporate actions for T-1)
+        # Calculate T-1 discrepancies (no trades/corporate actions for T-1)
+        df1['vest_quantity'] = self._coerce_numeric_series(
+            df1.get('_vest_quantity')
+            if '_vest_quantity' in df1.columns
+            else df1.get('quantity_vest', df1.get('quantity', pd.Series(0.0, index=df1.index)))
+        )
+        df1['shares_cust'] = self._coerce_numeric_series(df1.get('shares_cust', pd.Series(0.0, index=df1.index, dtype=float)))
+        df1['discrepancy'] = df1['vest_quantity'] - df1['shares_cust']
+        df1['quantity'] = df1['vest_quantity']
+
+        if '_vest_quantity' in df1.columns:
+            df1.drop(columns=['_vest_quantity'], inplace=True)
+
+        # Identify T-1 mismatches
+        mask_missing_t1 = df1['in_vest'] != df1['in_cust']
+        mask_qty_t1 = df1['in_vest'] & df1['in_cust'] & df1['discrepancy'].abs().gt(0)
+        df_issues_t1 = df1.loc[mask_missing_t1 | mask_qty_t1].copy()
+
+        # Categorize T-1 discrepancies
+        conditions_t1 = [
+            ~df_issues_t1['in_vest'] & df_issues_t1['in_cust'],
+            df_issues_t1['in_vest'] & ~df_issues_t1['in_cust'],
+            mask_qty_t1.loc[df_issues_t1.index]
+        ]
+        df_issues_t1['discrepancy_type'] = np.select(conditions_t1,
+            ["Missing in OMS", "Missing in Custodian", "Quantity Mismatch"],
+            default="Unknown")
+
+        # T-1 breakdown
+        df_issues_t1['breakdown'] = np.where(
+            df_issues_t1['discrepancy_type'] == "Quantity Mismatch",
+            "Vest=" + df_issues_t1['quantity'].fillna(0).astype(int).astype(str)
+            + " | Cust=" + df_issues_t1.get('shares_cust', 0).fillna(0).astype(int).astype(str),
+            "Present in Vest: " + df_issues_t1['in_vest'].map({True: "Yes", False: "No"})
+            + " | Present in Cust: " + df_issues_t1['in_cust'].map({True: "Yes", False: "No"})
+        )
+
+        # Store T-1 results
+        self.results['custodian_equity_t1'] = ReconciliationResult(
+            raw_recon=df1.loc[mask_qty_t1].reset_index(drop=True),
+            final_recon=df_issues_t1.reset_index(drop=True),
+            price_discrepancies_T=pd.DataFrame(),  # No T price discrepancies for T-1 recon
+            price_discrepancies_T1=self._calculate_price_discrepancies(df1, 'equity_ticker'),
+            merged_data=df1.copy()
+        )
+
+        # Emit T-1 summary rows
+        for _, row in df_issues_t1.iterrows():
+            dtype = row['discrepancy_type']
+            desc = row.get('breakdown', '')
+            val = row['discrepancy'] if dtype == 'Quantity Mismatch' else 'N/A'
+            self.add_summary_row(f"Custodian Equity T-1: {dtype}",
+                                 row['equity_ticker'], desc, val)
+
     def reconcile_custodian_option(self):
         """Reconcile custodian options using Fund object data"""
 
@@ -703,6 +790,372 @@ class Reconciliator:
                 row['price_diff']
             )
 
+    def reconcile_custodian_option_t1(self):
+        """Reconcile custodian options for T-1 date"""
+        # Get T-1 data
+        df_oms1 = self.fund_data.get('vest_option_t1', pd.DataFrame()).copy()
+        df_cust1 = self.fund_data.get('custodian_option_t1', pd.DataFrame()).copy()
+
+        if df_oms1.empty and df_cust1.empty:
+            self.results['custodian_option_t1'] = ReconciliationResult(
+                raw_recon=pd.DataFrame(),
+                final_recon=pd.DataFrame(),
+                price_discrepancies_T=pd.DataFrame(),
+                price_discrepancies_T1=pd.DataFrame(),
+                merged_data=pd.DataFrame()
+            )
+            return
+
+        if (
+            ('optticker' not in df_oms1.columns and not df_oms1.empty)
+            or ('optticker' not in df_cust1.columns and not df_cust1.empty)
+        ):
+            self.results['custodian_option_t1'] = ReconciliationResult(
+                raw_recon=pd.DataFrame(),
+                final_recon=pd.DataFrame(),
+                price_discrepancies_T=pd.DataFrame(),
+                price_discrepancies_T1=pd.DataFrame(),
+                merged_data=pd.DataFrame()
+            )
+            return
+
+        df_oms1['quantity'] = self._get_quantity_column(df_oms1)
+        if 'shares_cust' not in df_cust1.columns:
+            for candidate in ["quantity", "contracts", "par", "position", "shares"]:
+                if candidate in df_cust1.columns:
+                    df_cust1['shares_cust'] = df_cust1[candidate]
+                    break
+            else:
+                df_cust1['shares_cust'] = 0.0 if not df_cust1.empty else pd.Series(dtype=float)
+        df_cust1['shares_cust'] = self._coerce_numeric_series(df_cust1['shares_cust'])
+
+        df1 = pd.merge(
+            df_oms1,
+            df_cust1,
+            on='optticker',
+            how='outer',
+            suffixes=('_vest', '_cust')
+        )
+
+        quantity_series = df1['quantity'] if 'quantity' in df1 else pd.Series(0.0, index=df1.index)
+        shares_series = df1['shares_cust'] if 'shares_cust' in df1 else pd.Series(0.0, index=df1.index)
+        df1['quantity'] = self._coerce_numeric_series(quantity_series)
+        df1['shares_cust'] = self._coerce_numeric_series(shares_series)
+        df1['in_vest'] = df1['quantity'].notnull()
+        df1['in_cust'] = df1['shares_cust'].notnull()
+        df1['discrepancy'] = df1['quantity'] - df1['shares_cust']
+
+        mask_missing = df1['in_vest'] != df1['in_cust']
+        mask_qty = df1['in_vest'] & df1['in_cust'] & df1['discrepancy'].abs().gt(0)
+        df_issues = df1.loc[mask_missing | mask_qty].copy()
+
+        if not df_issues.empty:
+            df_issues['discrepancy_type'] = np.where(
+                mask_qty.loc[df_issues.index],
+                'Quantity Mismatch',
+                'Holdings Mismatch'
+            )
+            df_issues['breakdown'] = np.where(
+                df_issues['discrepancy_type'] == 'Quantity Mismatch',
+                "Vest=" + df_issues['quantity'].round(0).astype(int).astype(str)
+                + " | Cust=" + df_issues['shares_cust'].round(0).astype(int).astype(str),
+                "Present in Vest: " + df_issues['in_vest'].map({True: 'Yes', False: 'No'})
+                + " | Present in Cust: " + df_issues['in_cust'].map({True: 'Yes', False: 'No'})
+            )
+        else:
+            df_issues = pd.DataFrame(columns=[
+                'optticker',
+                'quantity',
+                'shares_cust',
+                'in_vest',
+                'in_cust',
+                'discrepancy',
+                'discrepancy_type',
+                'breakdown'
+            ])
+
+        df_issues['is_flex'] = (
+            df_issues.get('optticker', pd.Series(dtype=str)).str.contains("SPX|XSP", na=False) &
+            (self.fund.is_private_fund or self.fund.is_closed_end_fund)
+        )
+
+        flex_issues = df_issues[df_issues['is_flex']].copy() if not df_issues.empty else pd.DataFrame()
+        regular_issues = df_issues[~df_issues['is_flex']].copy() if not df_issues.empty else pd.DataFrame()
+
+        price_T1 = self._calculate_option_price_discrepancies(df1, 'T1')
+
+        self.results['custodian_option_t1'] = ReconciliationResult(
+            raw_recon=df1.loc[mask_qty].reset_index(drop=True) if 'optticker' in df1 else pd.DataFrame(),
+            final_recon=df_issues.reset_index(drop=True),
+            price_discrepancies_T=pd.DataFrame(),
+            price_discrepancies_T1=price_T1,
+            merged_data=df1.copy(),
+            regular_options=regular_issues,
+            flex_options=flex_issues
+        )
+
+        for _, row in df_issues.iterrows():
+            dtype = row.get('discrepancy_type', 'Unknown')
+            desc = row.get('breakdown', '')
+            value = row.get('discrepancy', 'N/A') if dtype == 'Quantity Mismatch' else 'N/A'
+            self.add_summary_row(f"Custodian Option T-1: {dtype}", row.get('optticker', ''), desc, value)
+
+    def reconcile_custodian_treasury(self):
+        """Reconcile custodian treasury holdings for current date"""
+
+        df_oms = self.fund_data.get('vest_treasury', pd.DataFrame()).copy()
+        df_cust = self.fund_data.get('custodian_treasury_holdings', pd.DataFrame()).copy()
+
+        if df_oms.empty and df_cust.empty:
+            self.results['custodian_treasury'] = ReconciliationResult(
+                raw_recon=pd.DataFrame(),
+                final_recon=pd.DataFrame(),
+                price_discrepancies_T=pd.DataFrame(),
+                price_discrepancies_T1=pd.DataFrame(),
+                merged_data=pd.DataFrame()
+            )
+            return
+
+        if 'cusip' not in df_oms.columns:
+            if df_oms.empty:
+                df_oms['cusip'] = pd.Series(dtype=object)
+            else:
+                self.logger.warning("Missing CUSIP column for OMS treasury holdings")
+                self.results['custodian_treasury'] = ReconciliationResult(
+                    raw_recon=pd.DataFrame(),
+                    final_recon=pd.DataFrame(),
+                    price_discrepancies_T=pd.DataFrame(),
+                    price_discrepancies_T1=pd.DataFrame(),
+                    merged_data=pd.DataFrame()
+                )
+                return
+
+        if 'cusip' not in df_cust.columns:
+            if df_cust.empty:
+                df_cust['cusip'] = pd.Series(dtype=object)
+            else:
+                self.logger.warning("Missing CUSIP column for custodian treasury holdings")
+                self.results['custodian_treasury'] = ReconciliationResult(
+                    raw_recon=pd.DataFrame(),
+                    final_recon=pd.DataFrame(),
+                    price_discrepancies_T=pd.DataFrame(),
+                    price_discrepancies_T1=pd.DataFrame(),
+                    merged_data=pd.DataFrame()
+                )
+                return
+
+        df_oms['quantity'] = self._get_quantity_column(df_oms)
+        if 'shares_cust' not in df_cust.columns:
+            for candidate in ['quantity', 'par', 'par_value', 'face', 'position', 'amount']:
+                if candidate in df_cust.columns:
+                    df_cust['shares_cust'] = df_cust[candidate]
+                    break
+            else:
+                df_cust['shares_cust'] = 0.0
+        df_cust['shares_cust'] = self._coerce_numeric_series(df_cust['shares_cust'])
+
+        df = pd.merge(
+            df_oms,
+            df_cust,
+            on='cusip',
+            how='outer',
+            suffixes=('_vest', '_cust'),
+            indicator=True
+        )
+
+        quantity_series = df['quantity'] if 'quantity' in df else pd.Series(0.0, index=df.index)
+        shares_series = df['shares_cust'] if 'shares_cust' in df else pd.Series(0.0, index=df.index)
+        df['quantity'] = self._coerce_numeric_series(quantity_series)
+        df['shares_cust'] = self._coerce_numeric_series(shares_series)
+        df['in_vest'] = df['_merge'] != 'right_only'
+        df['in_cust'] = df['_merge'] != 'left_only'
+        df['quantity_diff'] = df['quantity'] - df['shares_cust']
+
+        mask_missing = df['in_vest'] != df['in_cust']
+        mask_qty = df['in_vest'] & df['in_cust'] & df['quantity_diff'].abs().gt(0)
+        df_issues = df.loc[mask_missing | mask_qty].copy()
+
+        if not df_issues.empty:
+            df_issues['discrepancy_type'] = np.select(
+                [
+                    ~df_issues['in_vest'] & df_issues['in_cust'],
+                    df_issues['in_vest'] & ~df_issues['in_cust'],
+                    mask_qty.loc[df_issues.index],
+                ],
+                ['Missing in OMS', 'Missing in Custodian', 'Quantity Mismatch'],
+                default='Unknown',
+            )
+            df_issues['breakdown'] = np.where(
+                df_issues['discrepancy_type'] == 'Quantity Mismatch',
+                "Vest=" + df_issues['quantity'].round(2).astype(str)
+                + " | Cust=" + df_issues['shares_cust'].round(2).astype(str),
+                "Present in Vest: " + df_issues['in_vest'].map({True: 'Yes', False: 'No'})
+                + " | Present in Cust: " + df_issues['in_cust'].map({True: 'Yes', False: 'No'})
+            )
+        else:
+            df_issues = pd.DataFrame(columns=[
+                'cusip',
+                'quantity',
+                'shares_cust',
+                'in_vest',
+                'in_cust',
+                'quantity_diff',
+                'discrepancy_type',
+                'breakdown'
+            ])
+
+        price_disc_T = self._calculate_price_discrepancies(df, 'cusip')
+
+        self.results['custodian_treasury'] = ReconciliationResult(
+            raw_recon=df.loc[mask_qty].reset_index(drop=True),
+            final_recon=df_issues.reset_index(drop=True),
+            price_discrepancies_T=price_disc_T,
+            price_discrepancies_T1=pd.DataFrame(),
+            merged_data=df.copy()
+        )
+
+        for _, row in df_issues.iterrows():
+            dtype = row.get('discrepancy_type', 'Unknown')
+            desc = row.get('breakdown', '')
+            value = row.get('quantity_diff', 'N/A') if dtype == 'Quantity Mismatch' else 'N/A'
+            self.add_summary_row(f"Custodian Treasury: {dtype}", row.get('cusip', ''), desc, value)
+
+        for _, row in price_disc_T.iterrows():
+            self.add_summary_row(
+                "Custodian Treasury Price (T)",
+                row.get('cusip', ''),
+                f"{row['price_vest']:.4f} vs {row['price_cust']:.4f}",
+                row.get('price_diff', 0.0),
+            )
+
+    def reconcile_custodian_treasury_t1(self):
+        """Reconcile custodian treasury holdings for T-1 date"""
+        # Similar to reconcile_custodian_treasury but using previous data
+        df_oms1 = self.fund_data.get('vest_treasury', pd.DataFrame()).copy()
+        df_cust1 = self.fund_data.get('custodian_treasury_holdings', pd.DataFrame()).copy()
+
+        if df_oms1.empty and df_cust1.empty:
+            self.results['custodian_treasury_t1'] = ReconciliationResult(
+                raw_recon=pd.DataFrame(),
+                final_recon=pd.DataFrame(),
+                price_discrepancies_T=pd.DataFrame(),
+                price_discrepancies_T1=pd.DataFrame(),
+                merged_data=pd.DataFrame()
+            )
+            return
+
+        if 'cusip' not in df_oms1.columns:
+            if df_oms1.empty:
+                df_oms1['cusip'] = pd.Series(dtype=object)
+            else:
+                self.logger.warning("Missing CUSIP column for OMS treasury T-1 holdings")
+                self.results['custodian_treasury_t1'] = ReconciliationResult(
+                    raw_recon=pd.DataFrame(),
+                    final_recon=pd.DataFrame(),
+                    price_discrepancies_T=pd.DataFrame(),
+                    price_discrepancies_T1=pd.DataFrame(),
+                    merged_data=pd.DataFrame()
+                )
+                return
+
+        if 'cusip' not in df_cust1.columns:
+            if df_cust1.empty:
+                df_cust1['cusip'] = pd.Series(dtype=object)
+            else:
+                self.logger.warning("Missing CUSIP column for custodian treasury T-1 holdings")
+                self.results['custodian_treasury_t1'] = ReconciliationResult(
+                    raw_recon=pd.DataFrame(),
+                    final_recon=pd.DataFrame(),
+                    price_discrepancies_T=pd.DataFrame(),
+                    price_discrepancies_T1=pd.DataFrame(),
+                    merged_data=pd.DataFrame()
+                )
+                return
+
+        df_oms1['quantity'] = self._get_quantity_column(df_oms1)
+        if 'shares_cust' not in df_cust1.columns:
+            for candidate in ['quantity', 'par', 'par_value', 'face', 'position', 'amount']:
+                if candidate in df_cust1.columns:
+                    df_cust1['shares_cust'] = df_cust1[candidate]
+                    break
+            else:
+                df_cust1['shares_cust'] = 0.0
+        df_cust1['shares_cust'] = self._coerce_numeric_series(df_cust1['shares_cust'])
+
+        df1 = pd.merge(
+            df_oms1,
+            df_cust1,
+            on='cusip',
+            how='outer',
+            suffixes=('_vest', '_cust'),
+            indicator=True
+        )
+
+        quantity_series = df1['quantity'] if 'quantity' in df1 else pd.Series(0.0, index=df1.index)
+        shares_series = df1['shares_cust'] if 'shares_cust' in df1 else pd.Series(0.0, index=df1.index)
+        df1['quantity'] = self._coerce_numeric_series(quantity_series)
+        df1['shares_cust'] = self._coerce_numeric_series(shares_series)
+        df1['in_vest'] = df1['_merge'] != 'right_only'
+        df1['in_cust'] = df1['_merge'] != 'left_only'
+        df1['quantity_diff'] = df1['quantity'] - df1['shares_cust']
+
+        mask_missing = df1['in_vest'] != df1['in_cust']
+        mask_qty = df1['in_vest'] & df1['in_cust'] & df1['quantity_diff'].abs().gt(0)
+        df_issues = df1.loc[mask_missing | mask_qty].copy()
+
+        if not df_issues.empty:
+            df_issues['discrepancy_type'] = np.select(
+                [
+                    ~df_issues['in_vest'] & df_issues['in_cust'],
+                    df_issues['in_vest'] & ~df_issues['in_cust'],
+                    mask_qty.loc[df_issues.index],
+                ],
+                ['Missing in OMS', 'Missing in Custodian', 'Quantity Mismatch'],
+                default='Unknown',
+            )
+            df_issues['breakdown'] = np.where(
+                df_issues['discrepancy_type'] == 'Quantity Mismatch',
+                "Vest=" + df_issues['quantity'].round(2).astype(str)
+                + " | Cust=" + df_issues['shares_cust'].round(2).astype(str),
+                "Present in Vest: " + df_issues['in_vest'].map({True: 'Yes', False: 'No'})
+                + " | Present in Cust: " + df_issues['in_cust'].map({True: 'Yes', False: 'No'})
+            )
+        else:
+            df_issues = pd.DataFrame(columns=[
+                'cusip',
+                'quantity',
+                'shares_cust',
+                'in_vest',
+                'in_cust',
+                'quantity_diff',
+                'discrepancy_type',
+                'breakdown'
+            ])
+
+        price_disc_T1 = self._calculate_price_discrepancies(df1, 'cusip')
+
+        self.results['custodian_treasury_t1'] = ReconciliationResult(
+            raw_recon=df1.loc[mask_qty].reset_index(drop=True),
+            final_recon=df_issues.reset_index(drop=True),
+            price_discrepancies_T=pd.DataFrame(),
+            price_discrepancies_T1=price_disc_T1,
+            merged_data=df1.copy()
+        )
+
+        for _, row in df_issues.iterrows():
+            dtype = row.get('discrepancy_type', 'Unknown')
+            desc = row.get('breakdown', '')
+            value = row.get('quantity_diff', 'N/A') if dtype == 'Quantity Mismatch' else 'N/A'
+            self.add_summary_row(f"Custodian Treasury T-1: {dtype}", row.get('cusip', ''), desc, value)
+
+        for _, row in price_disc_T1.iterrows():
+            self.add_summary_row(
+                "Custodian Treasury Price (T-1)",
+                row.get('cusip', ''),
+                f"{row['price_vest']:.4f} vs {row['price_cust']:.4f}",
+                row.get('price_diff', 0.0),
+            )
+
     def reconcile_index_equity(self):
         # Check for special fund first
         if self.fund_name == "DOGG":
@@ -714,7 +1167,7 @@ class Reconciliator:
 
         # Get data from fund_data dictionary (not self.fund_data)
         df_oms = self.fund_data.get('vest_equity', pd.DataFrame())
-        df_index = self._payload_frame('index', 'index_holdings')
+        df_index = self.fund_data.get('index_holdings', pd.DataFrame())
 
         # Check if data is available
         if df_oms.empty or df_index.empty:
@@ -860,466 +1313,6 @@ class Reconciliator:
             }
         )
 
-    def reconcile_custodian_equity_t1(self):
-        """Reconcile custodian equity for T-1 date (simpler version)"""
-        # Get T-1 data from Fund object
-        df_oms1 = self._previous_frame('equity', source='vest')
-        df_cust1 = self._previous_frame('equity', source='custodian')
-
-        if df_oms1.empty or df_cust1.empty:
-            self.results['custodian_equity_t1'] = ReconciliationResult(
-                raw_recon=pd.DataFrame(),
-                final_recon=pd.DataFrame(),
-                price_discrepancies_T=pd.DataFrame(),
-                price_discrepancies_T1=pd.DataFrame(),
-                merged_data=pd.DataFrame()
-            )
-            return
-
-        # Set quantities for T-1
-        df_oms1['_vest_quantity'] = self._get_quantity_column(df_oms1)
-
-        if 'shares_cust' not in df_cust1.columns:
-            for candidate in [
-                'quantity',
-                'shares',
-                'share_qty',
-                'position',
-                'qty',
-            ]:
-                if candidate in df_cust1.columns:
-                    df_cust1['shares_cust'] = df_cust1[candidate]
-                    break
-            else:
-                df_cust1['shares_cust'] = pd.Series(dtype=float)
-
-        df_cust1['shares_cust'] = self._coerce_numeric_series(df_cust1.get('shares_cust', pd.Series(dtype=float)))
-
-        # Merge T-1 data
-        df1 = pd.merge(df_oms1, df_cust1, on='equity_ticker', how='outer',
-                       suffixes=('_vest', '_cust'), indicator=True)
-        df1['in_vest'] = df1['_merge'] != 'right_only'
-        df1['in_cust'] = df1['_merge'] != 'left_only'
-        df1.drop(columns=['_merge'], inplace=True)
-
-        # Calculate T-1 discrepancies (no trades/corporate actions for T-1)
-        # Calculate T-1 discrepancies (no trades/corporate actions for T-1)
-        df1['vest_quantity'] = self._coerce_numeric_series(
-            df1.get('_vest_quantity')
-            if '_vest_quantity' in df1.columns
-            else df1.get('quantity_vest', df1.get('quantity', pd.Series(0.0, index=df1.index)))
-        )
-        df1['shares_cust'] = self._coerce_numeric_series(df1.get('shares_cust', pd.Series(0.0, index=df1.index, dtype=float)))
-        df1['discrepancy'] = df1['vest_quantity'] - df1['shares_cust']
-        df1['quantity'] = df1['vest_quantity']
-
-        if '_vest_quantity' in df1.columns:
-            df1.drop(columns=['_vest_quantity'], inplace=True)
-
-        # Identify T-1 mismatches
-        mask_missing_t1 = df1['in_vest'] != df1['in_cust']
-        mask_qty_t1 = df1['in_vest'] & df1['in_cust'] & df1['discrepancy'].abs().gt(0)
-        df_issues_t1 = df1.loc[mask_missing_t1 | mask_qty_t1].copy()
-
-        # Categorize T-1 discrepancies
-        conditions_t1 = [
-            ~df_issues_t1['in_vest'] & df_issues_t1['in_cust'],
-            df_issues_t1['in_vest'] & ~df_issues_t1['in_cust'],
-            mask_qty_t1.loc[df_issues_t1.index]
-        ]
-        df_issues_t1['discrepancy_type'] = np.select(conditions_t1,
-            ["Missing in OMS", "Missing in Custodian", "Quantity Mismatch"],
-            default="Unknown")
-
-        # T-1 breakdown
-        df_issues_t1['breakdown'] = np.where(
-            df_issues_t1['discrepancy_type'] == "Quantity Mismatch",
-            "Vest=" + df_issues_t1['quantity'].fillna(0).astype(int).astype(str)
-            + " | Cust=" + df_issues_t1.get('shares_cust', 0).fillna(0).astype(int).astype(str),
-            "Present in Vest: " + df_issues_t1['in_vest'].map({True: "Yes", False: "No"})
-            + " | Present in Cust: " + df_issues_t1['in_cust'].map({True: "Yes", False: "No"})
-        )
-
-        # Store T-1 results
-        self.results['custodian_equity_t1'] = ReconciliationResult(
-            raw_recon=df1.loc[mask_qty_t1].reset_index(drop=True),
-            final_recon=df_issues_t1.reset_index(drop=True),
-            price_discrepancies_T=pd.DataFrame(),  # No T price discrepancies for T-1 recon
-            price_discrepancies_T1=self._calculate_price_discrepancies(df1, 'equity_ticker'),
-            merged_data=df1.copy()
-        )
-
-        # Emit T-1 summary rows
-        for _, row in df_issues_t1.iterrows():
-            dtype = row['discrepancy_type']
-            desc = row.get('breakdown', '')
-            val = row['discrepancy'] if dtype == 'Quantity Mismatch' else 'N/A'
-            self.add_summary_row(f"Custodian Equity T-1: {dtype}",
-                                 row['equity_ticker'], desc, val)
-
-    def reconcile_custodian_option_t1(self):
-        """Reconcile custodian options for T-1 date"""
-        # Get T-1 data
-        df_oms1 = self._payload_frame('vest_option_t1', 't1_options_holdings').copy()
-        df_cust1 = self._payload_frame('custodian_option_t1', 't1_custodian_option_holdings').copy()
-
-        if df_oms1.empty and df_cust1.empty:
-            self.results['custodian_option_t1'] = ReconciliationResult(
-                raw_recon=pd.DataFrame(),
-                final_recon=pd.DataFrame(),
-                price_discrepancies_T=pd.DataFrame(),
-                price_discrepancies_T1=pd.DataFrame(),
-                merged_data=pd.DataFrame()
-            )
-            return
-
-        if (
-            ('optticker' not in df_oms1.columns and not df_oms1.empty)
-            or ('optticker' not in df_cust1.columns and not df_cust1.empty)
-        ):
-            self.results['custodian_option_t1'] = ReconciliationResult(
-                raw_recon=pd.DataFrame(),
-                final_recon=pd.DataFrame(),
-                price_discrepancies_T=pd.DataFrame(),
-                price_discrepancies_T1=pd.DataFrame(),
-                merged_data=pd.DataFrame()
-            )
-            return
-
-        df_oms1['quantity'] = self._get_quantity_column(df_oms1)
-        if 'shares_cust' not in df_cust1.columns:
-            for candidate in ["quantity", "contracts", "par", "position", "shares"]:
-                if candidate in df_cust1.columns:
-                    df_cust1['shares_cust'] = df_cust1[candidate]
-                    break
-            else:
-                df_cust1['shares_cust'] = 0.0 if not df_cust1.empty else pd.Series(dtype=float)
-        df_cust1['shares_cust'] = self._coerce_numeric_series(df_cust1['shares_cust'])
-
-        df1 = pd.merge(
-            df_oms1,
-            df_cust1,
-            on='optticker',
-            how='outer',
-            suffixes=('_vest', '_cust')
-        )
-
-        quantity_series = df1['quantity'] if 'quantity' in df1 else pd.Series(0.0, index=df1.index)
-        shares_series = df1['shares_cust'] if 'shares_cust' in df1 else pd.Series(0.0, index=df1.index)
-        df1['quantity'] = self._coerce_numeric_series(quantity_series)
-        df1['shares_cust'] = self._coerce_numeric_series(shares_series)
-        df1['in_vest'] = df1['quantity'].notnull()
-        df1['in_cust'] = df1['shares_cust'].notnull()
-        df1['discrepancy'] = df1['quantity'] - df1['shares_cust']
-
-        mask_missing = df1['in_vest'] != df1['in_cust']
-        mask_qty = df1['in_vest'] & df1['in_cust'] & df1['discrepancy'].abs().gt(0)
-        df_issues = df1.loc[mask_missing | mask_qty].copy()
-
-        if not df_issues.empty:
-            df_issues['discrepancy_type'] = np.where(
-                mask_qty.loc[df_issues.index],
-                'Quantity Mismatch',
-                'Holdings Mismatch'
-            )
-            df_issues['breakdown'] = np.where(
-                df_issues['discrepancy_type'] == 'Quantity Mismatch',
-                "Vest=" + df_issues['quantity'].round(0).astype(int).astype(str)
-                + " | Cust=" + df_issues['shares_cust'].round(0).astype(int).astype(str),
-                "Present in Vest: " + df_issues['in_vest'].map({True: 'Yes', False: 'No'})
-                + " | Present in Cust: " + df_issues['in_cust'].map({True: 'Yes', False: 'No'})
-            )
-        else:
-            df_issues = pd.DataFrame(columns=[
-                'optticker',
-                'quantity',
-                'shares_cust',
-                'in_vest',
-                'in_cust',
-                'discrepancy',
-                'discrepancy_type',
-                'breakdown'
-            ])
-
-        df_issues['is_flex'] = (
-            df_issues.get('optticker', pd.Series(dtype=str)).str.contains("SPX|XSP", na=False) &
-            (self.fund.is_private_fund or self.fund.is_closed_end_fund)
-        )
-
-        flex_issues = df_issues[df_issues['is_flex']].copy() if not df_issues.empty else pd.DataFrame()
-        regular_issues = df_issues[~df_issues['is_flex']].copy() if not df_issues.empty else pd.DataFrame()
-
-        price_T1 = self._calculate_option_price_discrepancies(df1, 'T1')
-
-        self.results['custodian_option_t1'] = ReconciliationResult(
-            raw_recon=df1.loc[mask_qty].reset_index(drop=True) if 'optticker' in df1 else pd.DataFrame(),
-            final_recon=df_issues.reset_index(drop=True),
-            price_discrepancies_T=pd.DataFrame(),
-            price_discrepancies_T1=price_T1,
-            merged_data=df1.copy(),
-            regular_options=regular_issues,
-            flex_options=flex_issues
-        )
-
-        for _, row in df_issues.iterrows():
-            dtype = row.get('discrepancy_type', 'Unknown')
-            desc = row.get('breakdown', '')
-            value = row.get('discrepancy', 'N/A') if dtype == 'Quantity Mismatch' else 'N/A'
-            self.add_summary_row(f"Custodian Option T-1: {dtype}", row.get('optticker', ''), desc, value)
-
-    def reconcile_custodian_treasury(self):
-        """Reconcile custodian treasury holdings for current date"""
-        df_oms = self._payload_frame('vest_treasury', 'treasury_holdings').copy()
-        df_cust = self._payload_frame('custodian_treasury', 'custodian_treasury_holdings').copy()
-
-        if df_oms.empty and df_cust.empty:
-            self.results['custodian_treasury'] = ReconciliationResult(
-                raw_recon=pd.DataFrame(),
-                final_recon=pd.DataFrame(),
-                price_discrepancies_T=pd.DataFrame(),
-                price_discrepancies_T1=pd.DataFrame(),
-                merged_data=pd.DataFrame()
-            )
-            return
-
-        if 'cusip' not in df_oms.columns:
-            if df_oms.empty:
-                df_oms['cusip'] = pd.Series(dtype=object)
-            else:
-                self.logger.warning("Missing CUSIP column for OMS treasury holdings")
-                self.results['custodian_treasury'] = ReconciliationResult(
-                    raw_recon=pd.DataFrame(),
-                    final_recon=pd.DataFrame(),
-                    price_discrepancies_T=pd.DataFrame(),
-                    price_discrepancies_T1=pd.DataFrame(),
-                    merged_data=pd.DataFrame()
-                )
-                return
-
-        if 'cusip' not in df_cust.columns:
-            if df_cust.empty:
-                df_cust['cusip'] = pd.Series(dtype=object)
-            else:
-                self.logger.warning("Missing CUSIP column for custodian treasury holdings")
-                self.results['custodian_treasury'] = ReconciliationResult(
-                    raw_recon=pd.DataFrame(),
-                    final_recon=pd.DataFrame(),
-                    price_discrepancies_T=pd.DataFrame(),
-                    price_discrepancies_T1=pd.DataFrame(),
-                    merged_data=pd.DataFrame()
-                )
-                return
-
-        df_oms['quantity'] = self._get_quantity_column(df_oms)
-        if 'shares_cust' not in df_cust.columns:
-            for candidate in ['quantity', 'par', 'par_value', 'face', 'position', 'amount']:
-                if candidate in df_cust.columns:
-                    df_cust['shares_cust'] = df_cust[candidate]
-                    break
-            else:
-                df_cust['shares_cust'] = 0.0
-        df_cust['shares_cust'] = self._coerce_numeric_series(df_cust['shares_cust'])
-
-        df = pd.merge(
-            df_oms,
-            df_cust,
-            on='cusip',
-            how='outer',
-            suffixes=('_vest', '_cust'),
-            indicator=True
-        )
-
-        quantity_series = df['quantity'] if 'quantity' in df else pd.Series(0.0, index=df.index)
-        shares_series = df['shares_cust'] if 'shares_cust' in df else pd.Series(0.0, index=df.index)
-        df['quantity'] = self._coerce_numeric_series(quantity_series)
-        df['shares_cust'] = self._coerce_numeric_series(shares_series)
-        df['in_vest'] = df['_merge'] != 'right_only'
-        df['in_cust'] = df['_merge'] != 'left_only'
-        df['quantity_diff'] = df['quantity'] - df['shares_cust']
-
-        mask_missing = df['in_vest'] != df['in_cust']
-        mask_qty = df['in_vest'] & df['in_cust'] & df['quantity_diff'].abs().gt(0)
-        df_issues = df.loc[mask_missing | mask_qty].copy()
-
-        if not df_issues.empty:
-            df_issues['discrepancy_type'] = np.select(
-                [
-                    ~df_issues['in_vest'] & df_issues['in_cust'],
-                    df_issues['in_vest'] & ~df_issues['in_cust'],
-                    mask_qty.loc[df_issues.index],
-                ],
-                ['Missing in OMS', 'Missing in Custodian', 'Quantity Mismatch'],
-                default='Unknown',
-            )
-            df_issues['breakdown'] = np.where(
-                df_issues['discrepancy_type'] == 'Quantity Mismatch',
-                "Vest=" + df_issues['quantity'].round(2).astype(str)
-                + " | Cust=" + df_issues['shares_cust'].round(2).astype(str),
-                "Present in Vest: " + df_issues['in_vest'].map({True: 'Yes', False: 'No'})
-                + " | Present in Cust: " + df_issues['in_cust'].map({True: 'Yes', False: 'No'})
-            )
-        else:
-            df_issues = pd.DataFrame(columns=[
-                'cusip',
-                'quantity',
-                'shares_cust',
-                'in_vest',
-                'in_cust',
-                'quantity_diff',
-                'discrepancy_type',
-                'breakdown'
-            ])
-
-        price_disc_T = self._calculate_price_discrepancies(df, 'cusip')
-
-        self.results['custodian_treasury'] = ReconciliationResult(
-            raw_recon=df.loc[mask_qty].reset_index(drop=True),
-            final_recon=df_issues.reset_index(drop=True),
-            price_discrepancies_T=price_disc_T,
-            price_discrepancies_T1=pd.DataFrame(),
-            merged_data=df.copy()
-        )
-
-        for _, row in df_issues.iterrows():
-            dtype = row.get('discrepancy_type', 'Unknown')
-            desc = row.get('breakdown', '')
-            value = row.get('quantity_diff', 'N/A') if dtype == 'Quantity Mismatch' else 'N/A'
-            self.add_summary_row(f"Custodian Treasury: {dtype}", row.get('cusip', ''), desc, value)
-
-        for _, row in price_disc_T.iterrows():
-            self.add_summary_row(
-                "Custodian Treasury Price (T)",
-                row.get('cusip', ''),
-                f"{row['price_vest']:.4f} vs {row['price_cust']:.4f}",
-                row.get('price_diff', 0.0),
-            )
-
-    def reconcile_custodian_treasury_t1(self):
-        """Reconcile custodian treasury holdings for T-1 date"""
-        # Similar to reconcile_custodian_treasury but using previous data
-        df_oms1 = self._previous_frame('treasury', source='vest')
-        df_cust1 = self._previous_frame('treasury', source='custodian')
-        if df_oms1.empty and df_cust1.empty:
-            self.results['custodian_treasury_t1'] = ReconciliationResult(
-                raw_recon=pd.DataFrame(),
-                final_recon=pd.DataFrame(),
-                price_discrepancies_T=pd.DataFrame(),
-                price_discrepancies_T1=pd.DataFrame(),
-                merged_data=pd.DataFrame()
-            )
-            return
-
-        if 'cusip' not in df_oms1.columns:
-            if df_oms1.empty:
-                df_oms1['cusip'] = pd.Series(dtype=object)
-            else:
-                self.logger.warning("Missing CUSIP column for OMS treasury T-1 holdings")
-                self.results['custodian_treasury_t1'] = ReconciliationResult(
-                    raw_recon=pd.DataFrame(),
-                    final_recon=pd.DataFrame(),
-                    price_discrepancies_T=pd.DataFrame(),
-                    price_discrepancies_T1=pd.DataFrame(),
-                    merged_data=pd.DataFrame()
-                )
-                return
-
-        if 'cusip' not in df_cust1.columns:
-            if df_cust1.empty:
-                df_cust1['cusip'] = pd.Series(dtype=object)
-            else:
-                self.logger.warning("Missing CUSIP column for custodian treasury T-1 holdings")
-                self.results['custodian_treasury_t1'] = ReconciliationResult(
-                    raw_recon=pd.DataFrame(),
-                    final_recon=pd.DataFrame(),
-                    price_discrepancies_T=pd.DataFrame(),
-                    price_discrepancies_T1=pd.DataFrame(),
-                    merged_data=pd.DataFrame()
-                )
-                return
-
-        df_oms1['quantity'] = self._get_quantity_column(df_oms1)
-        if 'shares_cust' not in df_cust1.columns:
-            for candidate in ['quantity', 'par', 'par_value', 'face', 'position', 'amount']:
-                if candidate in df_cust1.columns:
-                    df_cust1['shares_cust'] = df_cust1[candidate]
-                    break
-            else:
-                df_cust1['shares_cust'] = 0.0
-        df_cust1['shares_cust'] = self._coerce_numeric_series(df_cust1['shares_cust'])
-
-        df1 = pd.merge(
-            df_oms1,
-            df_cust1,
-            on='cusip',
-            how='outer',
-            suffixes=('_vest', '_cust'),
-            indicator=True
-        )
-
-        quantity_series = df1['quantity'] if 'quantity' in df1 else pd.Series(0.0, index=df1.index)
-        shares_series = df1['shares_cust'] if 'shares_cust' in df1 else pd.Series(0.0, index=df1.index)
-        df1['quantity'] = self._coerce_numeric_series(quantity_series)
-        df1['shares_cust'] = self._coerce_numeric_series(shares_series)
-        df1['in_vest'] = df1['_merge'] != 'right_only'
-        df1['in_cust'] = df1['_merge'] != 'left_only'
-        df1['quantity_diff'] = df1['quantity'] - df1['shares_cust']
-
-        mask_missing = df1['in_vest'] != df1['in_cust']
-        mask_qty = df1['in_vest'] & df1['in_cust'] & df1['quantity_diff'].abs().gt(0)
-        df_issues = df1.loc[mask_missing | mask_qty].copy()
-
-        if not df_issues.empty:
-            df_issues['discrepancy_type'] = np.select(
-                [
-                    ~df_issues['in_vest'] & df_issues['in_cust'],
-                    df_issues['in_vest'] & ~df_issues['in_cust'],
-                    mask_qty.loc[df_issues.index],
-                ],
-                ['Missing in OMS', 'Missing in Custodian', 'Quantity Mismatch'],
-                default='Unknown',
-            )
-            df_issues['breakdown'] = np.where(
-                df_issues['discrepancy_type'] == 'Quantity Mismatch',
-                "Vest=" + df_issues['quantity'].round(2).astype(str)
-                + " | Cust=" + df_issues['shares_cust'].round(2).astype(str),
-                "Present in Vest: " + df_issues['in_vest'].map({True: 'Yes', False: 'No'})
-                + " | Present in Cust: " + df_issues['in_cust'].map({True: 'Yes', False: 'No'})
-            )
-        else:
-            df_issues = pd.DataFrame(columns=[
-                'cusip',
-                'quantity',
-                'shares_cust',
-                'in_vest',
-                'in_cust',
-                'quantity_diff',
-                'discrepancy_type',
-                'breakdown'
-            ])
-
-        price_disc_T1 = self._calculate_price_discrepancies(df1, 'cusip')
-
-        self.results['custodian_treasury_t1'] = ReconciliationResult(
-            raw_recon=df1.loc[mask_qty].reset_index(drop=True),
-            final_recon=df_issues.reset_index(drop=True),
-            price_discrepancies_T=pd.DataFrame(),
-            price_discrepancies_T1=price_disc_T1,
-            merged_data=df1.copy()
-        )
-
-        for _, row in df_issues.iterrows():
-            dtype = row.get('discrepancy_type', 'Unknown')
-            desc = row.get('breakdown', '')
-            value = row.get('quantity_diff', 'N/A') if dtype == 'Quantity Mismatch' else 'N/A'
-            self.add_summary_row(f"Custodian Treasury T-1: {dtype}", row.get('cusip', ''), desc, value)
-
-        for _, row in price_disc_T1.iterrows():
-            self.add_summary_row(
-                "Custodian Treasury Price (T-1)",
-                row.get('cusip', ''),
-                f"{row['price_vest']:.4f} vs {row['price_cust']:.4f}",
-                row.get('price_diff', 0.0),
-            )
 
     def _build_equity_details(self):
         """Assemble detailed calculations for downstream reporting."""
@@ -1332,10 +1325,15 @@ class Reconciliator:
             return value.copy() if isinstance(value, pd.DataFrame) else pd.DataFrame()
 
         equity_details = {
-            'vest_current': self._current_frame('equity', source='vest'),
-            'custodian_current': self._current_frame('equity', source='custodian'),
-            'vest_previous': self._previous_frame('equity', source='vest'),
-            'custodian_previous': self._previous_frame('equity', source='custodian'),
+            # Current day holdings
+            'vest_current': self.fund_data.get('vest_equity', pd.DataFrame()).copy(),
+            'custodian_current': self.fund_data.get('custodian_equity', pd.DataFrame()).copy(),
+
+            # T-1 holdings
+            'vest_previous': self.fund_data.get('vest_equity_t1', pd.DataFrame()).copy(),
+            'custodian_previous': self.fund_data.get('custodian_equity_t1', pd.DataFrame()).copy(),
+
+            # Other inputs
             'trades': self.fund_data.get('equity_trades', pd.DataFrame()).copy(),
             'corporate_actions': self.fund_data.get('cr_rd_data', pd.DataFrame()).copy(),
         }
@@ -1350,7 +1348,9 @@ class Reconciliator:
                 'final': _safe_result_df('custodian_equity_t1', 'final_recon'),
             },
             'index_equity': {
-                'final': _safe_result_df('index_equity', 'final_recon'),
+                # index_equity returns dict, not ReconciliationResult
+                'final': self.results.get('index_equity', {}).get('significant_diffs', pd.DataFrame()).copy()
+                if isinstance(self.results.get('index_equity'), dict) else pd.DataFrame(),
             },
         }
 
