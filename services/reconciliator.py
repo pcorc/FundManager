@@ -4,12 +4,8 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, Optional
 from domain.fund import Fund, FundSnapshot, FundHoldings
-from config.fund_definitions import (
-    DIVERSIFIED_FUNDS,
-    NON_DIVERSIFIED_FUNDS,
-    PRIVATE_FUNDS,
-    CLOSED_END_FUNDS,
-)
+from config.fund_definitions import FUND_DEFINITIONS
+
 from utilities.ticker_utils import normalize_equity_pair, normalize_option_pair
 
 
@@ -32,7 +28,22 @@ class Reconciliator:
         self.analysis_type = analysis_type
         self.results = {}
         self.logger = logging.getLogger(f"Reconciliator_{fund_name}")
-        self.is_etf = fund_name not in PRIVATE_FUNDS and fund_name not in CLOSED_END_FUNDS
+        self.fund_definition = FUND_DEFINITIONS.get(fund_name, {})
+        vehicle = (self.fund_definition.get("vehicle_wrapper") or "").lower()
+        self.vehicle_wrapper = vehicle
+        self.is_private_fund = vehicle == "private_fund"
+        self.is_closed_end_fund = vehicle == "closed_end_fund"
+        if vehicle:
+            self.is_etf = vehicle == "etf"
+        else:
+            self.is_etf = not (self.is_private_fund or self.is_closed_end_fund)
+        self.has_flex_option = bool(self.fund_definition.get("has_flex_option"))
+        self.flex_option_type = (
+            (self.fund_definition.get("flex_option_type") or "").lower()
+            if self.has_flex_option
+            else None
+        )
+        self._uses_spx_flex = self.has_flex_option and self.flex_option_type == "index"
         self.fund = fund_data.get('fund_object') if isinstance(fund_data, dict) else None
         self.holdings_price_breaks = fund_data.get("holdings_price_breaks", {}) if isinstance(fund_data, dict) else {}
         self.summary_rows = []  # Initialize summary_rows list
@@ -96,6 +107,16 @@ class Reconciliator:
                 summary[recon_type] = {k: 0 for k in keys}
 
         return summary
+
+    def _spx_flex_mask(self, ticker_series: pd.Series) -> pd.Series:
+        """Return a FLEX mask for SPX/XSP tickers when enabled for the fund."""
+        if ticker_series is None:
+            return pd.Series(dtype=bool)
+
+        if not self._uses_spx_flex:
+            return pd.Series(False, index=ticker_series.index)
+
+        return ticker_series.str.contains("SPX|XSP", na=False)
 
     def _set_internal_quantity_column(self, df_internal):
         """
@@ -194,10 +215,7 @@ class Reconciliator:
             qty_col = "quantity_t1" if self.analysis_type == "ex_ante" else "quantity_t"
 
             # Separate flex and regular options
-            is_flex = (
-                    df_opt["optticker"].str.contains("SPX|XSP", na=False) &
-                    self.fund_name.startswith(("PF", "PD"))
-            )
+            is_flex = self._spx_flex_mask(df_opt["optticker"])
 
             # Regular options
             regular_opt = df_opt[~is_flex].copy()
