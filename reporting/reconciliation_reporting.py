@@ -1,5 +1,6 @@
 """Holdings reconciliation reporting utilities."""
 from __future__ import annotations
+from openpyxl.styles import Alignment, PatternFill
 
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -477,6 +478,7 @@ class ReconciliationReport:
                 self._create_price_comparison_tab(writer)
                 self._create_system_specific_tabs(writer)
                 self._format_price_comparison_tab(writer)
+            self._apply_global_header_formatting(writer)
             if writer.book.sheetnames:
                 writer.book[writer.book.sheetnames[0]].sheet_state = "visible"
 
@@ -527,26 +529,17 @@ class ReconciliationReport:
         row = {"Fund": fund, "Date": self.date}
         columns = [
             "custodian_equity_holdings_breaks_T",
-            "custodian_equity_holdings_breaks_T_1",
             "custodian_equity_price_breaks_T",
-            "custodian_equity_price_breaks_T_1",
             "custodian_option_holdings_breaks_T",
-            "custodian_option_holdings_breaks_T_1",
             "custodian_option_regular_breaks_T",
             "custodian_option_flex_breaks_T",
             "custodian_option_price_breaks_T",
-            "custodian_option_price_breaks_T_1",
             "flex_option_holdings_breaks_T",
-            "flex_option_holdings_breaks_T_1",
             "flex_option_price_breaks_T",
-            "flex_option_price_breaks_T_1",
             "custodian_treasury_holdings_breaks_T",
-            "custodian_treasury_holdings_breaks_T_1",
             "custodian_treasury_price_breaks_T",
-            "custodian_treasury_price_breaks_T_1",
             "index_equity_holdings_breaks",
             "index_equity_price_breaks_T",
-            "index_equity_price_breaks_T_1",
             "sg_option_breaks",
             "sg_equity_breaks",
         ]
@@ -564,26 +557,17 @@ class ReconciliationReport:
     def _map_recon_key_to_summary(self, recon_type: str) -> str | None:
         mapping = {
             "custodian_equity": "custodian_equity_holdings_breaks_T",
-            "custodian_equity_t1": "custodian_equity_holdings_breaks_T_1",
             "custodian_equity_price_T": "custodian_equity_price_breaks_T",
-            "custodian_equity_price_T-1": "custodian_equity_price_breaks_T_1",
             "custodian_option": "custodian_option_holdings_breaks_T",
-            "custodian_option_t1": "custodian_option_holdings_breaks_T_1",
             "custodian_option_regular": "custodian_option_regular_breaks_T",
             "custodian_option_flex": "custodian_option_flex_breaks_T",
             "custodian_option_price_T": "custodian_option_price_breaks_T",
-            "custodian_option_price_T-1": "custodian_option_price_breaks_T_1",
             "custodian_option_flex_holdings": "flex_option_holdings_breaks_T",
-            "custodian_option_flex_holdings_t1": "flex_option_holdings_breaks_T_1",
             "custodian_option_flex_price_T": "flex_option_price_breaks_T",
-            "custodian_option_flex_price_T-1": "flex_option_price_breaks_T_1",
             "custodian_treasury": "custodian_treasury_holdings_breaks_T",
-            "custodian_treasury_t1": "custodian_treasury_holdings_breaks_T_1",
             "custodian_treasury_price_T": "custodian_treasury_price_breaks_T",
-            "custodian_treasury_price_T-1": "custodian_treasury_price_breaks_T_1",
             "index_equity": "index_equity_holdings_breaks",
             "index_equity_price_T": "index_equity_price_breaks_T",
-            "index_equity_price_T-1": "index_equity_price_breaks_T_1",
             "sg_option": "sg_option_breaks",
             "sg_equity": "sg_equity_breaks",
         }
@@ -614,6 +598,8 @@ class ReconciliationReport:
         price_comparison: list[pd.DataFrame] = []
         for (fund, date_str, recon_type), df in self.flattened_results.items():
             if "_price_" not in recon_type:
+                continue
+            if "t-1" in recon_type.lower():
                 continue
             df_copy = df.copy()
             df_copy["FUND"] = fund
@@ -762,16 +748,10 @@ class ReconciliationReport:
     def _format_price_comparison_tab(self, writer: pd.ExcelWriter) -> None:
         if "COMPREHENSIVE PRICE COMPARISON" not in writer.sheets:
             return
-        from openpyxl.styles import Alignment, Font, PatternFill
 
         worksheet = writer.sheets["COMPREHENSIVE PRICE COMPARISON"]
-        header_fill = PatternFill(start_color="D3E4F7", end_color="D3E4F7", fill_type="solid")
+        self._apply_header_styles(worksheet)
         weight_fill = PatternFill(start_color="E2F0D9", end_color="E2F0D9", fill_type="solid")
-
-        for cell in worksheet[1]:
-            cell.font = Font(bold=True)
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal="center", vertical="center")
 
         weight_idx = None
         pct_idx = None
@@ -802,6 +782,22 @@ class ReconciliationReport:
                     max_length = max(max_length, len(str(cell.value)))
             worksheet.column_dimensions[column_letter].width = min(max_length + 2, 50)
 
+    def _apply_global_header_formatting(self, writer: pd.ExcelWriter) -> None:
+        for worksheet in writer.sheets.values():
+            self._apply_header_styles(worksheet)
+
+    @staticmethod
+    def _apply_header_styles(worksheet) -> None:
+        from openpyxl.styles import Alignment, Font, PatternFill
+
+        header_fill = PatternFill(start_color="D3E4F7", end_color="D3E4F7", fill_type="solid")
+        header_font = Font(bold=True)
+        for cell in worksheet[1]:
+            if cell.value is None:
+                continue
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center")
 
 class ReconciliationReportPDF(BaseReportPDF, HoldingsReconciliationRenderer):
     """Generate the enhanced holdings reconciliation PDF report."""
@@ -880,13 +876,10 @@ class ReconciliationReportPDF(BaseReportPDF, HoldingsReconciliationRenderer):
             ("Index\nWgt Diff", 18),
             ("Cust Eq\nHold Brk", 18),
             ("Cust Eq\nPrice T", 18),
-            ("Cust Eq\nPrice T-1", 18),
             ("Cust Opt\nHold Brk", 18),
             ("Cust Opt\nPrice T", 18),
-            ("Cust Opt\nPrice T-1", 18),
             ("Cust Tsy\nHold Brk", 18),
             ("Cust Tsy\nPrice T", 18),
-            ("Cust Tsy\nPrice T-1", 18),
         ]
 
         self.pdf.set_font("Arial", "B", 6)
@@ -917,13 +910,10 @@ class ReconciliationReportPDF(BaseReportPDF, HoldingsReconciliationRenderer):
                 summary.get("index_equity", {}).get("significant_diffs", 0),
                 summary.get("custodian_equity", {}).get("final_recon", 0),
                 summary.get("custodian_equity", {}).get("price_discrepancies_T", 0),
-                summary.get("custodian_equity", {}).get("price_discrepancies_T1", 0),
                 summary.get("custodian_option", {}).get("final_recon", 0),
                 summary.get("custodian_option", {}).get("price_discrepancies_T", 0),
-                summary.get("custodian_option", {}).get("price_discrepancies_T1", 0),
                 summary.get("custodian_treasury", {}).get("final_recon", 0),
                 summary.get("custodian_treasury", {}).get("price_discrepancies_T", 0),
-                summary.get("custodian_treasury", {}).get("price_discrepancies_T1", 0),
             ]
 
             self.pdf.set_font("Arial", size=7)

@@ -978,86 +978,130 @@ class DailyOperationsSummaryPDF(BaseReportPDF):
         self.add_subtitle(f"As of {self.report_date}")
 
         if self.compliance_results:
-            compliance_summary = summarise_compliance_status(self.compliance_results)
-            self.add_section_heading("Compliance Overview")
-            rows = [
-                ("Funds Processed", compliance_summary["funds"]),
-                ("Funds with Breaches", compliance_summary["funds_in_breach"]),
-                ("Checks Evaluated", compliance_summary["total_checks"]),
-                ("Checks Failed", compliance_summary["failed_checks"]),
-            ]
-            self.add_key_value_table(rows, header=("Metric", "Value"))
+            self._render_compliance_overview()
 
         if self.reconciliation_results:
-            totals = summarise_reconciliation_breaks(self.reconciliation_results)
-            self.add_section_heading("Holdings Reconciliation")
-            rows = [
-                (name.replace("_", " ").title(), totals.get(name, 0))
-                for name in sorted(totals)
-            ]
-            if rows:
-                # FIX: Use 'align' instead of 'alignments'
-                self.add_table([
-                    "Reconciliation",
-                    "Total Breaks",
-                ], rows, column_widths=[100, 40], align=["L", "R"])
-
-            for fund_name, payload in sorted(self.reconciliation_results.items()):
-                summary = payload.get("summary", {})
-                if not summary:
-                    continue
-                self.add_section_heading(f"{fund_name} - Breaks")
-                fund_rows = []
-                for recon_type, metrics in sorted(summary.items()):
-                    total_breaks = sum(
-                        int(value)
-                        for value in (metrics or {}).values()
-                        if isinstance(value, (int, float))
-                    )
-                    fund_rows.append((recon_type.replace("_", " ").title(), total_breaks))
-                if fund_rows:
-                    self.add_key_value_table(fund_rows, header=("Reconciliation", "Breaks"))
+            self._render_reconciliation_summary()
 
         if self.nav_results:
-            self.add_section_heading("NAV Reconciliation")
-            totals = summarise_nav_differences(self.nav_results)
-            avg_diff = (
-                totals["absolute_difference"] / totals["funds"]
-                if totals["funds"]
-                else 0.0
-            )
-            self.add_key_value_table(
-                [
-                    ("Funds Analysed", totals["funds"]),
-                    ("Total Absolute Variance", format_number(totals["absolute_difference"], 4)),
-                    ("Average Absolute Variance", format_number(avg_diff, 4)),
-                ],
-                header=("Metric", "Value"),
-            )
-
-            detail_rows = []
-            for fund_name, payload in sorted(self.nav_results.items()):
-                summary = payload.get("summary", {})
-                if not summary:
-                    continue
-                detail_rows.append(
-                    (
-                        fund_name,
-                        format_number(summary.get("expected_nav"), 4),
-                        format_number(summary.get("current_nav"), 4),
-                        format_number(summary.get("difference"), 4),
-                    )
-                )
-            if detail_rows:
-                # FIX: Use 'align' instead of 'alignments'
-                self.add_table(
-                    ["Fund", "Expected NAV", "Custodian NAV", "Variance"],
-                    detail_rows,
-                    column_widths=[70, 35, 35, 35],
-                    align=["L", "R", "R", "R"],
-                )
+            self._render_nav_summary()
 
         self.output()
+
+    def _metric_table_widths(self, column_count: int) -> list[float]:
+        usable_width = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
+        if column_count <= 1:
+            return [usable_width]
+        metric_width = usable_width * 0.3
+        remaining = usable_width - metric_width
+        fund_width = remaining / (column_count - 1)
+        return [metric_width] + [fund_width] * (column_count - 1)
+
+    def _render_compliance_overview(self) -> None:
+        self.add_section_heading("Compliance Overview")
+        compliance_summary = summarise_compliance_status(self.compliance_results)
+        rows = [
+            ("Funds Processed", compliance_summary["funds"]),
+            ("Funds with Breaches", compliance_summary["funds_in_breach"]),
+            ("Checks Evaluated", compliance_summary["total_checks"]),
+            ("Checks Failed", compliance_summary["failed_checks"]),
+        ]
+        self.add_key_value_table(rows, header=("Metric", "Value"))
+
+        funds = sorted(self.compliance_results)
+        if not funds:
+            return
+        breach_row = ["Breached?"]
+        failed_row = ["Failed Checks"]
+        for fund in funds:
+            fund_results = self.compliance_results.get(fund, {})
+            failed_count = 0
+            breached = False
+            for payload in fund_results.values():
+                if not isinstance(payload, Mapping):
+                    continue
+                status = payload.get("is_compliant")
+                if status is False or str(status).upper() == "FAIL":
+                    breached = True
+                    failed_count += 1
+            breach_row.append("Yes" if breached else "No")
+            failed_row.append(str(failed_count))
+
+        headers = ["Metric"] + funds
+        align = ["L"] + ["C"] * len(funds)
+        self.add_table(headers, [breach_row, failed_row], column_widths=self._metric_table_widths(len(headers)), align=align)
+
+    def _render_reconciliation_summary(self) -> None:
+        self.add_section_heading("Holdings Reconciliation")
+        funds = sorted(self.reconciliation_results)
+        metrics = []
+        for payload in self.reconciliation_results.values():
+            summary = payload.get("summary", {}) or {}
+            metrics.extend(summary.keys())
+        metric_names = sorted(set(metrics))
+        if not metric_names or not funds:
+            self.add_paragraph("No reconciliation data available.")
+            return
+
+        rows = []
+        for metric in metric_names:
+            row = [metric.replace("_", " ").title()]
+            for fund in funds:
+                summary = self.reconciliation_results.get(fund, {}).get("summary", {}) or {}
+                values = summary.get(metric, {}) or {}
+                if isinstance(values, Mapping):
+                    total_breaks = sum(
+                        int(value)
+                        for value in values.values()
+                        if isinstance(value, (int, float))
+                    )
+                elif isinstance(values, (int, float)):
+                    total_breaks = int(values)
+                else:
+                    total_breaks = 0
+                row.append(str(total_breaks))
+            rows.append(row)
+
+        headers = ["Reconciliation"] + funds
+        align = ["L"] + ["R"] * len(funds)
+        self.add_table(headers, rows, column_widths=self._metric_table_widths(len(headers)), align=align)
+
+    def _render_nav_summary(self) -> None:
+        self.add_section_heading("NAV Reconciliation")
+        totals = summarise_nav_differences(self.nav_results)
+        avg_diff = (
+            totals["absolute_difference"] / totals["funds"]
+            if totals["funds"]
+            else 0.0
+        )
+        self.add_key_value_table(
+            [
+                ("Funds Analysed", totals["funds"]),
+                ("Total Absolute Variance", format_number(totals["absolute_difference"], 4)),
+                ("Average Absolute Variance", format_number(avg_diff, 4)),
+            ],
+            header=("Metric", "Value"),
+        )
+
+        funds = sorted(self.nav_results)
+        if not funds:
+            return
+        metric_rows = []
+        metric_map = [
+            ("Expected NAV", "expected_nav"),
+            ("Custodian NAV", "current_nav"),
+            ("NAV Difference", "difference"),
+        ]
+        for label, key in metric_map:
+            row = [label]
+            for fund in funds:
+                summary = self.nav_results.get(fund, {}).get("summary", {}) or {}
+                row.append(format_number(summary.get(key), 4))
+            metric_rows.append(row)
+
+        headers = ["Metric"] + funds
+        align = ["L"] + ["R"] * len(funds)
+        self.add_table(headers, metric_rows, column_widths=self._metric_table_widths(len(headers)), align=align)
 
 
 def generate_nav_reconciliation_reports(reconciliation_results, date_str, excel_path):
