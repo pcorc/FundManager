@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Sequence, T
 import numpy as np
 import pandas as pd
 
-from config.fund_definitions import FUND_DEFINITIONS
+from config.fund_definitions import FUND_DEFINITIONS, INDEX_FLEX_FUNDS
 from reporting.base_report_pdf import BaseReportPDF
 from reporting.holdings_recon_renderer import HoldingsReconciliationRenderer
 from reporting.report_utils import normalize_reconciliation_payload, normalize_report_date
@@ -595,7 +595,7 @@ class ReconciliationReport:
             if "_price_" in recon_type:
                 continue
             df_copy = df.copy()
-            df_copy["Asset Type"] = self._determine_asset_type(recon_type, df_copy)
+            df_copy["Asset Type"] = self._determine_asset_type(fund, recon_type, df_copy)
             all_breaks.append(df_copy)
         if not all_breaks:
             return
@@ -627,7 +627,11 @@ class ReconciliationReport:
         comparison_df = self._build_price_comparison_df(all_prices)
         comparison_df.to_excel(writer, sheet_name="COMPREHENSIVE PRICE COMPARISON", index=False)
 
-    def _determine_asset_type(self, recon_type: str, df: pd.DataFrame) -> str:
+    @staticmethod
+    def _uses_index_flex(fund_name: Optional[str]) -> bool:
+        return bool(fund_name) and fund_name in INDEX_FLEX_FUNDS
+
+    def _determine_asset_type(self, fund: Optional[str], recon_type: str, df: pd.DataFrame) -> str:
         recon_lower = recon_type.lower()
         if "flex" in recon_lower:
             return "FLEX"
@@ -643,7 +647,12 @@ class ReconciliationReport:
             return "Equity"
         if "optticker" in df.columns or "occ_symbol" in df.columns:
             tickers = df.get("optticker") or df.get("occ_symbol")
-            if isinstance(tickers, pd.Series) and tickers.str.contains("SPX|XSP", na=False).any():
+            uses_index_flex = self._uses_index_flex(fund)
+            if (
+                uses_index_flex
+                and isinstance(tickers, pd.Series)
+                and tickers.str.contains("SPX|XSP", na=False).any()
+            ):
                 return "FLEX"
             return "Option"
         return "Unknown"

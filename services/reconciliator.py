@@ -4,8 +4,15 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, Optional
 from domain.fund import Fund, FundSnapshot, FundHoldings
-from config.fund_definitions import FUND_DEFINITIONS
-
+from config.fund_definitions import (
+    FUND_DEFINITIONS,
+    CLOSED_END_FUNDS,
+    PRIVATE_FUNDS,
+    ETF_FUNDS,
+    DIVERSIFIED_FUNDS,
+    NON_DIVERSIFIED_FUNDS,
+    INDEX_FLEX_FUNDS,
+)
 from utilities.ticker_utils import normalize_equity_pair, normalize_option_pair
 
 
@@ -31,19 +38,12 @@ class Reconciliator:
         self.fund_definition = FUND_DEFINITIONS.get(fund_name, {})
         vehicle = (self.fund_definition.get("vehicle_wrapper") or "").lower()
         self.vehicle_wrapper = vehicle
-        self.is_private_fund = vehicle == "private_fund"
-        self.is_closed_end_fund = vehicle == "closed_end_fund"
-        if vehicle:
-            self.is_etf = vehicle == "etf"
-        else:
-            self.is_etf = not (self.is_private_fund or self.is_closed_end_fund)
-        self.has_flex_option = bool(self.fund_definition.get("has_flex_option"))
-        self.flex_option_type = (
-            (self.fund_definition.get("flex_option_type") or "").lower()
-            if self.has_flex_option
-            else None
-        )
-        self._uses_spx_flex = self.has_flex_option and self.flex_option_type == "index"
+        self.is_closed_end_fund = fund_name in CLOSED_END_FUNDS
+        self.is_private_fund = fund_name in PRIVATE_FUNDS
+        self.is_etf = fund_name in ETF_FUNDS
+        self.is_diversified = fund_name in DIVERSIFIED_FUNDS
+        self.is_non_diversified = fund_name in NON_DIVERSIFIED_FUNDS
+        self.uses_index_flex = fund_name in INDEX_FLEX_FUNDS
         self.fund = fund_data.get('fund_object') if isinstance(fund_data, dict) else None
         self.holdings_price_breaks = fund_data.get("holdings_price_breaks", {}) if isinstance(fund_data, dict) else {}
         self.summary_rows = []  # Initialize summary_rows list
@@ -215,7 +215,10 @@ class Reconciliator:
             qty_col = "quantity_t1" if self.analysis_type == "ex_ante" else "quantity_t"
 
             # Separate flex and regular options
-            is_flex = self._spx_flex_mask(df_opt["optticker"])
+            if self.uses_index_flex and 'optticker' in df_opt.columns:
+                is_flex = df_opt['optticker'].str.contains("SPX|XSP", na=False)
+            else:
+                is_flex = pd.Series(False, index=df_opt.index)
 
             # Regular options
             regular_opt = df_opt[~is_flex].copy()
@@ -892,10 +895,10 @@ class Reconciliator:
                 'breakdown'
             ])
 
-        df_issues['is_flex'] = (
-            df_issues.get('optticker', pd.Series(dtype=str)).str.contains("SPX|XSP", na=False) &
-            (self.fund.is_private_fund or self.fund.is_closed_end_fund)
-        )
+        if 'optticker' in df_issues.columns and self.uses_index_flex:
+            df_issues['is_flex'] = df_issues['optticker'].str.contains("SPX|XSP", na=False)
+        else:
+            df_issues['is_flex'] = pd.Series(False, index=df_issues.index)
 
         flex_issues = df_issues[df_issues['is_flex']].copy() if not df_issues.empty else pd.DataFrame()
         regular_issues = df_issues[~df_issues['is_flex']].copy() if not df_issues.empty else pd.DataFrame()
@@ -1290,10 +1293,12 @@ class Reconciliator:
 
             # Add FLEX indicator and weights
             if not price_discrepancies.empty:
-                price_discrepancies['is_flex'] = (
-                        price_discrepancies['optticker'].str.contains("SPX|XSP", na=False) &
-                        (self.fund.is_private_fund or self.fund.is_closed_end_fund)
-                )
+                if self.uses_index_flex and 'optticker' in price_discrepancies.columns:
+                    price_discrepancies['is_flex'] = price_discrepancies['optticker'].str.contains(
+                        "SPX|XSP", na=False
+                    )
+                else:
+                    price_discrepancies['is_flex'] = False
 
                 # Add option weights
                 if 'option_weight' in df.columns:
@@ -1307,7 +1312,7 @@ class Reconciliator:
                     price_discrepancies['option_weight'] = 0.0
 
                 # Filter standard options for private/closed-end funds
-                if self.fund.is_private_fund or self.fund.is_closed_end_fund:
+                if self.vehicle_wrapper in {"private_fund", "closed_end_fund"}:
                     standard_price = price_discrepancies[~price_discrepancies['is_flex']].copy()
                     flex_price = price_discrepancies[price_discrepancies['is_flex']].copy()
 

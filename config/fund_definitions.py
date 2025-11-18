@@ -758,3 +758,50 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "diversification_status": "diversified",
     },
 }
+
+CLOSED_END_FUNDS = {
+    fund
+    for fund, payload in FUND_DEFINITIONS.items()
+    if payload.get("vehicle_wrapper", "").lower() == "closed_end_fund"
+}
+PRIVATE_FUNDS = {
+    fund
+    for fund, payload in FUND_DEFINITIONS.items()
+    if payload.get("vehicle_wrapper", "").lower() == "private_fund"
+}
+ETF_FUNDS = {
+    fund
+    for fund, payload in FUND_DEFINITIONS.items()
+    if payload.get("vehicle_wrapper", "").lower() == "etf"
+}
+
+DIVERSIFIED_FUNDS = {
+    fund
+    for fund, payload in FUND_DEFINITIONS.items()
+    if payload.get("diversification_status") == "diversified"
+}
+
+NON_DIVERSIFIED_FUNDS = {
+    fund
+    for fund, payload in FUND_DEFINITIONS.items()
+    if payload.get("diversification_status") == "non-diversified"
+}
+
+LISTED_INDEX_OPTION_FUNDS = {
+    fund
+    for fund, payload in FUND_DEFINITIONS.items()
+    if payload.get("listed_option_type") == "index"
+}
+
+LISTED_SINGLE_STOCK_OPTION_FUNDS = {
+    fund
+    for fund, payload in FUND_DEFINITIONS.items()
+    if payload.get("listed_option_type") == "single_stock"
+}
+
+INDEX_FLEX_FUNDS = {
+    fund
+    for fund, payload in FUND_DEFINITIONS.items()
+    if bool(payload.get("has_flex_option"))
+    and (payload.get("flex_option_type") or "").lower() == "index"
+}

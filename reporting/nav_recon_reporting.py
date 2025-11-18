@@ -6,6 +6,7 @@ from typing import Any, Dict, Mapping, Optional
 
 import pandas as pd
 
+from config.fund_definitions import INDEX_FLEX_FUNDS
 from reporting.base_report_pdf import BaseReportPDF
 from reporting.combined_reconciliation_report import build_combined_reconciliation_pdf
 
@@ -542,7 +543,7 @@ class NAVReconciliationExcelReport:
 
         return []
 
-    def _extract_flex_details(self, nav_data):
+    def _extract_flex_details(self, nav_data, fund_name: Optional[str] = None):
         """Extract flex option details from nav_data."""
         # First try detailed_calculations
         if 'detailed_calculations' in nav_data:
@@ -555,6 +556,11 @@ class NAVReconciliationExcelReport:
                     return flex_df
 
         # Fallback to raw_option filtered for flex
+        inferred_fund = fund_name or nav_data.get('fund') or nav_data.get('fund_name')
+        uses_index_flex = self._uses_index_flex(inferred_fund)
+        if not uses_index_flex:
+            return []
+
         if 'raw_option' in nav_data:
             raw_df = nav_data['raw_option']
             if isinstance(raw_df, pd.DataFrame) and not raw_df.empty:

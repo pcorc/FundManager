@@ -9,7 +9,7 @@ import pandas as pd
 from pandas.tseries.offsets import BDay, MonthEnd
 
 from domain.fund import Fund, GainLossResult
-
+from config.fund_definitions import FUND_DEFINITIONS, INDEX_FLEX_FUNDS
 
 @dataclass
 class _ComponentGL:
@@ -56,6 +56,19 @@ class NAVReconciliator:
         self.summary: Dict[str, float] = {}
         self.fund: Fund | None = fund
         self.socgen_custodian = socgen_custodian
+        self.fund_definition = FUND_DEFINITIONS.get(fund_name, {})
+        metadata_flex = bool(self.fund_definition.get("has_flex_option"))
+        fund_flex = bool(getattr(self.fund, "has_flex_option", False))
+        self.has_flex_option = metadata_flex or fund_flex
+        flex_type = (
+            getattr(self.fund, "flex_option_type", None)
+            or self.fund_definition.get("flex_option_type")
+            or ""
+        )
+        self.flex_option_type = flex_type.lower() or None
+        self.uses_index_flex = (
+            fund_name in INDEX_FLEX_FUNDS or self.flex_option_type == "index"
+        )
 
         # Containers that hold per component detail frames
         self.equity_details = pd.DataFrame(columns=self.DETAIL_COLUMNS)
@@ -186,7 +199,7 @@ class NAVReconciliator:
         return result
 
     def _calculate_flex_option_gl(self) -> _ComponentGL:
-        if isinstance(self.fund, Fund) and getattr(self.fund, "has_flex_option", False):
+        if self.has_flex_option:
             result = self._component_gain_loss("flex_options")
         else:
             result = _ComponentGL()

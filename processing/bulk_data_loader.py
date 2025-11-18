@@ -16,6 +16,7 @@ from utilities.ticker_utils import normalize_all_holdings
 class BulkDataStore:
     """Central storage for ALL fund data - no more SQL calls after initialization"""
     date: str
+    session: Optional[Any] = None
     # Data organized by [fund_name][data_type] -> DataFrame
     fund_data: Dict[str, Dict[str, pd.DataFrame]] = None
     # Metadata about what we loaded
@@ -51,7 +52,7 @@ class BulkDataLoader:
     ) -> BulkDataStore:
         """Bulk load data for ``target_date`` (and optionally ``previous_date``)."""
 
-        data_store = BulkDataStore(date=str(target_date))
+        data_store = BulkDataStore(date=str(target_date), session=self.session)
 
         # Get all funds from registry
         all_funds = self.fund_registry.funds
