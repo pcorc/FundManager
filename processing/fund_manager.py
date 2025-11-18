@@ -102,13 +102,19 @@ class FundManager:
         """Run compliance checks"""
         try:
             checker = ComplianceChecker(
-                fund=fund,
-                analysis_date=self.data_store.date,
+                getattr(self.data_store, "session", None),
+                funds={fund.name: fund},
+                date=getattr(self.data_store, "date", None),
+                base_cls=getattr(self.data_store, "base_cls", None),
                 analysis_type=self.analysis_type,
             )
 
-            # Run selected compliance tests
-            fund_results = checker.run_compliance(tests)
+            requested_tests = [test for test in tests if test]
+            checker_results = checker.run_compliance_tests(
+                test_functions=requested_tests or None
+            )
+
+            fund_results = dict(checker_results.get(fund.name, {}))
             fund_results["fund_object"] = fund
             return fund_results
 

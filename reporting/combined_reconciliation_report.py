@@ -1,5 +1,6 @@
 """Combined NAV and holdings reconciliation PDF report."""
 from __future__ import annotations
+import datetime
 
 import logging
 from pathlib import Path
@@ -84,6 +85,7 @@ class CombinedReconciliationReport:
 
     # ------------------------------------------------------------------
     def _generate_report(self) -> None:
+        self._add_title_page()
         self._add_nav_summary_page()
         self._add_holdings_summary_page()
         if self.compliance_results:
@@ -91,6 +93,54 @@ class CombinedReconciliationReport:
         self._add_gl_components_page()
         for fund in sorted(self._get_all_funds()):
             self._add_fund_detail_page(fund)
+
+    def _add_title_page(self) -> None:
+        self.pdf.add_page()
+        self.pdf.set_font("Arial", "B", 20)
+        self.pdf.cell(0, 18, "Combined Reconciliation Report", ln=True, align="C")
+        self.pdf.set_font("Arial", size=14)
+        self.pdf.cell(0, 10, f"Date: {self.date}", ln=True, align="C")
+        self.pdf.set_font("Arial", "I", 10)
+        self.pdf.cell(0, 8, f"Generated: {datetime.date.today():%Y-%m-%d}", ln=True, align="C")
+        self.pdf.ln(15)
+
+        self.pdf.set_font("Arial", "B", 16)
+        self.pdf.cell(0, 12, "Table of Contents", ln=True, align="C")
+        self.pdf.ln(5)
+
+        self.pdf.set_font("Arial", "B", 12)
+        self.pdf.cell(0, 8, "Fund Details", ln=True)
+        self.pdf.ln(3)
+
+        for fund_name in sorted(self._get_all_funds()):
+            fund_link = self.fund_links.get(fund_name)
+            if fund_link is None:
+                continue
+            self._add_toc_link(fund_name, fund_link)
+            for section in (
+                "NAV Reconciliation",
+                "Holdings Reconciliation",
+            ):
+                self._add_toc_sub_link(section, fund_link)
+
+    def _add_toc_link(self, text: str, link_id: int) -> None:
+        self.pdf.set_font("Arial", size=11)
+        self.pdf.set_text_color(0, 0, 200)
+        x, y = self.pdf.get_x(), self.pdf.get_y()
+        self.pdf.cell(160, 6, text, ln=False)
+        self.pdf.set_text_color(0, 0, 0)
+        self.pdf.cell(0, 6, "", ln=True, align="R")
+        self.pdf.link(x, y, 160, 6, link_id)
+
+    def _add_toc_sub_link(self, text: str, link_id: int) -> None:
+        self.pdf.set_font("Arial", size=10)
+        self.pdf.set_text_color(0, 0, 150)
+        self.pdf.cell(8)
+        x, y = self.pdf.get_x(), self.pdf.get_y()
+        self.pdf.cell(152, 5, f"- {text}", ln=False)
+        self.pdf.set_text_color(0, 0, 0)
+        self.pdf.cell(0, 5, "", ln=True, align="R")
+        self.pdf.link(x, y, 152, 5, link_id)
 
     def _add_nav_summary_page(self) -> None:
         self.pdf.add_page()
@@ -188,12 +238,10 @@ class CombinedReconciliationReport:
             ("Idx Wgt", 20),
             ("Eq Hold", 20),
             ("Eq Qty", 20),
-            ("Eq Pr T", 18),
-            ("Eq Pr T-1", 18),
+            ("Eq Price", 20),
             ("Opt Hold", 20),
             ("Opt Qty", 20),
-            ("Opt Pr T", 18),
-            ("Opt Pr T-1", 18),
+            ("Opt Price", 20),
         ]
 
         self.pdf.set_font("Arial", "B", 7)
@@ -220,11 +268,9 @@ class CombinedReconciliationReport:
                 summary.get("custodian_equity", {}).get("final_recon", 0),
                 summary.get("custodian_equity", {}).get("raw_recon", 0),
                 summary.get("custodian_equity", {}).get("price_discrepancies_T", 0),
-                summary.get("custodian_equity", {}).get("price_discrepancies_T1", 0),
                 summary.get("custodian_option", {}).get("final_recon", 0),
                 summary.get("custodian_option", {}).get("raw_recon", 0),
                 summary.get("custodian_option", {}).get("price_discrepancies_T", 0),
-                summary.get("custodian_option", {}).get("price_discrepancies_T1", 0),
             ]
 
             for val, (_, width) in zip(values, cols[1:], strict=False):

@@ -61,6 +61,9 @@ class HoldingsReconciliationRenderer:
         *,
         fund_name: str,
     ) -> None:
+        recon_lower = recon_type.lower()
+        if "t-1" in recon_lower or recon_lower.endswith("_t1"):
+            return
         if recon_type == "index_equity":
             self._print_index_equity_section(recon_data)
             return
@@ -84,10 +87,8 @@ class HoldingsReconciliationRenderer:
             return
 
         if recon_type == "custodian_treasury":
-            self._print_custodian_treasury_section(recon_data)
-            return
-        if recon_type == "custodian_treasury_t1":
-            self._print_custodian_treasury_section(recon_data, is_t1=True)
+            if self._has_recon_activity(recon_data):
+                self._print_custodian_treasury_section(recon_data)
             return
 
         df = recon_data.get("final_recon", pd.DataFrame())
@@ -175,40 +176,45 @@ class HoldingsReconciliationRenderer:
             ),
             None,
         )
-        if not ticker_col:
+        column_sources = {
+            "equity_ticker": [ticker_col] if ticker_col else [],
+            "discrepancy_type": ["discrepancy_type", "type"],
+            "shares_cust": ["shares_cust", "cust_shares", "custodian_shares"],
+            "shares_vest": ["shares_vest", "nav_shares", "quantity", "shares_oms", "vest_shares"],
+            "price_vest": ["price_vest", "fund_price", "vest_price"],
+            "price_cust": ["price_cust", "cust_price", "price_custodian"],
+        }
+
+        resolved_columns = {}
+        for display_name, candidates in column_sources.items():
+            resolved_columns[display_name] = next((col for col in candidates if col in df.columns), None)
+
+        if not resolved_columns.get("equity_ticker"):
             return
 
-        display_cols = [ticker_col]
-        for col in [
-            "discrepancy_type",
-            "shares_cust",
-            "trade_discrepancy",
-            "final_discrepancy",
-            "price_vest",
-            "price_cust",
-            "price_diff",
-        ]:
-            if col in df.columns:
-                display_cols.append(col)
+        display_cols = list(column_sources.keys())
+        usable_width = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
+        col_width = usable_width / len(display_cols)
 
-        col_width = (self.pdf.w - 2 * self.pdf.l_margin) / len(display_cols)
         self.pdf.set_font("Arial", "B", 8)
         self.pdf.set_fill_color(200, 200, 200)
         for col in display_cols:
-            self.pdf.cell(col_width, 6, str(col), border=1, fill=True, align="C")
+            self.pdf.cell(col_width, 6, col, border=1, fill=True, align="C")
         self.pdf.ln()
 
         self.pdf.set_font("Arial", size=8)
         for _, row in df.head(10).iterrows():
             for col in display_cols:
-                val = row[col]
+                source = resolved_columns.get(col)
+                val = row.get(source) if source else ""
                 if isinstance(val, bool):
                     text = "YES" if val else "NO"
                 elif isinstance(val, (int, float, np.number)):
                     text = f"{val:,.2f}"
                 else:
                     text = str(val)
-                self.pdf.cell(col_width, 5, text, border=1, align="R")
+                align = "R" if col in {"shares_cust", "shares_vest", "price_vest", "price_cust"} else "L"
+                self.pdf.cell(col_width, 5, text[:20], border=1, align=align)
             self.pdf.ln()
 
         if len(df) > 10:
@@ -225,8 +231,7 @@ class HoldingsReconciliationRenderer:
             self._draw_two_column_table([("Holdings Breaks", 0)])
 
         price_t = recon_data.get("price_discrepancies_T")
-        price_t1 = recon_data.get("price_discrepancies_T1")
-        self._print_price_discrepancies(price_t, price_t1, price_label="Index")
+        self._print_price_discrepancies(price_t, price_label="Index")
 
     def _print_custodian_equity_section(self, recon_data: Mapping[str, Any]) -> None:
         final_df = recon_data.get("final_recon")
@@ -237,8 +242,7 @@ class HoldingsReconciliationRenderer:
             self._draw_two_column_table([("Holdings Breaks", 0)])
 
         price_t = recon_data.get("price_discrepancies_T")
-        price_t1 = recon_data.get("price_discrepancies_T1")
-        self._print_price_discrepancies(price_t, price_t1, price_label="Custodian")
+        self._print_price_discrepancies(price_t, price_label="Custodian")
 
     def _print_custodian_option_section(
         self,
@@ -265,8 +269,7 @@ class HoldingsReconciliationRenderer:
             self._print_discrepancy_table(final_df, "Option Discrepancies")
 
         price_t = recon_data.get("price_discrepancies_T")
-        price_t1 = recon_data.get("price_discrepancies_T1")
-        self._print_price_discrepancies(price_t, price_t1, price_label="Custodian")
+        self._print_price_discrepancies(price_t, price_label="Custodian")
 
     def _print_custodian_treasury_section(
         self,
@@ -283,27 +286,25 @@ class HoldingsReconciliationRenderer:
             self._draw_two_column_table([(holdings_label, 0)])
 
         price_t = recon_data.get("price_discrepancies_T")
-        price_t1 = recon_data.get("price_discrepancies_T1")
-        self._print_price_discrepancies(price_t, price_t1, price_label="Custodian")
+        self._print_price_discrepancies(price_t, price_label="Custodian")
 
     # ------------------------------------------------------------------
     def _print_price_discrepancies(
         self,
         price_t: Any,
-        price_t1: Any,
         *,
         price_label: str,
     ) -> None:
-        rows = []
         if isinstance(price_t, pd.DataFrame) and not price_t.empty:
-            rows.append((f"{price_label} Price Breaks T", len(price_t)))
-        if isinstance(price_t1, pd.DataFrame) and not price_t1.empty:
-            rows.append((f"{price_label} Price Breaks T-1", len(price_t1)))
-        if rows:
-            self._draw_two_column_table(rows)
-            if isinstance(price_t, pd.DataFrame) and not price_t.empty:
-                self._print_discrepancy_table(price_t, f"{price_label} Price Breaks T")
-            if isinstance(price_t1, pd.DataFrame) and not price_t1.empty:
-                self._print_discrepancy_table(price_t1, f"{price_label} Price Breaks T-1")
+            self._draw_two_column_table([(f"{price_label} Price Breaks T", len(price_t))])
+            self._print_discrepancy_table(price_t, f"{price_label} Price Breaks T")
         else:
             self._draw_two_column_table([(f"{price_label} Price Breaks", 0)])
+
+    def _has_recon_activity(self, recon_data: Mapping[str, Any]) -> bool:
+        final_df = recon_data.get("final_recon")
+        price_df = recon_data.get("price_discrepancies_T")
+        return any(
+            isinstance(df, pd.DataFrame) and not df.empty
+            for df in [final_df, price_df]
+        )
