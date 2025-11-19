@@ -132,7 +132,7 @@ class Reconciliator:
         # breakdown text
         df_issues['breakdown'] = np.where(
             df_issues['discrepancy_type'] == "Quantity Mismatch",
-            "Vest=" + df_issues['quantity'].fillna(0).astype(int).astype(str)
+            "Vest=" + df_issues['nav_shares'].fillna(0).astype(int).astype(str)
             + " | Cust=" + df_issues['shares_cust'].fillna(0).astype(int).astype(str)
             + " | TradesAdj=" + df_issues['qty_sign_adj'].astype(int).astype(str)
             + " | CR/RD=" + df_issues['cr_rd'].astype(int).astype(str),
@@ -161,7 +161,7 @@ class Reconciliator:
             # override small (<1) today's vest price so final_discrepancy reflects it
             small_T = df['price_diff'].between(0.01, 1)
             df.loc[small_T, 'price_vest'] = df.loc[small_T, 'price_cust']
-            df['final_discrepancy'] = df['quantity'].fillna(0) - df['final_adjusted_shares']
+            df['final_discrepancy'] = df['nav_shares'].fillna(0) - df['final_adjusted_shares']
 
         # T-1: compare prior vest vs custodian prices
         if {'price_vest', 'price_cust'}.issubset(df1.columns):
@@ -226,12 +226,10 @@ class Reconciliator:
 
         # Step 4: Verify optticker column exists after normalization
         if not df_oms.empty and 'optticker' not in df_oms.columns:
-            self.logger.warning("OMS options missing optticker column after normalization")
             self.results['custodian_option'] = empty_result
             return
 
         if not df_cust.empty and 'optticker' not in df_cust.columns:
-            self.logger.warning("Custodian options missing optticker column after normalization")
             self.results['custodian_option'] = empty_result
             return
 
