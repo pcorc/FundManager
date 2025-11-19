@@ -65,18 +65,18 @@ RECON_DESCRIPTOR_REGISTRY: Dict[str, ReconDescriptor] = {
         price_ticker="equity_ticker",
         price_cust_col="price_index",
     ),
-    "sg_option": ReconDescriptor(
-        holdings_key="final_recon",
-        holdings_ticker="optticker",
-        price_keys=("price_discrepancies", None),
-        price_ticker="optticker",
-    ),
-    "sg_equity": ReconDescriptor(
-        holdings_key="final_recon",
-        holdings_ticker="equity_ticker",
-        price_keys=("price_discrepancies", None),
-        price_ticker="equity_ticker",
-    ),
+    # "sg_option": ReconDescriptor(
+    #     holdings_key="final_recon",
+    #     holdings_ticker="optticker",
+    #     price_keys=("price_discrepancies", None),
+    #     price_ticker="optticker",
+    # ),
+    # "sg_equity": ReconDescriptor(
+    #     holdings_key="final_recon",
+    #     holdings_ticker="equity_ticker",
+    #     price_keys=("price_discrepancies", None),
+    #     price_ticker="equity_ticker",
+    # ),
     "custodian_treasury": ReconDescriptor(
         holdings_key="final_recon",
         holdings_ticker="cusip",

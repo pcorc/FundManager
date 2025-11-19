@@ -6,142 +6,131 @@ from config.fund_definitions import FUND_DEFINITIONS
 
 
 def normalize_all_holdings(
-    fund_name: str,
-    fund_data: Dict[str, Any],
-    *,
-    fund_definition: Optional[Dict[str, Any]] = None,
-    logger=None,
+        fund_name: str,
+        fund_data: Dict[str, Any],
+        *,
+        fund_definition: Optional[Dict[str, Any]] = None,
+        logger=None,
 ) -> Dict[str, Any]:
-    """
-    Normalize holdings for a fund using its static configuration.
-
-    Only the asset types flagged in :mod:`config.fund_definitions` are
-    processed. The function returns a shallow copy of ``fund_data`` with the
-    normalised holdings written back to their existing keys (``vest_*`` and
-    ``custodian_*``).
-    """
-
-    normalized = {**fund_data}
+    """Optimized version - processes each key directly."""
     definition = fund_definition or FUND_DEFINITIONS.get(fund_name, {})
+    result = {}
 
-    def _normalize_pair(oms_key: str, cust_key: str, func) -> None:
-        oms_df = normalized.get(oms_key, pd.DataFrame()).copy()
-        cust_df = normalized.get(cust_key, pd.DataFrame()).copy()
-
-        if oms_df.empty and cust_df.empty:
-            normalized[oms_key] = oms_df
-            normalized[cust_key] = cust_df
-            return
-
-        normalized[oms_key], normalized[cust_key] = func(oms_df, cust_df, logger)
-
+    asset_processors = []
     if definition.get("has_equity", True):
-        _normalize_pair("vest_equity", "custodian_equity", normalize_equity_pair)
-        _normalize_pair(
-            "vest_equity_t1", "custodian_equity_t1", normalize_equity_pair
-        )
+        asset_processors.extend([
+            ("vest_equity", "custodian_equity", _normalize_equity),
+            ("vest_equity_t1", "custodian_equity_t1", _normalize_equity),
+        ])
 
     if definition.get("has_listed_option", False) or definition.get("has_flex_option", False):
-        _normalize_pair("vest_option", "custodian_option", normalize_option_pair)
-        _normalize_pair("vest_option_t1", "custodian_option_t1", normalize_option_pair)
+        asset_processors.extend([
+            ("vest_option", "custodian_option", _normalize_options),
+            ("vest_option_t1", "custodian_option_t1", _normalize_options),
+        ])
 
     if definition.get("has_treasury", False):
-        _normalize_pair("vest_treasury", "custodian_treasury", normalize_treasury_pair)
-        _normalize_pair(
-            "vest_treasury_t1", "custodian_treasury_t1", normalize_treasury_pair
-        )
+        asset_processors.extend([
+            ("vest_treasury", "custodian_treasury", _normalize_treasury),
+            ("vest_treasury_t1", "custodian_treasury_t1", _normalize_treasury),
+        ])
+
+    # Process all pairs in one loop
+    for oms_key, cust_key, processor in asset_processors:
+        oms_df = fund_data.get(oms_key, pd.DataFrame())
+        cust_df = fund_data.get(cust_key, pd.DataFrame())
+
+        if oms_df.empty and cust_df.empty:
+            result[oms_key] = oms_df
+            result[cust_key] = cust_df
+        else:
+            result[oms_key], result[cust_key] = processor(oms_df, cust_df, logger)
+
+    # Copy any unprocessed keys
+    for key, value in fund_data.items():
+        if key not in result:
+            result[key] = value
 
     if logger:
         logger.info("Holdings normalization complete for fund %s", fund_name)
 
-    return normalized
+    return result
 
-def normalize_equity_pair(
-    df_oms: pd.DataFrame, df_cust: pd.DataFrame, logger=None, debug_mode: bool = False
+
+def _normalize_equity(
+        df_oms: pd.DataFrame, df_cust: pd.DataFrame, logger=None
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Normalise equity tickers across OMS and custodian datasets."""
 
-    df_oms = df_oms.copy()
-    df_cust = df_cust.copy()
-
-    if "equity_ticker" not in df_oms.columns:
+    # Process OMS side
+    if not df_oms.empty and "equity_ticker" not in df_oms.columns:
         if "ticker" in df_oms.columns:
-            df_oms["equity_ticker"] = df_oms["ticker"]
+            df_oms = df_oms.assign(equity_ticker=df_oms["ticker"])
         elif logger:
             logger.warning("OMS equity holdings missing equity_ticker column")
 
-    if "equity_ticker" not in df_cust.columns:
-        source = None
+    # Process custodian side
+    if not df_cust.empty and "equity_ticker" not in df_cust.columns:
+        # Try direct column mapping first
         for candidate in ("equity_ticker", "ticker", "security_tkr"):
             if candidate in df_cust.columns:
-                source = candidate
+                df_cust = df_cust.assign(equity_ticker=df_cust[candidate])
                 break
-        if source:
-            df_cust["equity_ticker"] = df_cust[source]
-        elif "sedol" in df_cust.columns and "sedol" in df_oms.columns:
-            mapping = (
-                df_oms.dropna(subset=["sedol"])
-                .set_index("sedol")
-                .get("equity_ticker")
-            )
-            if mapping is not None:
-                df_cust["equity_ticker"] = df_cust["sedol"].map(mapping)
-                if logger and debug_mode:
+        else:
+            # Fall back to SEDOL mapping if available
+            if "sedol" in df_cust.columns and not df_oms.empty and "sedol" in df_oms.columns:
+                mapping = df_oms.set_index("sedol")["equity_ticker"].dropna().to_dict()
+                df_cust = df_cust.assign(equity_ticker=df_cust["sedol"].map(mapping))
+                if logger:
                     mapped = df_cust["equity_ticker"].notna().sum()
                     logger.debug("Mapped %s custodian tickers via SEDOL", mapped)
-        elif logger:
-            logger.warning("Custodian equity holdings missing recognizable ticker column")
+            elif logger:
+                logger.warning("Custodian equity holdings missing recognizable ticker column")
 
     return df_oms, df_cust
 
 
-def normalize_option_pair(
-    df_oms: pd.DataFrame, df_cust: pd.DataFrame, logger=None, debug_mode: bool = False
+def _normalize_options(
+        df_oms: pd.DataFrame, df_cust: pd.DataFrame, logger=None
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Normalise option identifiers to use ``optticker`` consistently."""
 
-    df_oms = df_oms.copy()
-    df_cust = df_cust.copy()
-
-    def ensure_optticker(df: pd.DataFrame, side: str) -> None:
-        if "optticker" in df.columns:
-            return
+    def _ensure_optticker(df: pd.DataFrame, side: str) -> pd.DataFrame:
+        if df.empty or "optticker" in df.columns:
+            return df
         if "occ_symbol" in df.columns:
-            df["optticker"] = df["occ_symbol"]
+            return df.assign(optticker=df["occ_symbol"])
         elif "ticker" in df.columns:
-            df["optticker"] = df["ticker"]
+            return df.assign(optticker=df["ticker"])
         elif logger:
             logger.warning("%s options missing optticker column", side)
+        return df
 
-    ensure_optticker(df_oms, "OMS")
-    ensure_optticker(df_cust, "Custodian")
+    return (
+        _ensure_optticker(df_oms, "OMS"),
+        _ensure_optticker(df_cust, "Custodian")
+    )
 
-    return df_oms, df_cust
 
-
-def normalize_treasury_pair(
-    df_oms: pd.DataFrame, df_cust: pd.DataFrame, logger=None, debug_mode: bool = False
+def _normalize_treasury(
+        df_oms: pd.DataFrame, df_cust: pd.DataFrame, logger=None
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Ensure treasury datasets carry a ``cusip`` identifier when possible."""
 
-    df_oms = df_oms.copy()
-    df_cust = df_cust.copy()
-
-    def ensure_cusip(df: pd.DataFrame, side: str) -> None:
-        if "cusip" in df.columns:
-            return
+    def _ensure_cusip(df: pd.DataFrame, side: str) -> pd.DataFrame:
+        if df.empty or "cusip" in df.columns:
+            return df
         for candidate in ("ticker", "security_id", "isin"):
             if candidate in df.columns:
-                df["cusip"] = df[candidate]
-                return
+                return df.assign(cusip=df[candidate])
         if logger:
             logger.warning("%s treasury holdings missing CUSIP-like identifier", side)
+        return df
 
-    ensure_cusip(df_oms, "OMS")
-    ensure_cusip(df_cust, "Custodian")
-
-    return df_oms, df_cust
-
+    return (
+        _ensure_cusip(df_oms, "OMS"),
+        _ensure_cusip(df_cust, "Custodian")
+    )
 
 def normalize_option_ticker(ticker: str, logger=None, verbose: bool = False) -> str:
     """Normalise raw option tickers into OCC standard format."""

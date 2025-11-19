@@ -91,9 +91,17 @@ class BulkDataLoader:
 
         data_store.gics_mapping = self._load_gics_mapping()
 
-        # Ensure every fund has an entry even if a data set was empty
-        for fund_name in all_funds.keys():
-            self._ensure_fund_slot(data_store, fund_name)
+        # Normalize holdings once using fund definitions so downstream flows can
+        # consume consistent identifiers without re-normalizing.
+        for fund_name, fund in all_funds.items():
+            fund_data = data_store.fund_data.get(fund_name, {})
+            normalized = normalize_all_holdings(
+                fund_name,
+                fund_data,
+                fund_definition=fund.mapping_data,
+                logger=self.logger,
+            )
+            data_store.fund_data[fund_name] = normalized
 
         self.logger.info(f"Bulk loaded data for {len(data_store.loaded_funds)} funds")
         return data_store
@@ -304,6 +312,7 @@ class BulkDataLoader:
                             previous_date,
                             analysis_type,
                         )
+
                     elif config_key == 'vest_options_holdings':
                         all_data = self._query_vest_option_holdings(
                             table,
