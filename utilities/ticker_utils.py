@@ -62,23 +62,14 @@ def _normalize_equity(
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Normalise equity tickers across OMS and custodian datasets."""
 
-    # Process custodian side
-    if not df_cust.empty and "eqyticker" not in df_cust.columns:
-        # Try direct column mapping first
-        for candidate in ("equity_ticker", "ticker", "security_tkr"):
-            if candidate in df_cust.columns:
-                df_cust = df_cust.assign(eqyticker=df_cust[candidate])
-                break
-        else:
-            # Fall back to SEDOL mapping if available
-            if "sedol" in df_cust.columns and not df_oms.empty and "sedol" in df_oms.columns:
-                mapping = df_oms.set_index("sedol")["equity_ticker"].dropna().to_dict()
-                df_cust = df_cust.assign(equity_ticker=df_cust["sedol"].map(mapping))
-                if logger:
-                    mapped = df_cust["equity_ticker"].notna().sum()
-                    logger.debug("Mapped %s custodian tickers via SEDOL", mapped)
-            elif logger:
-                logger.warning("Custodian equity holdings missing recognizable ticker column")
+    if "sedol" in df_cust.columns and not df_oms.empty and "sedol" in df_oms.columns:
+        mapping = df_oms.set_index("sedol")["eqyticker"].dropna().to_dict()
+        df_cust = df_cust.assign(equity_ticker=df_cust["sedol"].map(mapping))
+        if logger:
+            mapped = df_cust["eqyticker"].notna().sum()
+            logger.debug("Mapped %s custodian tickers via SEDOL", mapped)
+    elif logger:
+        logger.warning("Custodian equity holdings missing recognizable ticker column")
 
     return df_oms, df_cust
 

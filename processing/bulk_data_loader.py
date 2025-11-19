@@ -1738,12 +1738,7 @@ class BulkDataLoader:
             query = self.session.query(
                 table.process_date.label('date'),
                 table.fund.label('fund'),
-                # Add " US" after first space in security_desc
-                func.concat(
-                    func.substr(table.security_desc, 1, func.instr(table.security_desc, ' ')),
-                    'US',
-                    func.substr(table.security_desc, func.instr(table.security_desc, ' '))
-                ).label('optticker'),
+                table.security_tkr.label('cusip'),
                 table.mkt_qty.label('shares_cust'),
                 table.eod_close.label('price'),
                 table.security_catgry.label('category_description'),

@@ -536,10 +536,38 @@ class ReconciliationReport:
         return row
 
     def _standardize_ticker_column(self, df: pd.DataFrame) -> pd.DataFrame:
-        for col in ["equity_ticker", "optticker", "norm_ticker", "eqyticker", "occ_symbol"]:
+        for col in ["eqyticker", "optticker", "occ_symbol"]:
             if col in df.columns:
                 return df.rename(columns={col: "TICKER"})
         return df
+
+    def _determine_asset_type(self, fund: Optional[str], recon_type: str, df: pd.DataFrame) -> str:
+        """Infer the asset type for a reconciliation row.
+
+        The determination prioritizes explicit recon type hints, then falls back to
+        inspecting available ticker columns for option/equity/treasury cues. FLEX
+        exposure is inferred either directly from the recon type or, for index funds
+        flagged as FLEX, from well-known FLEX tickers in the option data.
+        """
+        recon_lower = recon_type.lower()
+        if "flex" in recon_lower:
+            return "FLEX"
+        if "treasury" in recon_lower:
+            return "Treasury"
+        if "equity" in recon_lower:
+            return "Equity"
+        if "option" in recon_lower:
+            return "Option"
+        if "cusip" in df.columns:
+            return "Treasury"
+        if "eqyticker" in df.columns:
+            return "Equity"
+        if "optticker" in df.columns or "occ_symbol" in df.columns:
+            uses_index_flex = self._uses_index_flex(fund)
+            if uses_index_flex:
+                return "FLEX"
+            return "Option"
+        return "Unknown"
 
     def _create_detailed_breaks_tab(self, writer: pd.ExcelWriter) -> None:
         all_breaks: list[pd.DataFrame] = []
