@@ -53,7 +53,7 @@ class Reconciliator:
     def run_all_reconciliations(self):
         """Run all reconciliations using Fund object data"""
         recon_funcs = [
-            # ("custodian_equity", self.reconcile_custodian_equity),
+            ("custodian_equity", self.reconcile_custodian_equity),
             ("custodian_option", self.reconcile_custodian_option),
             # ("custodian_treasury", self.reconcile_custodian_treasury),
             # ("index_equity", self.reconcile_index_equity),
@@ -76,8 +76,8 @@ class Reconciliator:
         df_trades = self.fund_data.get('trades_data', pd.DataFrame())
         df_crrd = self.fund_data.get('cr_rd_data', pd.DataFrame())
 
-        # must have equity_ticker
-        if 'equity_ticker' not in df_oms.columns or 'equity_ticker' not in df_cust.columns:
+        # must have eqyticker
+        if 'eqyticker' not in df_oms.columns or 'eqyticker' not in df_cust.columns:
             self.results['custodian_equity'] = {
                 'raw_recon': pd.DataFrame(),
                 'final_recon': pd.DataFrame(),
@@ -89,7 +89,7 @@ class Reconciliator:
 
         # 3) Merge base tables (today)
         df = pd.merge(df_oms, df_cust,
-                      on='equity_ticker', how='outer',
+                      on='eqyticker', how='outer',
                       suffixes=('_vest', '_cust'), indicator=True)
         df['in_vest'] = df['_merge'] != 'right_only'
         df['in_cust'] = df['_merge'] != 'left_only'
@@ -97,16 +97,16 @@ class Reconciliator:
 
         # same for T-1
         df1 = pd.merge(df_oms1, df_cust1,
-                       on='equity_ticker', how='outer',
+                       on='eqyticker', how='outer',
                        suffixes=('_vest', '_cust'), indicator=False)
 
         # 4) trades & corporate actions (only today)
-        trade_map = df_trades.set_index('equity_ticker')['qty_sign_adj'] \
-            if 'equity_ticker' in df_trades.columns else pd.Series(dtype=object)
-        df['qty_sign_adj'] = df['equity_ticker'].map(trade_map).fillna(0)
-        cr_map = (df_crrd.set_index('equity_ticker')['cr_rd']
-                  if self.is_etf and 'equity_ticker' in df_crrd.columns else pd.Series(dtype=object))
-        df['cr_rd'] = df['equity_ticker'].map(cr_map).fillna(0)
+        trade_map = df_trades.set_index('eqyticker')['qty_sign_adj'] \
+            if 'eqyticker' in df_trades.columns else pd.Series(dtype=object)
+        df['qty_sign_adj'] = df['eqyticker'].map(trade_map).fillna(0)
+        cr_map = (df_crrd.set_index('eqyticker')['cr_rd']
+                  if self.is_etf and 'eqyticker' in df_crrd.columns else pd.Series(dtype=object))
+        df['cr_rd'] = df['eqyticker'].map(cr_map).fillna(0)
 
         # 5) adjusted shares & base discrepancy
         df['adjusted_cust_shares'] = df['shares_cust'].fillna(0) + df['qty_sign_adj']
@@ -156,7 +156,7 @@ class Reconciliator:
         if {'price_vest', 'price_cust'}.issubset(df.columns):
             df['price_diff'] = (df['price_vest'] - df['price_cust']).abs()
             price_disc_T = df.loc[df['price_diff'] > 0.01,
-            ['equity_ticker', 'price_vest', 'price_cust', 'price_diff']].copy()
+            ['eqyticker', 'price_vest', 'price_cust', 'price_diff']].copy()
 
             # override small (<1) today's vest price so final_discrepancy reflects it
             small_T = df['price_diff'].between(0.01, 1)
@@ -167,7 +167,7 @@ class Reconciliator:
         if {'price_vest', 'price_cust'}.issubset(df1.columns):
             df1['price_diff'] = (df1['price_vest'] - df1['price_cust']).abs()
             price_disc_T1 = df1.loc[df1['price_diff'] > 0.01,
-            ['equity_ticker', 'price_vest', 'price_cust', 'price_diff']].copy()
+            ['eqyticker', 'price_vest', 'price_cust', 'price_diff']].copy()
 
         # 8) store everything under the expected keys
         # Combine T and T1 price discrepancies for backward compatibility
@@ -187,17 +187,17 @@ class Reconciliator:
             desc = row['breakdown']
             val = row['final_discrepancy'] if dtype == 'Quantity Mismatch' else 'N/A'
             self.add_summary_row(f"Custodian Equity: {dtype}",
-                                 row['equity_ticker'], desc, val)
+                                 row['eqyticker'], desc, val)
 
         for _, row in price_disc_T.iterrows():
             self.add_summary_row("Custodian Equity Price (T)",
-                                 row['equity_ticker'],
+                                 row['eqyticker'],
                                  f"{row['price_vest']} vs {row['price_cust']}",
                                  row['price_diff'])
 
         for _, row in price_disc_T1.iterrows():
             self.add_summary_row("Custodian Equity Price (T-1)",
-                                 row['equity_ticker'],
+                                 row['eqyticker'],
                                  f"{row['price_vest']} vs {row['price_cust']}",
                                  row['price_diff'])
 
@@ -607,8 +607,8 @@ class Reconciliator:
         # Process equity details
         if not eq_today.empty and not eq_prior.empty:
             df_eq = eq_today.merge(
-                eq_prior[["equity_ticker", "price", "quantity"]],
-                on="equity_ticker", how="inner", suffixes=("_t", "_t1")
+                eq_prior[["eqyticker", "price", "quantity"]],
+                on="eqyticker", how="inner", suffixes=("_t", "_t1")
             ).dropna(subset=["price_t", "price_t1"])
 
             qty_col = "quantity_t1" if self.analysis_type == "ex_ante" else "quantity_t"
@@ -622,12 +622,12 @@ class Reconciliator:
             if not df_eq.empty:
                 # Apply price adjustments and track them
                 df_eq_adj = self.apply_small_price_override(
-                    df_eq.copy(), kind="equity", key_col="equity_ticker"
+                    df_eq.copy(), kind="equity", key_col="eqyticker"
                 )
 
                 # Create detailed equity dataframe
                 equity_detail = pd.DataFrame({
-                    'ticker': df_eq['equity_ticker'],
+                    'ticker': df_eq['eqyticker'],
                     'quantity_t1': df_eq['quantity_t1'],
                     'quantity_t': df_eq['quantity_t'],
                     'price_t1_raw': df_eq['price_t1'],
@@ -832,7 +832,7 @@ class Reconciliator:
             return
 
         # Merge with outer join to capture all securities
-        df = pd.merge(df_oms, df_index, on='equity_ticker', how='outer', suffixes=('_vest', '_index'), indicator=True)
+        df = pd.merge(df_oms, df_index, on='eqyticker', how='outer', suffixes=('_vest', '_index'), indicator=True)
 
         # Add in_vest and in_index flags
         df['in_vest'] = df['nav_wgt_begin'].notnull()
@@ -843,7 +843,7 @@ class Reconciliator:
 
         # Holdings discrepancies - now includes weight information
         holdings_disc = df[df['in_vest'] != df['in_index']][
-            ['equity_ticker', 'in_vest', 'in_index', 'nav_wgt_begin', 'weight_index', 'wgt_diff']
+            ['eqyticker', 'in_vest', 'in_index', 'nav_wgt_begin', 'weight_index', 'wgt_diff']
         ].copy()
 
         # Fill NaN weights with 0 for cleaner display
@@ -852,7 +852,7 @@ class Reconciliator:
 
         # Significant weight differences (for securities in both)
         sig = df[df['wgt_diff'].gt(0.001) & df['in_vest'] & df['in_index']][
-            ['equity_ticker', 'nav_wgt_begin', 'weight_index', 'wgt_diff']
+            ['eqyticker', 'nav_wgt_begin', 'weight_index', 'wgt_diff']
         ].copy()
 
         self.results['index_equity'] = {
@@ -864,11 +864,11 @@ class Reconciliator:
         for _, row in holdings_disc.iterrows():
             note = 'Missing in OMS' if not row['in_vest'] else 'Missing in Index'
             weight_info = f"OMS: {row['nav_wgt_begin']:.4f}, Index: {row['weight_index']:.4f}"
-            self.add_summary_row('Index Equity', row['equity_ticker'], f"{note} - {weight_info}", row['wgt_diff'])
+            self.add_summary_row('Index Equity', row['eqyticker'], f"{note} - {weight_info}", row['wgt_diff'])
 
         for _, row in sig.iterrows():
             weight_info = f"OMS: {row['nav_wgt_begin']:.4f}, Index: {row['weight_index']:.4f}"
-            self.add_summary_row('Index Weight Diff', row['equity_ticker'], f"Weight diff - {weight_info}", row['wgt_diff'])
+            self.add_summary_row('Index Weight Diff', row['eqyticker'], f"Weight diff - {weight_info}", row['wgt_diff'])
 
     def _calculate_price_discrepancies(self, df: pd.DataFrame, ticker_col: str) -> pd.DataFrame:
         """Calculate price discrepancies between vest and custodian"""
@@ -896,17 +896,17 @@ class Reconciliator:
             desc = row.get('breakdown', '')
             val = row['final_discrepancy'] if dtype == 'Quantity Mismatch' else 'N/A'
             self.add_summary_row(f"Custodian Equity: {dtype}",
-                                 row['equity_ticker'], desc, val)
+                                 row['eqyticker'], desc, val)
 
         for _, row in price_disc_T.iterrows():
             self.add_summary_row("Custodian Equity Price (T)",
-                                 row['equity_ticker'],
+                                 row['eqyticker'],
                                  f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
                                  row['price_diff'])
 
         for _, row in price_disc_T1.iterrows():
             self.add_summary_row("Custodian Equity Price (T-1)",
-                                 row['equity_ticker'],
+                                 row['eqyticker'],
                                  f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
                                  row['price_diff'])
 
@@ -1089,7 +1089,7 @@ class Reconciliator:
             return
 
         # Merge data
-        df = pd.merge(df_oms, df_sg, on='equity_ticker', how='outer',
+        df = pd.merge(df_oms, df_sg, on='eqyticker', how='outer',
                       suffixes=('_vest', '_sg'))
 
         # Identify discrepancies
@@ -1107,7 +1107,7 @@ class Reconciliator:
         if {'price_vest', 'price_sg'}.issubset(df.columns):
             df['price_diff'] = (df['price_vest'] - df['price_sg']).abs()
             price_disc = df.loc[df['price_diff'] > 0.01,
-            ['equity_ticker', 'price_vest', 'price_sg', 'price_diff']]
+            ['eqyticker', 'price_vest', 'price_sg', 'price_diff']]
 
         self.results['sg_equity'] = ReconciliationResult(
             raw_recon=df.loc[mask_qty].reset_index(drop=True),
@@ -1120,6 +1120,6 @@ class Reconciliator:
         # Add summary rows
         for _, row in df_issues.iterrows():
             self.add_summary_row("SG Equity Discrepancy",
-                                 row['equity_ticker'],
+                                 row['eqyticker'],
                                  f"Vest: {row.get('quantity_vest', 0)}, SG: {row.get('quantity_sg', 0)}",
                                  row['quantity_diff'])

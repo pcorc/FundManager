@@ -712,11 +712,11 @@ class ComplianceReport:
                         ("overlap_constituents", overlap_summary),
                         (
                             "bottom_50_largest_holding",
-                            f"{largest.get('equity_ticker', 'N/A')} ({float(largest.get('tna_wgt', 0) or 0):.2%})",
+                            f"{largest.get('eqyticker', 'N/A')} ({float(largest.get('tna_wgt', 0) or 0):.2%})",
                         ),
                         (
                             "bottom_50_second_largest_holding",
-                            f"{second.get('equity_ticker', 'N/A')} ({float(second.get('tna_wgt', 0) or 0):.2%})",
+                            f"{second.get('eqyticker', 'N/A')} ({float(second.get('tna_wgt', 0) or 0):.2%})",
                         ),
                     ]
                 )
@@ -885,7 +885,7 @@ class ComplianceReport:
                 calc = rule.get("calculations", {})
                 holdings = calc.get("insurance_holdings", [])
                 holdings_str = ", ".join(
-                    f"{h.get('equity_ticker') or h.get('ticker')} ({(h.get('ownership_pct') or 0)*100:.5f}%)" for h in holdings
+                    f"{h.get('eqyticker') or h.get('ticker')} ({(h.get('ownership_pct') or 0)*100:.5f}%)" for h in holdings
                 ) or "None"
                 rows.append(
                     {
@@ -2058,7 +2058,7 @@ class ComplianceReportPDF(BaseReportPDF):
         issuer_limited_assets_list = calculations.get("issuer_limited_securities", [])
         if isinstance(issuer_limited_assets_list, list) and issuer_limited_assets_list:
             issuer_limited_assets_str = ", ".join(
-                f"({item.get('equity_ticker')}, {abs(item.get('net_market_value', 0)) / total_assets:.2%})"
+                f"({item.get('eqyticker')}, {abs(item.get('net_market_value', 0)) / total_assets:.2%})"
                 for item in issuer_limited_assets_list
                 if total_assets
             )
@@ -2092,7 +2092,7 @@ class ComplianceReportPDF(BaseReportPDF):
         if large_securities:
             large_lines: list[str] = []
             for sec in large_securities:
-                ticker = str(sec.get("equity_ticker", ""))
+                ticker = str(sec.get("eqyticker", ""))
                 market_value = float(sec.get("net_market_value", 0) or 0)
                 if pd.isna(market_value):
                     market_value = 0.0
@@ -2185,7 +2185,7 @@ class ComplianceReportPDF(BaseReportPDF):
         inv_companies = calculations.get("investment_companies", [])
 
         holdings_str = ", ".join(
-            f"{c.get('equity_ticker', '')} ({float(c.get('ownership_pct', 0) or 0):.2%})"
+            f"{c.get('eqyticker', '')} ({float(c.get('ownership_pct', 0) or 0):.2%})"
             for c in inv_companies
         ) or "None"
 
@@ -2209,7 +2209,7 @@ class ComplianceReportPDF(BaseReportPDF):
         holdings = calculations.get("insurance_holdings", [])
 
         holdings_str = ", ".join(
-            f"{h.get('equity_ticker', '')} ({float(h.get('ownership_pct', 0) or 0):.2%})"
+            f"{h.get('eqyticker', '')} ({float(h.get('ownership_pct', 0) or 0):.2%})"
             for h in holdings
         ) or "None"
 
@@ -2249,16 +2249,14 @@ class ComplianceReportPDF(BaseReportPDF):
 
         self.pdf.set_font("Arial", "", 9)
         for holding in combined:
-            ticker = holding.get("ticker") or holding.get("equity_ticker") or "N/A"
-            for holding in combined:
-                ticker = holding.get("ticker") or holding.get("equity_ticker") or "N/A"
-                vest_weight = float(holding.get("vest_weight", 0) or 0)
-                ownership_pct = float(holding.get("ownership_pct", 0) or 0)
+            ticker = holding.get("ticker") or holding.get("eqyticker") or "N/A"
+            vest_weight = float(holding.get("vest_weight", 0) or 0)
+            ownership_pct = float(holding.get("ownership_pct", 0) or 0)
 
-                self.pdf.set_fill_color(255, 255, 255)
-                self.pdf.cell(col_widths[0], 6, self._sanitize_text(str(ticker)), border=1)
-                self.pdf.cell(col_widths[1], 6, f"{vest_weight:.2%}", border=1)
-                self.pdf.cell(col_widths[2], 6, f"{ownership_pct:.2%}", border=1)
+            self.pdf.set_fill_color(255, 255, 255)
+            self.pdf.cell(col_widths[0], 6, self._sanitize_text(str(ticker)), border=1)
+            self.pdf.cell(col_widths[1], 6, f"{vest_weight:.2%}", border=1)
+            self.pdf.cell(col_widths[2], 6, f"{ownership_pct:.2%}", border=1)
             self.pdf.ln()
         self.pdf.ln(2)
 

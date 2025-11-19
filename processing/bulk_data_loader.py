@@ -150,12 +150,7 @@ class BulkDataLoader:
         holdings_map = [
             ('custodian_equity_holdings', 'custodian_equity', 'custodian_equity_t1', 'equity'),
             ('custodian_option_holdings', 'custodian_option', 'custodian_option_t1', 'option'),
-            (
-                'custodian_treasury_holdings',
-                'custodian_treasury',
-                'custodian_treasury_t1',
-                'treasury',
-            ),
+            ('custodian_treasury_holdings', 'custodian_treasury', 'custodian_treasury_t1', 'treasury'),
         ]
 
         for config_key, payload_key, payload_key_t1, holdings_kind in holdings_map:
@@ -1710,7 +1705,7 @@ class BulkDataLoader:
             query = self.session.query(
                 table.process_date.label('date'),
                 table.fund.label('fund'),
-                table.security_tkr.label('equity_ticker'),
+                table.security_tkr.label('eqyticker'),
                 table.mkt_qty.label('shares_cust'),
                 table.eod_close.label('price'),
                 table.security_catgry.label('category_description'),

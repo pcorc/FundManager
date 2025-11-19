@@ -306,8 +306,8 @@ class ComplianceChecker:
             holdings_df = pd.merge(
                 vest_eqy_holdings,
                 vest_opt_holdings,
-                left_on="ticker",
-                right_on="equity_ticker",
+                left_on="eqyticker",
+                right_on="equity_underlying_ticker",
                 how="outer",
                 suffixes=("", "_option"),
             )
@@ -488,8 +488,8 @@ class ComplianceChecker:
                     vest_eqy_holdings,
                     vest_opt_holdings,
                     how="outer",
-                    left_on="ticker",
-                    right_on="equity_ticker",
+                    left_on="eqyticker",
+                    right_on="equity_underlying_ticker",
                     suffixes=("", "_option"),
                 )
                 holdings_df["equity_market_value"] = pd.to_numeric(
@@ -718,16 +718,12 @@ class ComplianceChecker:
             if total_assets == 0:
                 raise ValueError("Total assets missing")
 
-            for df in [vest_eqy_holdings, vest_opt_holdings]:
-                if "equity_ticker" not in df.columns and "ticker" in df.columns:
-                    df["equity_ticker"] = df["ticker"]
-
             holdings_df = pd.merge(
                 vest_eqy_holdings,
                 vest_opt_holdings,
                 how="left",
-                left_on="equity_ticker",
-                right_on="equity_ticker",
+                left_on="eqyticker",
+                right_on="equity_underlying_ticker",
                 suffixes=("", "_option"),
             )
             holdings_df = self._fill_numeric_defaults(holdings_df)
@@ -747,7 +743,7 @@ class ComplianceChecker:
                     top_exposures[idx] = float(cum_values.iloc[idx] / total_assets)
 
             top_holdings = (
-                sorted_holdings[["equity_ticker", "net_market_value"]]
+                sorted_holdings[["eqyticker", "net_market_value"]]
                 .head(4)
                 .to_dict("records")
             )
@@ -1086,8 +1082,8 @@ class ComplianceChecker:
                 sec_related_businesses,
                 vest_opt_holdings,
                 how="left",
-                left_on="ticker",
-                right_on="equity_ticker",
+                left_on="eqyticker",
+                right_on="equity_underlying_ticker",
                 suffixes=("", "_option"),
             )
             combined_holdings["option_market_value"] = pd.to_numeric(
@@ -1106,8 +1102,8 @@ class ComplianceChecker:
             max_weight = float(combined_holdings["vest_weight"].max()) if not combined_holdings.empty else 0.0
             rule_3_pass = max_weight <= RULE_12D3_ASSET_LIMIT
 
-            related_tickers = sec_related_businesses["ticker"].unique()
-            ticker_mask = vest_opt_holdings["equity_ticker"].isin(related_tickers)
+            related_tickers = sec_related_businesses["eqyticker"].unique()
+            ticker_mask = vest_opt_holdings["equity_underlying_ticker"].isin(related_tickers)
             # occ_exposure = vest_opt_holdings[ticker_mask].copy()
             # occ_weight_mkt_val = float(occ_exposure["option_market_value"].sum())
             # occ_weight = occ_weight_mkt_val / total_assets if total_assets else 0.0
@@ -1759,9 +1755,7 @@ class ComplianceChecker:
         overlap = overlap.drop_duplicates(subset="security_ticker")
 
         df = holdings_df.copy()
-        if "equity_ticker" in df.columns:
-            x = df["ticker_option"]
-            y = df["equity_ticker"]
+        if "eqyticker" in df.columns:
             flex_mask = df["ticker_option"].astype(str).str.upper().isin(["SPX", "XSP"])
         else:
             flex_mask = pd.Series(False, index=df.index)
@@ -1799,7 +1793,7 @@ class ComplianceChecker:
 
         merged = result.merge(
             overlap[["security_ticker", "security_weight"]],
-            left_on="equity_ticker",
+            left_on="eqyticker",
             right_on="security_ticker",
             how="left",
         )
@@ -1822,8 +1816,8 @@ class ComplianceChecker:
 
         overlap_details = merged.loc[
             merged["overlap_market_value"] > 0
-        , ["equity_ticker", "security_weight", "overlap_market_value"]].copy()
-        overlap_details = overlap_details.rename(columns={"equity_ticker": "security_ticker"})
+        , ["eqyticker", "security_weight", "overlap_market_value"]].copy()
+        overlap_details = overlap_details.rename(columns={"eqyticker": "security_ticker"})
         if not overlap_details.empty:
             if total_assets:
                 overlap_details["overlap_weight"] = (

@@ -62,19 +62,12 @@ def _normalize_equity(
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Normalise equity tickers across OMS and custodian datasets."""
 
-    # Process OMS side
-    if not df_oms.empty and "equity_ticker" not in df_oms.columns:
-        if "ticker" in df_oms.columns:
-            df_oms = df_oms.assign(equity_ticker=df_oms["ticker"])
-        elif logger:
-            logger.warning("OMS equity holdings missing equity_ticker column")
-
     # Process custodian side
-    if not df_cust.empty and "equity_ticker" not in df_cust.columns:
+    if not df_cust.empty and "eqyticker" not in df_cust.columns:
         # Try direct column mapping first
         for candidate in ("equity_ticker", "ticker", "security_tkr"):
             if candidate in df_cust.columns:
-                df_cust = df_cust.assign(equity_ticker=df_cust[candidate])
+                df_cust = df_cust.assign(eqyticker=df_cust[candidate])
                 break
         else:
             # Fall back to SEDOL mapping if available

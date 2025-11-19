@@ -535,6 +535,11 @@ class ReconciliationReport:
                 row[column_name] += len(df)
         return row
 
+    def _standardize_ticker_column(self, df: pd.DataFrame) -> pd.DataFrame:
+        for col in ["equity_ticker", "optticker", "norm_ticker", "eqyticker", "occ_symbol"]:
+            if col in df.columns:
+                return df.rename(columns={col: "TICKER"})
+        return df
 
     def _create_detailed_breaks_tab(self, writer: pd.ExcelWriter) -> None:
         all_breaks: list[pd.DataFrame] = []
@@ -675,11 +680,6 @@ class ReconciliationReport:
     def _get_unique_funds(self) -> set[str]:
         return {fund for (fund, _date, _recon) in self.flattened_results.keys()}
 
-    def _standardize_ticker_column(self, df: pd.DataFrame) -> pd.DataFrame:
-        for col in ["equity_ticker", "optticker", "norm_ticker", "eqyticker", "occ_symbol"]:
-            if col in df.columns:
-                return df.rename(columns={col: "TICKER"})
-        return df
 
     def _extract_source_from_recon_type(self, recon_type: str) -> str:
         recon_lower = recon_type.lower()
