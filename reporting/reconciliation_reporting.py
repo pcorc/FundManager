@@ -135,6 +135,16 @@ class ReconResult:
 
 class ReconciliationReport:
     """Generate the enhanced Excel holdings reconciliation report."""
+    SUMMARY_MAPPING: Dict[str, str] = {
+        "custodian_equity": "custodian_equity_holdings_breaks_T",
+        "custodian_equity_price_T": "custodian_equity_price_breaks_T",
+        "custodian_option": "custodian_option_holdings_breaks_T",
+        "custodian_option_price_T": "custodian_option_price_breaks_T",
+        "custodian_treasury": "custodian_treasury_holdings_breaks_T",
+        "custodian_treasury_price_T": "custodian_treasury_price_breaks_T",
+        "index_equity": "index_equity_holdings_breaks",
+        "index_equity_price_T": "index_equity_price_breaks_T",
+    }
 
     def __init__(
         self,
@@ -188,7 +198,7 @@ class ReconciliationReport:
 
         holdings_df: pd.DataFrame | None = None
         if descriptor.holdings_key:
-            holdings_raw = self._ensure_dataframe(subresults.get(descriptor.holdings_key))
+            holdings_raw = subresults.get(descriptor.holdings_key)
             if not holdings_raw.empty:
                 holdings_df = self._build_holdings_from_descriptor(
                     descriptor,
@@ -229,18 +239,18 @@ class ReconciliationReport:
         date_str: str,
         subresults: Mapping[str, Any],
     ) -> None:
-        regular_df = self._ensure_dataframe(subresults.get("regular_options"))
+        regular_df = subresults.get("regular_options")
         if not regular_df.empty:
             key = (fund, date_str, "custodian_option_regular")
             flat[key] = self._prepare_holdings_df(regular_df, fund, date_str, "custodian_option_regular", "optticker")
 
-        flex_df = self._ensure_dataframe(subresults.get("flex_options"))
+        flex_df = subresults.get("flex_options")
         if not flex_df.empty:
             prepared = self._prepare_holdings_df(flex_df, fund, date_str, "custodian_option_flex", "optticker")
             flat[(fund, date_str, "custodian_option_flex")] = prepared
             flat[(fund, date_str, "custodian_option_flex_holdings")] = prepared
 
-        price_t_df = self._ensure_dataframe(subresults.get("price_discrepancies_T"))
+        price_t_df = subresults.get("price_discrepancies_T")
         flex_price_t, _ = split_flex_price_frames(price_t_df)
         if not flex_price_t.empty:
             prepared = self._prepare_price_df(
@@ -252,7 +262,7 @@ class ReconciliationReport:
             )
             flat[(fund, date_str, "custodian_option_flex_price_T")] = prepared
 
-        price_t1_df = self._ensure_dataframe(subresults.get("price_discrepancies_T1"))
+        price_t1_df = subresults.get("price_discrepancies_T1")
         flex_price_t1, _ = split_flex_price_frames(price_t1_df)
         if not flex_price_t1.empty:
             prepared = self._prepare_price_df(
@@ -271,7 +281,7 @@ class ReconciliationReport:
         date_str: str,
         subresults: Mapping[str, Any],
     ) -> None:
-        flex_df = self._ensure_dataframe(subresults.get("flex_options"))
+        flex_df = subresults.get("flex_options")
         if not flex_df.empty:
             prepared = self._prepare_holdings_df(
                 flex_df,
@@ -317,7 +327,7 @@ class ReconciliationReport:
         price_t_key, price_t1_key = descriptor.price_keys
 
         if price_t_key:
-            price_t_raw = self._ensure_dataframe(subresults.get(price_t_key))
+            price_t_raw = subresults.get(price_t_key)
             price_t_raw = self._apply_price_transform(price_t_raw, descriptor)
             if not price_t_raw.empty:
                 price_t = self._prepare_price_df(
@@ -330,7 +340,7 @@ class ReconciliationReport:
                 )
 
         if price_t1_key:
-            price_t1_raw = self._ensure_dataframe(subresults.get(price_t1_key))
+            price_t1_raw = subresults.get(price_t1_key)
             price_t1_raw = self._apply_price_transform(price_t1_raw, descriptor)
             if not price_t1_raw.empty:
                 price_t1 = self._prepare_price_df(
@@ -450,14 +460,6 @@ class ReconciliationReport:
         cols = [c for c in cols if c in df.columns]
         return df[cols] if cols else df
 
-    def _ensure_dataframe(self, value: Any) -> pd.DataFrame:
-        if value is None:
-            return pd.DataFrame()
-        if isinstance(value, pd.DataFrame):
-            return value.copy()
-        if isinstance(value, Mapping):
-            return pd.DataFrame(value)
-        return pd.DataFrame(value)
 
     # ------------------------------------------------------------------
     def _export_to_excel(self) -> None:
@@ -520,51 +522,19 @@ class ReconciliationReport:
 
     def _build_summary_row(self, fund: str) -> Dict[str, Any]:
         row = {"Fund": fund, "Date": self.date}
-        columns = [
-            "custodian_equity_holdings_breaks_T",
-            "custodian_equity_price_breaks_T",
-            "custodian_option_holdings_breaks_T",
-            "custodian_option_regular_breaks_T",
-            "custodian_option_flex_breaks_T",
-            "custodian_option_price_breaks_T",
-            "flex_option_holdings_breaks_T",
-            "flex_option_price_breaks_T",
-            "custodian_treasury_holdings_breaks_T",
-            "custodian_treasury_price_breaks_T",
-            "index_equity_holdings_breaks",
-            "index_equity_price_breaks_T",
-            "sg_option_breaks",
-            "sg_equity_breaks",
-        ]
+        columns = list(self.SUMMARY_MAPPING.values())
+
         for col in columns:
             row[col] = 0
 
         for (fund_name, _date, recon_key), df in self.flattened_results.items():
             if fund_name != fund:
                 continue
-            column_name = self._map_recon_key_to_summary(recon_key)
+            column_name = self.SUMMARY_MAPPING.get(recon_key)
             if column_name:
                 row[column_name] += len(df)
         return row
 
-    def _map_recon_key_to_summary(self, recon_type: str) -> str | None:
-        mapping = {
-            "custodian_equity": "custodian_equity_holdings_breaks_T",
-            "custodian_equity_price_T": "custodian_equity_price_breaks_T",
-            "custodian_option": "custodian_option_holdings_breaks_T",
-            "custodian_option_regular": "custodian_option_regular_breaks_T",
-            "custodian_option_flex": "custodian_option_flex_breaks_T",
-            "custodian_option_price_T": "custodian_option_price_breaks_T",
-            "custodian_option_flex_holdings": "flex_option_holdings_breaks_T",
-            "custodian_option_flex_price_T": "flex_option_price_breaks_T",
-            "custodian_treasury": "custodian_treasury_holdings_breaks_T",
-            "custodian_treasury_price_T": "custodian_treasury_price_breaks_T",
-            "index_equity": "index_equity_holdings_breaks",
-            "index_equity_price_T": "index_equity_price_breaks_T",
-            "sg_option": "sg_option_breaks",
-            "sg_equity": "sg_equity_breaks",
-        }
-        return mapping.get(recon_type)
 
     def _create_detailed_breaks_tab(self, writer: pd.ExcelWriter) -> None:
         all_breaks: list[pd.DataFrame] = []
@@ -610,96 +580,84 @@ class ReconciliationReport:
     def _uses_index_flex(fund_name: Optional[str]) -> bool:
         return bool(fund_name) and fund_name in INDEX_FLEX_FUNDS
 
-    def _determine_asset_type(self, fund: Optional[str], recon_type: str, df: pd.DataFrame) -> str:
-        recon_lower = recon_type.lower()
-        if "flex" in recon_lower:
+    def _build_price_comparison_df(self, all_prices: pd.DataFrame) -> pd.DataFrame:
+        ticker_col = "TICKER" if "TICKER" in all_prices.columns else "equity_ticker"
+        rows = []
+
+        for (fund, ticker, period), group in all_prices.groupby(["FUND", ticker_col, "PERIOD"]):
+            row = self._build_price_row(fund, ticker, period, group)
+            rows.append(row)
+
+        comparison_df = pd.DataFrame(rows)
+        return comparison_df.sort_values(["Fund", "Asset Type", "Period"])
+
+    def _build_price_row(self, fund: str, ticker: str, period: str, group: pd.DataFrame) -> Dict[str, Any]:
+        """Build individual price comparison row."""
+        row = {
+            "Fund": fund,
+            "Ticker": ticker,
+            "Period": period,
+            "Fund_Price": np.nan,
+            "Custodian_Price": np.nan,
+            "Index_Price": np.nan,
+            "Price_Diff": np.nan,
+            "Asset Type": self._determine_price_asset_type(group),
+            "Option Weight": "",
+            "% Difference": "",
+        }
+
+        # Process price data
+        self._populate_price_data(row, group)
+
+        # Calculate price difference
+        prices = [p for p in [row["Fund_Price"], row["Custodian_Price"], row["Index_Price"]] if pd.notna(p)]
+        if prices:
+            row["Price_Diff"] = max(prices) - min(prices)
+
+        return row
+
+    def _determine_price_asset_type(self, group: pd.DataFrame) -> str:
+        """Determine asset type from price data group."""
+        if group["is_flex"].any() if "is_flex" in group.columns else False:
             return "FLEX"
-        if "treasury" in recon_lower:
+
+        recon_types = group["RECON_TYPE"].str.lower().fillna("")
+        if recon_types.str.contains("treasury").any():
             return "Treasury"
-        if "equity" in recon_lower:
+        elif recon_types.str.contains("equity").any():
             return "Equity"
-        if "option" in recon_lower:
-            return "Option"
-        if "cusip" in df.columns:
-            return "Treasury"
-        if "equity_ticker" in df.columns or "eqyticker" in df.columns:
-            return "Equity"
-        if "optticker" in df.columns or "occ_symbol" in df.columns:
-            tickers = df.get("optticker") or df.get("occ_symbol")
-            uses_index_flex = self._uses_index_flex(fund)
-            if (
-                uses_index_flex
-                and isinstance(tickers, pd.Series)
-                and tickers.str.contains("SPX|XSP", na=False).any()
-            ):
-                return "FLEX"
+        elif recon_types.str.contains("option").any():
             return "Option"
         return "Unknown"
 
-    def _build_price_comparison_df(self, all_prices: pd.DataFrame) -> pd.DataFrame:
-        ticker_col = "TICKER" if "TICKER" in all_prices.columns else "equity_ticker"
-        rows: list[Dict[str, Any]] = []
-        for (fund, ticker, period), group in all_prices.groupby(["FUND", ticker_col, "PERIOD"]):
-            row: Dict[str, Any] = {
-                "Fund": fund,
-                "Ticker": ticker,
-                "Period": period,
-                "Fund_Price": np.nan,
-                "Custodian_Price": np.nan,
-                "Index_Price": np.nan,
-                "Price_Diff": np.nan,
-                "Asset Type": "Unknown",
-                "Option Weight": "",
-                "% Difference": "",
-            }
+    def _populate_price_data(self, row: Dict[str, Any], group: pd.DataFrame) -> None:
+        """Populate price-related fields in the row."""
+        for _, price_row in group.iterrows():
+            source = str(price_row.get("SOURCE", "")).lower()
 
-            is_flex = False
-            if "is_flex" in group.columns and group["is_flex"].any():
-                is_flex = True
-            if group["RECON_TYPE"].str.contains("flex", case=False, na=False).any():
-                is_flex = True
-            if is_flex:
-                row["Asset Type"] = "FLEX"
+            if "custodian" in source:
+                row.update({
+                    "Fund_Price": price_row.get("price_vest"),
+                    "Custodian_Price": price_row.get("price_cust"),
+                    "Price_Diff": price_row.get("price_diff"),
+                })
+            elif "index" in source:
+                row.update({
+                    "Fund_Price": price_row.get("price_vest"),
+                    "Index_Price": price_row.get("price_index", price_row.get("price_cust")),
+                    "Price_Diff": price_row.get("price_diff"),
+                })
 
-            for _, price_row in group.iterrows():
-                source = price_row.get("SOURCE", "")
-                recon_name = price_row.get("RECON_TYPE", "")
-                fund_price = price_row.get("price_vest")
-                price_diff = price_row.get("price_diff")
-                lower_source = str(source).lower()
-                lower_recon = str(recon_name).lower()
-                if row["Asset Type"] == "Unknown":
-                    if "treasury" in lower_source or "treasury" in lower_recon:
-                        row["Asset Type"] = "Treasury"
-                    elif "equity" in lower_source or "equity" in lower_recon:
-                        row["Asset Type"] = "Equity"
-                    elif "option" in lower_source or "option" in lower_recon:
-                        row["Asset Type"] = "Option"
-                if "custodian" in str(source):
-                    row["Fund_Price"] = fund_price
-                    row["Custodian_Price"] = price_row.get("price_cust")
-                    row["Price_Diff"] = price_diff
-                elif "index" in str(source):
-                    row["Fund_Price"] = fund_price
-                    row["Index_Price"] = price_row.get("price_index", price_row.get("price_cust"))
-                    row["Price_Diff"] = price_diff
-                if "option_weight" in price_row:
-                    weight = price_row.get("option_weight")
-                    if isinstance(weight, (int, float)) and weight:
-                        row["Option Weight"] = f"{weight * 100:.2f}%"
-                if "price_pct_diff" in price_row:
-                    pct = price_row.get("price_pct_diff")
-                    if isinstance(pct, (int, float)):
-                        row["% Difference"] = f"{pct:.1f}%"
+            # Set optional fields
+            if "option_weight" in price_row:
+                weight = price_row["option_weight"]
+                if isinstance(weight, (int, float)) and weight:
+                    row["Option Weight"] = f"{weight * 100:.2f}%"
 
-            prices = [p for p in [row["Fund_Price"], row["Custodian_Price"], row["Index_Price"]] if pd.notna(p)]
-            if prices:
-                row["Price_Diff"] = max(prices) - min(prices)
-            rows.append(row)
-        comparison_df = pd.DataFrame(rows)
-        sort_cols = ["Fund", "Asset Type", "Period"]
-        comparison_df = comparison_df.sort_values(sort_cols)
-        return comparison_df
+            if "price_pct_diff" in price_row:
+                pct = price_row["price_pct_diff"]
+                if isinstance(pct, (int, float)):
+                    row["% Difference"] = f"{pct:.1f}%"
 
     def _create_system_specific_tabs(self, writer: pd.ExcelWriter) -> None:
         system_tabs = {
@@ -792,15 +750,6 @@ class ReconciliationReport:
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
 
-def _structure_reconciliation_details(
-    normalized_results: Mapping[str, Dict[str, Any]],
-    date_str: str,
-) -> Dict[str, Dict[str, Any]]:
-    details_by_date: Dict[str, Dict[str, Any]] = {date_str: {}}
-    for fund, payload in normalized_results.items():
-        details_by_date[date_str][fund] = payload.get("details", {})
-    return details_by_date
-
 
 def generate_reconciliation_reports(
     results: Mapping[str, Any],
@@ -818,7 +767,11 @@ def generate_reconciliation_reports(
     output_path.mkdir(parents=True, exist_ok=True)
 
     excel_path = output_path / f"{file_name_prefix}_{date_str}.xlsx"
-    structured_details = _structure_reconciliation_details(normalized, date_str)
+
+    structured_details = {date_str: {}}
+    for fund, payload in normalized.items():
+        structured_details[date_str][fund] = payload.get("details", {})
+
     ReconciliationReport(structured_details, date_str, excel_path)
 
     return GeneratedReconciliationReport(str(excel_path))
