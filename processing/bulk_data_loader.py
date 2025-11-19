@@ -88,7 +88,6 @@ class BulkDataLoader:
         self._bulk_load_overlap_data(
             data_store, all_funds, target_date, previous_date
         )
-        self._normalise_loaded_holdings(data_store)
 
         data_store.gics_mapping = self._load_gics_mapping()
 
@@ -211,50 +210,6 @@ class BulkDataLoader:
                             previous,
                         )
 
-    def _normalise_loaded_holdings(self, data_store: BulkDataStore) -> None:
-        """
-        For each fund in data_store, normalise OMS and custodian holdings for T and T-1,
-        and write the normalised DataFrames back into fund_payload using your existing
-        key conventions (vest_*, custodian_*, *_t1).
-        """
-
-        # Map your fund_payload keys -> normalize_all_holdings expected input keys
-        payload_to_input = {
-            # T (current)
-            "vest_equity": "equity_holdings",
-            "vest_option": "options_holdings",
-            "vest_treasury": "treasury_holdings",
-            "custodian_equity": "custodian_equity_holdings",
-            "custodian_option": "custodian_option_holdings",
-            "custodian_treasury": "custodian_treasury_holdings",
-
-            # T-1
-            "vest_equity_t1": "t1_equity_holdings",
-            "vest_option_t1": "t1_options_holdings",
-            "vest_treasury_t1": "t1_treasury_holdings",
-            "custodian_equity_t1": "t1_custodian_equity_holdings",
-            "custodian_option_t1": "t1_custodian_option_holdings",
-            "custodian_treasury_t1": "t1_custodian_treasury_holdings",
-        }
-
-        # Inverse map to push normalised outputs back to your payload keys
-        input_to_payload = {v: k for k, v in payload_to_input.items()}
-
-        for fund_name, fund_payload in data_store.fund_data.items():
-            if not fund_payload:
-                continue
-
-            # Build input dict for the normalisation function with safe defaults
-            to_normalize = {}
-            for payload_key, input_key in payload_to_input.items():
-                to_normalize[input_key] = fund_payload.get(payload_key, pd.DataFrame())
-
-            # Normalise
-            normalized = normalize_all_holdings(to_normalize)
-
-            # Write normalised outputs back to the payload using your key names
-            for input_key, payload_key in input_to_payload.items():
-                fund_payload[payload_key] = normalized.get(input_key, pd.DataFrame())
 
     def _bulk_load_vest_holdings(
         self,

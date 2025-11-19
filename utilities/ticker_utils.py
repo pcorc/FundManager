@@ -1,80 +1,60 @@
 import pandas as pd
 import re
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, Optional
+
+from config.fund_definitions import FUND_DEFINITIONS
 
 
-def normalize_all_holdings(fund_data: Dict[str, Any], logger=None) -> Dict[str, Any]:
+def normalize_all_holdings(
+    fund_name: str,
+    fund_data: Dict[str, Any],
+    *,
+    fund_definition: Optional[Dict[str, Any]] = None,
+    logger=None,
+) -> Dict[str, Any]:
     """
-    Normalize all equity, option, and treasury holdings for a fund.
+    Normalize holdings for a fund using its static configuration.
 
-    This entry point harmonises tickers and identifiers for both OMS and
-    custodian datasets across T and T-1 snapshots. The function operates on a
-    dictionary of holdings DataFrames and returns the same dictionary with
-    normalised copies alongside raw backups.
+    Only the asset types flagged in :mod:`config.fund_definitions` are
+    processed. The function returns a shallow copy of ``fund_data`` with the
+    normalised holdings written back to their existing keys (``vest_*`` and
+    ``custodian_*``).
     """
 
-    equity_df = fund_data.get("equity_holdings", pd.DataFrame()).copy()
-    options_df = fund_data.get("options_holdings", pd.DataFrame()).copy()
-    treasury_df = fund_data.get("treasury_holdings", pd.DataFrame()).copy()
+    normalized = {**fund_data}
+    definition = fund_definition or FUND_DEFINITIONS.get(fund_name, {})
 
-    df_cust_equity = fund_data.get("custodian_equity_holdings", pd.DataFrame()).copy()
-    df_cust_option = fund_data.get("custodian_option_holdings", pd.DataFrame()).copy()
-    df_cust_treasury = fund_data.get("custodian_treasury_holdings", pd.DataFrame()).copy()
+    def _normalize_pair(oms_key: str, cust_key: str, func) -> None:
+        oms_df = normalized.get(oms_key, pd.DataFrame()).copy()
+        cust_df = normalized.get(cust_key, pd.DataFrame()).copy()
 
-    equity_df_t1 = fund_data.get("t1_equity_holdings", pd.DataFrame()).copy()
-    options_df_t1 = fund_data.get("t1_options_holdings", pd.DataFrame()).copy()
-    treasury_df_t1 = fund_data.get("t1_treasury_holdings", pd.DataFrame()).copy()
+        if oms_df.empty and cust_df.empty:
+            normalized[oms_key] = oms_df
+            normalized[cust_key] = cust_df
+            return
 
-    df_cust_equity_t1 = fund_data.get("t1_custodian_equity_holdings", pd.DataFrame()).copy()
-    df_cust_option_t1 = fund_data.get("t1_custodian_option_holdings", pd.DataFrame()).copy()
-    df_cust_treasury_t1 = fund_data.get("t1_custodian_treasury_holdings", pd.DataFrame()).copy()
+        normalized[oms_key], normalized[cust_key] = func(oms_df, cust_df, logger)
 
-    fund_data["equity_holdings_raw"] = equity_df.copy()
-    fund_data["options_holdings_raw"] = options_df.copy()
-    fund_data["treasury_holdings_raw"] = treasury_df.copy()
+    if definition.get("has_equity", True):
+        _normalize_pair("vest_equity", "custodian_equity", normalize_equity_pair)
+        _normalize_pair(
+            "vest_equity_t1", "custodian_equity_t1", normalize_equity_pair
+        )
 
-    fund_data["t1_equity_holdings_raw"] = equity_df_t1.copy()
-    fund_data["t1_options_holdings_raw"] = options_df_t1.copy()
-    fund_data["t1_treasury_holdings_raw"] = treasury_df_t1.copy()
+    if definition.get("has_listed_option", False) or definition.get("has_flex_option", False):
+        _normalize_pair("vest_option", "custodian_option", normalize_option_pair)
+        _normalize_pair("vest_option_t1", "custodian_option_t1", normalize_option_pair)
 
-    equity_df, df_cust_equity = normalize_equity_pair(equity_df, df_cust_equity, logger)
-    options_df, df_cust_option = normalize_option_pair(options_df, df_cust_option, logger)
-    treasury_df, df_cust_treasury = normalize_treasury_pair(
-        treasury_df, df_cust_treasury, logger
-    )
-
-    equity_df_t1, df_cust_equity_t1 = normalize_equity_pair(
-        equity_df_t1, df_cust_equity_t1, logger
-    )
-    options_df_t1, df_cust_option_t1 = normalize_option_pair(
-        options_df_t1, df_cust_option_t1, logger
-    )
-    treasury_df_t1, df_cust_treasury_t1 = normalize_treasury_pair(
-        treasury_df_t1, df_cust_treasury_t1, logger
-    )
-
-
-    fund_data["equity_holdings"] = equity_df
-    fund_data["options_holdings"] = options_df
-    fund_data["treasury_holdings"] = treasury_df
-
-    fund_data["custodian_equity_holdings"] = df_cust_equity
-    fund_data["custodian_option_holdings"] = df_cust_option
-    fund_data["custodian_treasury_holdings"] = df_cust_treasury
-
-    fund_data["t1_equity_holdings"] = equity_df_t1
-    fund_data["t1_options_holdings"] = options_df_t1
-    fund_data["t1_treasury_holdings"] = treasury_df_t1
-
-    fund_data["t1_custodian_equity_holdings"] = df_cust_equity_t1
-    fund_data["t1_custodian_option_holdings"] = df_cust_option_t1
-    fund_data["t1_custodian_treasury_holdings"] = df_cust_treasury_t1
+    if definition.get("has_treasury", False):
+        _normalize_pair("vest_treasury", "custodian_treasury", normalize_treasury_pair)
+        _normalize_pair(
+            "vest_treasury_t1", "custodian_treasury_t1", normalize_treasury_pair
+        )
 
     if logger:
-        logger.info("Holdings normalization complete for fund")
+        logger.info("Holdings normalization complete for fund %s", fund_name)
 
-    return fund_data
-
+    return normalized
 
 def normalize_equity_pair(
     df_oms: pd.DataFrame, df_cust: pd.DataFrame, logger=None, debug_mode: bool = False

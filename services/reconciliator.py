@@ -13,7 +13,6 @@ from config.fund_definitions import (
     NON_DIVERSIFIED_FUNDS,
     INDEX_FLEX_FUNDS,
 )
-from utilities.ticker_utils import normalize_equity_pair, normalize_option_pair
 
 
 @dataclass
@@ -76,10 +75,6 @@ class Reconciliator:
         df_cust1 = self.fund_data.get('custodian_equity_t1', pd.DataFrame())
         df_trades = self.fund_data.get('trades_data', pd.DataFrame())
         df_crrd = self.fund_data.get('cr_rd_data', pd.DataFrame())
-
-        # 2) Normalize tickers
-        df_oms, df_cust = normalize_equity_pair(df_oms, df_cust, logger=self.logger)
-        df_oms1, df_cust1 = normalize_equity_pair(df_oms1, df_cust1, logger=self.logger)
 
         # must have equity_ticker
         if 'equity_ticker' not in df_oms.columns or 'equity_ticker' not in df_cust.columns:
@@ -228,10 +223,6 @@ class Reconciliator:
         if df_oms.empty and df_cust.empty:
             self.results['custodian_option'] = empty_result
             return
-
-        # Step 3: Normalize option tickers BEFORE any processing
-        df_oms, df_cust = normalize_option_pair(df_oms, df_cust, logger=self.logger)
-        df_oms1, df_cust1 = normalize_option_pair(df_oms1, df_cust1, logger=self.logger)
 
         # Step 4: Verify optticker column exists after normalization
         if not df_oms.empty and 'optticker' not in df_oms.columns:
@@ -1045,9 +1036,6 @@ class Reconciliator:
             )
             return
 
-        # Normalize option tickers if needed
-        df_oms, df_sg = normalize_option_pair(df_oms, df_sg, logger=self.logger)
-
         # Merge data
         df = pd.merge(df_oms, df_sg, on='optticker', how='outer',
                       suffixes=('_vest', '_sg'))
@@ -1099,9 +1087,6 @@ class Reconciliator:
                 merged_data=pd.DataFrame()
             )
             return
-
-        # Normalize equity tickers
-        df_oms, df_sg = normalize_equity_pair(df_oms, df_sg, logger=self.logger)
 
         # Merge data
         df = pd.merge(df_oms, df_sg, on='equity_ticker', how='outer',
