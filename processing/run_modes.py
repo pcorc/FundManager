@@ -141,8 +141,7 @@ def run_eod_mode(
             nav_results=nav_payload if "nav_reconciliation" in params.operations else None,
             report_date=params.trade_date,
             output_dir=str(output_dir),
-            create_pdf=params.create_pdf,
-            compliance_results=compliance_payload if "compliance" in params.operations else None,
+            create_pdf=params.create_pdf
         )
 
     return results, artefacts
@@ -304,8 +303,7 @@ def run_eod_range_mode(
                 nav_results=nav_payload if "nav_reconciliation" in operations else None,
                 report_date=trade_date,
                 output_dir=str(output_dir),
-                create_pdf=create_pdf,
-                compliance_results=compliance_payload if "compliance" in operations else None,
+                create_pdf=create_pdf
             )
 
         daily_artefacts[trade_date.isoformat()] = artefacts
@@ -344,23 +342,15 @@ def flatten_eod_paths(artefacts: Mapping[str, object]) -> Dict[str, str]:
         if holdings is not None:
             if getattr(holdings, "excel_path", None):
                 paths["holdings_reconciliation_excel"] = holdings.excel_path  # type: ignore[attr-defined]
-            if getattr(holdings, "pdf_path", None):
-                paths["holdings_reconciliation_pdf"] = holdings.pdf_path  # type: ignore[attr-defined]
 
         nav = getattr(reconciliation, "nav", None)
         if nav is not None:
             if getattr(nav, "excel_path", None):
                 paths["nav_reconciliation_excel"] = nav.excel_path  # type: ignore[attr-defined]
-            if getattr(nav, "pdf_path", None):
-                paths["nav_reconciliation_pdf"] = nav.pdf_path  # type: ignore[attr-defined]
 
         combined = getattr(reconciliation, "combined_reconciliation_pdf", None)
         if combined:
             paths["reconciliation_summary_pdf"] = combined
-
-        full = getattr(reconciliation, "full_summary_pdf", None)
-        if full:
-            paths["oversight_summary_pdf"] = full
 
     return paths
 

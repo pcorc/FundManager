@@ -9,7 +9,6 @@ from typing import Any, Mapping, Optional
 from processing.fund_manager import ProcessingResults
 from reporting.nav_recon_reporting import (
     GeneratedNAVReconciliationReport,
-    generate_daily_operations_pdf,
     generate_nav_reconciliation_reports,
     generate_reconciliation_summary_pdf,
 )
@@ -26,8 +25,6 @@ class GeneratedReconciliationSuite:
     reconciliation: Optional[GeneratedReconciliationReport]
     nav_reconciliation: Optional[GeneratedNAVReconciliationReport]
     reconciliation_summary_pdf: Optional[str]
-    daily_summary_pdf: Optional[str]
-
 
 def build_reconciliation_reports(
     results: ProcessingResults,
@@ -56,7 +53,6 @@ def build_reconciliation_reports(
             reconciliation_payload,
             report_date,
             output_dir,
-            create_pdf=create_pdf,
         )
         if reconciliation_payload
         else None
@@ -67,7 +63,6 @@ def build_reconciliation_reports(
             nav_payload,
             report_date,
             output_dir,
-            create_pdf=create_pdf,
         )
         if nav_payload
         else None
@@ -84,21 +79,7 @@ def build_reconciliation_reports(
         else None
     )
 
-    daily_summary = (
-        generate_daily_operations_pdf(
-            compliance_results or {},
-            reconciliation_payload,
-            nav_payload,
-            report_date,
-            output_dir,
-        )
-        if create_pdf
-        else None
-    )
-
     return GeneratedReconciliationSuite(
         reconciliation=reconciliation_report,
         nav_reconciliation=nav_report,
-        reconciliation_summary_pdf=reconciliation_summary,
-        daily_summary_pdf=daily_summary,
-    )
+        reconciliation_summary_pdf=reconciliation_summary)

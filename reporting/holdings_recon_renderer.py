@@ -122,13 +122,9 @@ class HoldingsReconciliationRenderer:
                         counts["Quantity"] += 1
 
         price_t = recon_data.get("price_discrepancies_T")
-        price_t1 = recon_data.get("price_discrepancies_T1")
         if isinstance(price_t, pd.DataFrame):
             counts["Price"] += len(price_t)
             counts["Total"] += len(price_t)
-        if isinstance(price_t1, pd.DataFrame):
-            counts["Price"] += len(price_t1)
-            counts["Total"] += len(price_t1)
 
         holdings_df = recon_data.get("holdings_discrepancies")
         if isinstance(holdings_df, pd.DataFrame) and not holdings_df.empty:

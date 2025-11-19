@@ -10,7 +10,6 @@ from pathlib import Path
 from processing.fund_manager import ProcessingResults
 from reporting.nav_recon_reporting import (
     GeneratedNAVReconciliationReport,
-    generate_daily_operations_pdf,
     generate_nav_reconciliation_reports,
     generate_reconciliation_summary_pdf,
 )
@@ -26,8 +25,6 @@ class GeneratedReconciliationArtefacts:
     holdings: Optional[GeneratedReconciliationReport]
     nav: Optional[GeneratedNAVReconciliationReport]
     combined_reconciliation_pdf: Optional[str]
-    full_summary_pdf: Optional[str]
-
 
 def _extract_results(
         results: ProcessingResults | None,
@@ -51,13 +48,11 @@ def build_nav_reconciliation_reports(
         create_pdf: bool = True,
         holdings_results: Mapping[str, Any] | None = None,
         nav_results: Mapping[str, Any] | None = None,
-        compliance_results: Mapping[str, Any] | None = None,
 ) -> Optional[GeneratedReconciliationArtefacts]:
     """Build holdings/NAV reconciliation artefacts using provided payloads."""
 
     derived_holdings: Mapping[str, Any] = holdings_results or _extract_results(results, "reconciliation_results")
     derived_nav: Mapping[str, Any] = nav_results or _extract_results(results, "nav_results")
-    derived_compliance: Mapping[str, Any] = compliance_results or _extract_results(results, "compliance_results")
 
     if not derived_holdings and not derived_nav:
         return None
@@ -68,7 +63,6 @@ def build_nav_reconciliation_reports(
             derived_holdings,
             report_date,
             output_dir,
-            create_pdf=create_pdf,
         )
 
     nav_report: Optional[GeneratedNAVReconciliationReport] = None
@@ -83,16 +77,7 @@ def build_nav_reconciliation_reports(
             excel_path  # excel_path
         )
 
-        pdf_output = None
-        if create_pdf:
-            # Generate PDF if requested - this would be a separate function
-            # You might need to implement a PDF generation for NAV reports
-            pass
-
-        nav_report = GeneratedNAVReconciliationReport(
-            excel_path=excel_output,
-            pdf_path=pdf_output
-        )
+        nav_report = GeneratedNAVReconciliationReport(excel_path=excel_output)
 
     combined_pdf: Optional[str] = None
     if create_pdf:
@@ -103,19 +88,8 @@ def build_nav_reconciliation_reports(
             output_dir,
         )
 
-    full_summary_pdf: Optional[str] = None
-    if create_pdf:
-        full_summary_pdf = generate_daily_operations_pdf(
-            derived_compliance,
-            derived_holdings,
-            derived_nav,
-            report_date,
-            output_dir,
-        )
-
     return GeneratedReconciliationArtefacts(
         holdings=holdings_report,
         nav=nav_report,
         combined_reconciliation_pdf=combined_pdf,
-        full_summary_pdf=full_summary_pdf,
     )
