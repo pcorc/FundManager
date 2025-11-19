@@ -64,10 +64,7 @@ def _normalize_equity(
 
     if "sedol" in df_cust.columns and not df_oms.empty and "sedol" in df_oms.columns:
         mapping = df_oms.set_index("sedol")["eqyticker"].dropna().to_dict()
-        df_cust = df_cust.assign(equity_ticker=df_cust["sedol"].map(mapping))
-        if logger:
-            mapped = df_cust["eqyticker"].notna().sum()
-            logger.debug("Mapped %s custodian tickers via SEDOL", mapped)
+        df_cust = df_cust.assign(eqyticker=df_cust["sedol"].map(mapping))
     elif logger:
         logger.warning("Custodian equity holdings missing recognizable ticker column")
 

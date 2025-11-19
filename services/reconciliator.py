@@ -111,7 +111,7 @@ class Reconciliator:
         # 5) adjusted shares & base discrepancy
         df['adjusted_cust_shares'] = df['shares_cust'].fillna(0) + df['qty_sign_adj']
         df['final_adjusted_shares'] = df['adjusted_cust_shares'] + df['cr_rd']
-        df['final_discrepancy'] = df['quantity'].fillna(0) - df['final_adjusted_shares']
+        df['final_discrepancy'] = df['nav_shares'].fillna(0) - df['final_adjusted_shares']
 
         # 6) Identify mismatches AND create discrepancy_type column FIRST
         mask_missing = df['in_vest'] != df['in_cust']
@@ -237,7 +237,7 @@ class Reconciliator:
 
         # Step 5: Set up quantity columns for current data
         if not df_oms.empty:
-            df_oms['quantity'] = self._get_quantity_column(df_oms)
+            df_oms['quantity'] = df_oms['nav_shares']
             # Take absolute value of option prices
             if 'price' in df_oms.columns:
                 df_oms['price'] = self._coerce_numeric_series(df_oms['price']).abs()
@@ -255,7 +255,7 @@ class Reconciliator:
 
         # Step 6: Set up quantity columns for previous data
         if not df_oms1.empty:
-            df_oms1['quantity'] = self._get_quantity_column(df_oms1)
+            df_oms1['quantity'] = df_oms1['nav_shares']
             if 'price' in df_oms1.columns:
                 df_oms1['price'] = self._coerce_numeric_series(df_oms1['price']).abs()
 
@@ -448,7 +448,7 @@ class Reconciliator:
                 )
                 return
 
-        df_oms['quantity'] = self._get_quantity_column(df_oms)
+        df_oms['quantity'] = df_oms['nav_shares']
         if 'shares_cust' not in df_cust.columns:
             for candidate in ['quantity', 'par', 'par_value', 'face', 'position', 'amount']:
                 if candidate in df_cust.columns:
@@ -759,51 +759,6 @@ class Reconciliator:
                 df2["gl_adj"] = (df2["price_t"] - df2.get("price_t1", 0)) * df2[qty_col] * multiplier
 
         return df2
-
-    def _get_quantity_column(self, holdings_df: pd.DataFrame) -> pd.Series:
-        """
-        Get appropriate quantity column based on analysis type.
-
-        Args:
-            holdings_df: DataFrame with holdings data
-
-        Returns:
-            Series with correct quantity values
-        """
-        if holdings_df.empty:
-            return pd.Series(dtype=float)
-
-        df = holdings_df.copy()
-
-        ex_ante_candidates = [
-            "quantity_tminus1",
-            "shares_tminus1",
-            "quantity_t_1",
-            "qty_tminus1",
-        ]
-        base_candidates = [
-            "quantity",
-            "shares",
-            "share_qty",
-            "position",
-            "vest_quantity",
-            "qty",
-        ]
-
-        if self.analysis_type == "ex_ante":
-            for column in ex_ante_candidates:
-                if column in df.columns:
-                    return pd.to_numeric(df[column], errors="coerce").fillna(0.0)
-
-        for column in base_candidates:
-            if column in df.columns:
-                return pd.to_numeric(df[column], errors="coerce").fillna(0.0)
-
-        numeric_columns = df.select_dtypes(include=["number"]).columns
-        if len(numeric_columns) > 0:
-            return pd.to_numeric(df[numeric_columns[0]], errors="coerce").fillna(0.0)
-
-        return pd.Series(0.0, index=df.index)
 
     @staticmethod
     def _coerce_numeric_series(series: pd.Series) -> pd.Series:
