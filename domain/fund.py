@@ -32,34 +32,34 @@ class FundMetrics:
     def __init__(self, snapshot: 'FundSnapshot'):
         self.snapshot = snapshot
 
-    @cached_property
+    @property
     def total_equity_value(self) -> float:
         """Total equity market value computed from holdings."""
         return self._compute_equity_value()
 
-    @cached_property
+    @property
     def total_option_value(self) -> float:
         """Total regular option market value computed from holdings."""
         return self._compute_option_value()
 
-    @cached_property
+    @property
     def total_flex_option_value(self) -> float:
         """Total flex option market value computed from holdings."""
         return self._compute_flex_option_value()
 
-    @cached_property
+    @property
     def total_treasury_value(self) -> float:
         """Total treasury market value computed from holdings."""
         return self._compute_treasury_value()
 
-    @cached_property
+    @property
     def total_option_delta_adjusted_notional(self) -> float:
         """Total delta-adjusted notional for all options (regular + flex)."""
         regular = self._compute_option_delta_adjusted_notional()
         flex = self._compute_flex_option_delta_adjusted_notional()
         return regular + flex
 
-    @cached_property
+    @property
     def total_holdings_value(self) -> float:
         """Total value of all holdings (equity + options + flex + treasury)."""
         return (
@@ -151,11 +151,11 @@ class FundSnapshot:
         *,
         vest: Optional[FundHoldings] = None,
         custodian: Optional[FundHoldings] = None,
-        cash: float = 0.0,
-        nav: float = 0.0,
-        expenses: float = 0.0,
-        total_assets: float = 0.0,
-        total_net_assets: float = 0.0,
+        reported_cash: float = 0.0,
+        reported_nav: float = 0.0,  # NAV per share
+        reported_tna: float = 0.0,  # Total Net Assets
+        reported_expenses: float = 0.0,  # What custodian reports for expenses
+        reported_shares_outstanding: float = 0.0,
         flows: float = 0.0,
         basket: Optional[pd.DataFrame] = None,
         index: Optional[pd.DataFrame] = None,
