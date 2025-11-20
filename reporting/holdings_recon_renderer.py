@@ -174,7 +174,7 @@ class HoldingsReconciliationRenderer:
             None,
         )
         column_sources = {
-            "equity_ticker": [ticker_col] if ticker_col else [],
+            "eqy_ticker": [ticker_col] if ticker_col else [],
             "discrepancy_type": ["discrepancy_type", "type"],
             "shares_cust": ["shares_cust", "cust_shares", "custodian_shares"],
             "shares_vest": ["shares_vest", "nav_shares", "quantity", "shares_oms", "vest_shares"],
@@ -186,7 +186,7 @@ class HoldingsReconciliationRenderer:
         for display_name, candidates in column_sources.items():
             resolved_columns[display_name] = next((col for col in candidates if col in df.columns), None)
 
-        if not resolved_columns.get("equity_ticker"):
+        if not resolved_columns.get("eqy_ticker"):
             return
 
         display_cols = list(column_sources.keys())
