@@ -63,6 +63,7 @@ class NAVReconciliator:
         metadata_flex = bool(self.fund_definition.get("has_flex_option"))
         fund_flex = bool(getattr(self.fund, "has_flex_option", False))
         self.has_flex_option = metadata_flex or fund_flex
+        self.flex_option_pattern = self.fund_definition.get("flex_option_pattern", "SPX|XSP")
         flex_type = (
             getattr(self.fund, "flex_option_type", None)
             or self.fund_definition.get("flex_option_type")
@@ -237,13 +238,12 @@ class NAVReconciliator:
 
         price_breaks = self.holdings_price_breaks.get("option", pd.DataFrame())
 
-        all_tickers: set[str] = set()
-        if not option_t.empty and "optticker" in option_t.columns:
-            non_flex = option_t[~option_t["optticker"].str.contains("SPX|XSP", na=False)]
-            all_tickers.update(non_flex["optticker"].unique())
-        if not option_t1.empty and "optticker" in option_t1.columns:
-            non_flex_t1 = option_t1[~option_t1["optticker"].str.contains("SPX|XSP", na=False)]
-            all_tickers.update(non_flex_t1["optticker"].unique())
+        all_tickers = self._gather_option_tickers(
+            option_t,
+            option_t1,
+            pattern=self.flex_option_pattern if self.has_flex_option else None,
+            include_pattern=False,
+        )
 
         for ticker in sorted(all_tickers):
             qty_t = 0
@@ -301,9 +301,11 @@ class NAVReconciliator:
 
     # ------------------------------------------------------------------
     def _calculate_flex_option_gl_with_details(self) -> _ComponentGL:
-        """Calculate flex option G/L with ticker-level details."""
+            
 
-        if not self.has_flex_option:
+        """Calculate flex option G/L with ticker-level details."""
+        
+        if not self.has_flex_option: 
             return _ComponentGL()
 
         option_t = self._payload_frame("vest_option", "option_holdings")
@@ -318,13 +320,12 @@ class NAVReconciliator:
 
         price_breaks = self.holdings_price_breaks.get("option", pd.DataFrame())
 
-        all_tickers: set[str] = set()
-        if not option_t.empty and "optticker" in option_t.columns:
-            flex_only = option_t[option_t["optticker"].str.contains("SPX|XSP", na=False)]
-            all_tickers.update(flex_only["optticker"].unique())
-        if not option_t1.empty and "optticker" in option_t1.columns:
-            flex_only_t1 = option_t1[option_t1["optticker"].str.contains("SPX|XSP", na=False)]
-            all_tickers.update(flex_only_t1["optticker"].unique())
+        all_tickers = self._gather_option_tickers(
+            option_t,
+            option_t1,
+            pattern=self.flex_option_pattern,
+            include_pattern=True,
+        )
 
         for ticker in sorted(all_tickers):
             qty_t = 0
@@ -350,8 +351,7 @@ class NAVReconciliator:
             if not price_breaks.empty and ticker in price_breaks.index:
                 adj_data = price_breaks.loc[ticker]
                 if "price_t_adj" in adj_data:
-                    price_t_adj = adj_data["price_t_adj"]
-
+                    continue
             cust_price = self._lookup_cust_price(price_breaks, ticker)
             if cust_price is not None:
                 price_t1_cust = cust_price
@@ -377,8 +377,33 @@ class NAVReconciliator:
                 total_gl_raw += gl_raw
                 total_gl_adj += gl_adj
 
-        self.flex_details = pd.DataFrame(details_list, columns=self.DETAIL_COLUMNS)
-        return _ComponentGL(raw=total_gl_raw, adjusted=total_gl_adj, details=self.flex_details)
+            self.flex_details = pd.DataFrame(details_list, columns=self.DETAIL_COLUMNS)
+            return _ComponentGL(raw=total_gl_raw, adjusted=total_gl_adj, details=self.flex_details)
+
+    # ------------------------------------------------------------------
+    def _gather_option_tickers(
+            self,
+            option_t: pd.DataFrame,
+            option_t1: pd.DataFrame,
+            pattern: str | None,
+            include_pattern: bool,
+    ) -> set[str]:
+        all_tickers: set[str] = set()
+
+        if pattern is None:
+            include_pattern = True
+
+        for df in (option_t, option_t1):
+            if df.empty or "optticker" not in df.columns:
+                continue
+
+            if pattern:
+                mask = df["optticker"].str.contains(pattern, na=False)
+                df = df[mask if include_pattern else ~mask]
+
+            all_tickers.update(df["optticker"].unique())
+
+        return all_tickers
 
     # ------------------------------------------------------------------
     def _payload_frame(self, *keys: str) -> pd.DataFrame:

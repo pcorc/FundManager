@@ -179,15 +179,12 @@ class BulkDataLoader:
 
                 for fund in funds:
                     fund_name = fund.name
-                    fund_data = self._filter_by_fund(
-                        all_data, fund_name, fund.mapping_data
-                    )
+                    fund_data = all_data[all_data["fund"] == fund_name].copy()
 
                     date_column = self._find_date_column(
                         fund_data,
                         'date',
                         'process_date',
-                        'trade_date',
                         'effective_date',
                     )
 
@@ -244,62 +241,16 @@ class BulkDataLoader:
                     continue
 
                 try:
-                    # CRITICAL: Process each fund separately for treasury to ensure no cross-contamination
                     if config_key == 'vest_treasury_holdings':
-                        for fund in funds:
-                            # Check if fund actually has treasury
-                            if not fund.mapping_data.get('has_treasury', False):
-                                # Store empty DataFrames for funds without treasury
-                                self._store_fund_data(
-                                    data_store, fund.name, payload_key, pd.DataFrame()
-                                )
-                                if previous_date is not None:
-                                    self._store_fund_data(
-                                        data_store, fund.name, payload_key_t1, pd.DataFrame()
-                                    )
-                                continue
+                        all_data = self._vest_treasury_holdings(
+                            table,
+                            funds,
+                            target_date,
+                            previous_date,
+                            analysis_type,
+                        )
 
-                            # Query treasury data for this specific fund only
-                            try:
-                                fund_data = self._vest_treasury_holdings(
-                                    table,
-                                    [fund],  # Pass only this fund
-                                    target_date,
-                                    previous_date,
-                                    analysis_type,
-                                )
-
-                                # Split into current and previous
-                                current, previous = self._split_current_previous(
-                                    fund_data,
-                                    'date',  # We know this column exists
-                                    target_date,
-                                    previous_date,
-                                )
-
-                                # Store the data
-                                self._store_fund_data(
-                                    data_store, fund.name, payload_key, current
-                                )
-                                if previous_date is not None:
-                                    self._store_fund_data(
-                                        data_store, fund.name, payload_key_t1, previous
-                                    )
-                            except Exception as exc:
-                                self.logger.warning(
-                                    "Failed to load treasury for fund %s: %s",
-                                    fund.name, exc
-                                )
-                                # Store empty DataFrames on error
-                                self._store_fund_data(
-                                    data_store, fund.name, payload_key, pd.DataFrame()
-                                )
-                                if previous_date is not None:
-                                    self._store_fund_data(
-                                        data_store, fund.name, payload_key_t1, pd.DataFrame()
-                                    )
-
-                    if config_key == 'vest_equity_holdings':
+                    elif config_key == 'vest_equity_holdings':
                         all_data = self._query_vest_equity_holdings(
                             table,
                             funds,
@@ -322,9 +273,7 @@ class BulkDataLoader:
 
                     for fund in funds:
                         fund_name = fund.name
-                        fund_data = self._filter_by_fund(
-                            all_data, fund_name, fund.mapping_data
-                        )
+                        fund_data = all_data[all_data["fund"] == fund_name].copy()
                         current, previous = self._split_current_previous(
                             fund_data,
                             self._find_date_column(
@@ -570,28 +519,6 @@ class BulkDataLoader:
     ) -> pd.DataFrame:
         query = self.session.query(table)
 
-        # date_column = getattr(table, 'date', None)
-        # if date_column is not None:
-        #     query = self._apply_date_filter(
-        #         query,
-        #         date_column,
-        #         target_date,
-        #         previous_date,
-        #     )
-        #
-        # fund_column =  getattr(table, 'fund', None)
-        # fund_aliases = self._collect_fund_aliases(funds)
-        # if fund_column is not None and fund_aliases:
-        #     query = query.filter(fund_column.in_(fund_aliases))
-        #
-        # if analysis_type:
-        #     analysis_column = getattr(table, 'analysis_type')
-        #     if analysis_column is not None:
-        #         query = query.filter(
-        #             func.lower(func.trim(analysis_column))
-        #             == analysis_type.lower(),
-        #         )
-
         # Simple date filter - we know there's always a 'date' column
         if previous_date is not None:
             query = query.filter(
@@ -600,7 +527,6 @@ class BulkDataLoader:
         else:
             query = query.filter(table.date == target_date)
 
-        # CRITICAL: Simple fund filter - we know there's always a 'fund' column
         fund_names = [f.name for f in funds]
         query = query.filter(table.fund.in_(fund_names))
 
@@ -611,14 +537,10 @@ class BulkDataLoader:
             )
 
         df = pd.read_sql(query.statement, self.session.bind)
-        # Additional safety: double-check fund filtering in pandas
-        if not df.empty and 'fund' in df.columns:
-            df = df[df['fund'].isin(fund_names)].copy()
 
         shares_series = self._resolve_shares_series(df, analysis_type=analysis_type)
         price_series = pd.to_numeric(df['price'], errors='coerce').fillna(0.0)
         df['treasury_market_value'] = shares_series * price_series
-
 
         return df
 
@@ -1598,10 +1520,12 @@ class BulkDataLoader:
             query = self._build_bny_holdings_query(
                 table, holdings_kind, target_date, previous_date
             )
+
         elif 'umb' in lower_name:
             query = self._build_umb_holdings_query(
                 table, holdings_kind, target_date, previous_date
             )
+
         else:
             query = self.session.query(table)
             date_column = self._get_table_column(
@@ -1623,9 +1547,6 @@ class BulkDataLoader:
         fund_values = self._collect_fund_aliases(funds)
         if fund_values:
             query = query.filter(fund_column.in_(fund_values))
-
-        if holdings_kind == "treasury":
-            x=pd.read_sql(query.statement, self.session.bind)
 
         return pd.read_sql(query.statement, self.session.bind)
 
@@ -1653,7 +1574,7 @@ class BulkDataLoader:
                 table.traded_market_value_base.label('market_value'),
             ).filter(
                     table.asset_group.notin_(['O', 'UN', 'ME', 'MM', 'CA', 'TI', 'B', 'CU'])
-            )
+            ).filter(table.date >= min_date)
             return query
 
         if holdings_kind == 'option':
@@ -1672,7 +1593,7 @@ class BulkDataLoader:
                 table.maturity_date.label('maturity_date'),
             ).filter(
                     table.asset_group.notin_(['S', 'FS', 'UN', 'ME', 'MM', 'CA', 'B', 'TI', 'CU'])
-                ).filter(maturity_column >= min_date)
+                ).filter(table.maturity_date >= min_date)
 
             return query
 
@@ -1682,14 +1603,14 @@ class BulkDataLoader:
                 table.fund.label('fund'),
                 table.security_cins.label('cusip'),
                 table.security_sedol.label('sedol'),
-                table.security_description_long_1.label('ticker'),
+                table.pricing_number.label('ticker'),
                 table.maturity_date.label('maturity'),
                 table.sharespar.label('shares_cust'),
                 table.sharespar.label('quantity'),
                 table.price_base.label('price'),
                 table.traded_market_value_base.label('market_value'),
                 table.asset_group.label('asset_group'),
-            ).filter(table.asset_group == "TI")
+            ).filter(table.asset_group == "TI").filter(table.date >= min_date)
             return query
 
     def _build_umb_holdings_query(
@@ -1700,6 +1621,7 @@ class BulkDataLoader:
         previous_date: Optional[date],
     ):
         """Select the canonical columns for UMB custodian datasets."""
+        min_date = target_date if previous_date is None else min(target_date, previous_date)
 
         if holdings_kind == 'equity':
             query = self.session.query(
@@ -1712,7 +1634,7 @@ class BulkDataLoader:
                 table.mkt_mktval.label('market_value'),
             ).filter(
                 table.security_catgry.in_(['COMMON', 'REIT']),
-            )
+            ).filter(table.process_date >= min_date)
             return query
 
         if holdings_kind == 'option':
@@ -1731,7 +1653,7 @@ class BulkDataLoader:
                 table.mkt_mktval.label('market_value'),
             ).filter(
                 table.security_catgry.like('OPT%'),
-            )
+            ).filter(table.process_date >= min_date)
             return query
 
         if holdings_kind == 'treasury':
@@ -1745,7 +1667,7 @@ class BulkDataLoader:
                 table.mkt_mktval.label('market_value'),
             ).filter(
                 table.security_catgry.like('TSY%'),
-            )
+            ).filter(table.process_date >= min_date)
             return query
 
         return self.session.query(table)
@@ -1910,9 +1832,11 @@ class BulkDataLoader:
             if candidate in lower_columns:
                 column = lower_columns[candidate]
                 value = fund_name
+
                 # Allow overrides from mapping when available
-                if candidate in ( 'account'):
+                if candidate in ('account'):
                     value = mapping_data.get(candidate, fund_name)
+
                 filtered = df[df[column] == value].copy()
                 if not filtered.empty:
                     return filtered

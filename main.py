@@ -418,7 +418,7 @@ if __name__ == "__main__":
         "analysis_type": "eod",
         "as_of_date": "2025-11-06",
         "previous_date": "2025-11-05",  # optional; defaults to prior business day if omitted
-        "funds": ["TDVI"],  # omit to process all registered funds # P3727
+        "funds": ["TDVI", "DOGG", "P3727"],  # omit to process all registered funds # P3727
         "eod_reports": ["reconciliation", "nav"],
         "create_pdf": True,
         "output_dir": "./outputs",
