@@ -44,7 +44,7 @@ class NAVReconciliator:
         analysis_date,
         prior_date,
         analysis_type=None,
-        fund: Fund | None = None,
+        fund: Optional[Fund] = None,
         socgen_custodian=None,
     ) -> None:
         self.session = session
@@ -57,7 +57,7 @@ class NAVReconciliator:
         self.logger = logging.getLogger(f"NAVReconciliator_{fund_name}")
         self.results: Dict[str, object] = {}
         self.summary: Dict[str, float] = {}
-        self.fund: Fund | None = fund
+        self.fund: Optional[Fund] = fund
         self.socgen_custodian = socgen_custodian
         self.fund_definition = FUND_DEFINITIONS.get(fund_name, {})
         self.has_flex_option = bool(self.fund_definition.get("has_flex_option"))

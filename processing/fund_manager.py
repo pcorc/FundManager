@@ -159,7 +159,8 @@ class FundManager:
             reconciliator = Reconciliator(
                 fund_name,  # fund_name
                 fund_data_dict,  # fund_data
-                self.analysis_type  # analysis_type (optional)
+                self.analysis_type,  # analysis_type (optional)
+                fund = fund
             )
 
             reconciliator.run_all_reconciliations()

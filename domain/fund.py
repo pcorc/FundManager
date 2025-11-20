@@ -2,24 +2,6 @@ from typing import Dict, Optional, Sequence
 import pandas as pd
 
 
-class GainLossResult:
-    """Simple container for gain/loss calculations."""
-
-    def __init__(
-        self,
-        raw_gl: float = 0.0,
-        adjusted_gl: float = 0.0,
-        details: Optional[pd.DataFrame] = None,
-        price_adjustments: Optional[pd.DataFrame] = None,
-    ) -> None:
-        self.raw_gl = raw_gl
-        self.adjusted_gl = adjusted_gl
-        self.details = details if details is not None else pd.DataFrame()
-        self.price_adjustments = (
-            price_adjustments if price_adjustments is not None else pd.DataFrame()
-        )
-
-
 class FundHoldings:
     """Wrapper for holdings data for a specific source (e.g. Vest or custodian)."""
 
@@ -28,21 +10,138 @@ class FundHoldings:
         *,
         equity: Optional[pd.DataFrame] = None,
         options: Optional[pd.DataFrame] = None,
+        flex_options: Optional[pd.DataFrame] = None,  # NEW
         treasury: Optional[pd.DataFrame] = None,
     ) -> None:
         self.equity = equity if isinstance(equity, pd.DataFrame) else pd.DataFrame()
         self.options = options if isinstance(options, pd.DataFrame) else pd.DataFrame()
+        self.flex_options = flex_options if isinstance(flex_options, pd.DataFrame) else pd.DataFrame()  # NEW
         self.treasury = treasury if isinstance(treasury, pd.DataFrame) else pd.DataFrame()
 
     def copy(self) -> "FundHoldings":
         return FundHoldings(
             equity=self.equity.copy() if isinstance(self.equity, pd.DataFrame) else pd.DataFrame(),
             options=self.options.copy() if isinstance(self.options, pd.DataFrame) else pd.DataFrame(),
-            treasury=self.treasury.copy()
-            if isinstance(self.treasury, pd.DataFrame)
-            else pd.DataFrame(),
+            flex_options=self.flex_options.copy() if isinstance(self.flex_options, pd.DataFrame) else pd.DataFrame(),  # NEW
+            treasury=self.treasury.copy() if isinstance(self.treasury, pd.DataFrame) else pd.DataFrame(),
         )
 
+class FundMetrics:
+    """Computed metrics from holdings data."""
+
+    def __init__(self, snapshot: 'FundSnapshot'):
+        self.snapshot = snapshot
+
+    @cached_property
+    def total_equity_value(self) -> float:
+        """Total equity market value computed from holdings."""
+        return self._compute_equity_value()
+
+    @cached_property
+    def total_option_value(self) -> float:
+        """Total regular option market value computed from holdings."""
+        return self._compute_option_value()
+
+    @cached_property
+    def total_flex_option_value(self) -> float:
+        """Total flex option market value computed from holdings."""
+        return self._compute_flex_option_value()
+
+    @cached_property
+    def total_treasury_value(self) -> float:
+        """Total treasury market value computed from holdings."""
+        return self._compute_treasury_value()
+
+    @cached_property
+    def total_option_delta_adjusted_notional(self) -> float:
+        """Total delta-adjusted notional for all options (regular + flex)."""
+        regular = self._compute_option_delta_adjusted_notional()
+        flex = self._compute_flex_option_delta_adjusted_notional()
+        return regular + flex
+
+    @cached_property
+    def total_holdings_value(self) -> float:
+        """Total value of all holdings (equity + options + flex + treasury)."""
+        return (
+                self.total_equity_value +
+                self.total_option_value +
+                self.total_flex_option_value +
+                self.total_treasury_value
+        )
+
+    def _compute_equity_value(self) -> float:
+        """Calculate total equity value from vest and custodian holdings."""
+        for frame in (self.snapshot.vest.equity, self.snapshot.custodian.equity):
+            value = self.snapshot._frame_value_sum(
+                frame, ["equity_market_value", "market_value", "net_market_value"]
+            )
+            if value is not None:
+                return value
+            fallback = self.snapshot._price_quantity_sum(frame)
+            if fallback is not None:
+                return fallback
+        return 0.0
+
+    def _compute_option_value(self) -> float:
+        """Calculate total regular option value from vest and custodian holdings."""
+        for frame in (self.snapshot.vest.options, self.snapshot.custodian.options):
+            value = self.snapshot._frame_value_sum(
+                frame, ["option_market_value", "market_value", "net_market_value"]
+            )
+            if value is not None:
+                return value
+            fallback = self.snapshot._price_quantity_sum(frame, multiplier=100.0)
+            if fallback is not None:
+                return fallback
+        return 0.0
+
+    def _compute_flex_option_value(self) -> float:
+        """Calculate total flex option value from vest and custodian holdings."""
+        for frame in (self.snapshot.vest.flex_options, self.snapshot.custodian.flex_options):
+            value = self.snapshot._frame_value_sum(
+                frame, ["flex_option_market_value", "option_market_value", "market_value", "net_market_value"]
+            )
+            if value is not None:
+                return value
+            fallback = self.snapshot._price_quantity_sum(frame, multiplier=100.0)
+            if fallback is not None:
+                return fallback
+        return 0.0
+
+    def _compute_treasury_value(self) -> float:
+        """Calculate total treasury value from vest and custodian holdings."""
+        for frame in (self.snapshot.vest.treasury, self.snapshot.custodian.treasury):
+            value = self.snapshot._frame_value_sum(
+                frame, ["treasury_market_value", "market_value", "net_market_value"]
+            )
+            if value is not None:
+                return value
+            fallback = self.snapshot._price_quantity_sum(frame)
+            if fallback is not None:
+                return fallback
+        return 0.0
+
+    def _compute_option_delta_adjusted_notional(self) -> float:
+        """Calculate delta-adjusted notional for regular options."""
+        for frame in (self.snapshot.vest.options, self.snapshot.custodian.options):
+            value = self.snapshot._frame_value_sum(
+                frame,
+                ["option_delta_adjusted_notional", "delta_adjusted_notional"],
+            )
+            if value is not None:
+                return value
+        return 0.0
+
+    def _compute_flex_option_delta_adjusted_notional(self) -> float:
+        """Calculate delta-adjusted notional for flex options."""
+        for frame in (self.snapshot.vest.flex_options, self.snapshot.custodian.flex_options):
+            value = self.snapshot._frame_value_sum(
+                frame,
+                ["flex_option_delta_adjusted_notional", "option_delta_adjusted_notional", "delta_adjusted_notional"],
+            )
+            if value is not None:
+                return value
+        return 0.0
 
 class FundSnapshot:
     """Container for all holdings data at a point in time."""
@@ -188,7 +287,6 @@ class FundSnapshot:
                 return fallback
         return 0.0
 
-
 class FundData:
     """Complete fund data for current day (T) and prior day (T-1)."""
 
@@ -204,7 +302,6 @@ class FundData:
             previous if isinstance(previous, FundSnapshot) else FundSnapshot()
         )
         self.expense_ratio = float(expense_ratio or 0.0)
-
 
 class Fund:
     def __init__(self, name: str, config: Dict, base_cls=None):
@@ -296,10 +393,6 @@ class Fund:
         return float(getattr(self.data.current, "expenses", 0.0) or 0.0)
 
     @property
-    def vehicle(self) -> Optional[str]:
-        return self.config.get("vehicle_wrapper")
-
-    @property
     def index_identifier(self) -> Optional[str]:
         value = self.config.get("index_identifier")
         if isinstance(value, str):
@@ -313,10 +406,6 @@ class Fund:
     @property
     def is_closed_end_fund(self) -> bool:
         return (self.vehicle or "").lower() == "closed_end_fund"
-
-    @property
-    def has_equity(self) -> bool:
-        return bool(self.config.get("has_equity", True))
 
     @property
     def has_listed_option(self) -> bool:
@@ -514,56 +603,64 @@ class Fund:
         index_df = getattr(self.data.current, "index", pd.DataFrame())
         return self._copy_dataframe(index_df)
 
-    def calculate_gain_loss(self, current_date: str, prior_date: str, asset_class: str) -> GainLossResult:
-        """
-        Calculate gain/loss for specific asset class.
-        Used by NAV reconciliation and performance attribution.
-        """
-        if asset_class == 'equity':
-            return self._calculate_equity_gl(current_date, prior_date)
-        elif asset_class == 'options':
-            return self._calculate_options_gl(current_date, prior_date)
-        elif asset_class == 'flex_options':
-            return self._calculate_flex_options_gl(current_date, prior_date)
-        elif asset_class == 'treasury':
-            return self._calculate_treasury_gl(current_date, prior_date)
-        return GainLossResult()
+    @property
+    def flex_options_holdings(self) -> pd.DataFrame:
+        """Current flex options holdings from Vest."""
+        return self._copy_dataframe(getattr(self.data.current.vest, "flex_options", pd.DataFrame()))
 
-    @staticmethod
-    def _build_gain_loss_result(current_value, previous_value) -> GainLossResult:
-        try:
-            current_float = float(current_value or 0.0)
-        except (TypeError, ValueError):
-            current_float = 0.0
+    @property
+    def custodian_flex_options_holdings(self) -> pd.DataFrame:
+        """Current flex options holdings from custodian."""
+        return self._copy_dataframe(getattr(self.data.current.custodian, "flex_options", pd.DataFrame()))
 
-        try:
-            previous_float = float(previous_value or 0.0)
-        except (TypeError, ValueError):
-            previous_float = 0.0
+    @property
+    def previous_flex_options_holdings(self) -> pd.DataFrame:
+        """Previous flex options holdings from Vest."""
+        return self._copy_dataframe(getattr(self.data.previous.vest, "flex_options", pd.DataFrame()))
 
-        difference = current_float - previous_float
-        return GainLossResult(raw_gl=difference, adjusted_gl=difference)
+    @property
+    def previous_custodian_flex_options_holdings(self) -> pd.DataFrame:
+        """Previous flex options holdings from custodian."""
+        return self._copy_dataframe(getattr(self.data.previous.custodian, "flex_options", pd.DataFrame()))
 
-    def _calculate_equity_gl(self, current_date: str, prior_date: str) -> GainLossResult:
-        current_snapshot = getattr(self.data, "current", None)
-        previous_snapshot = getattr(self.data, "previous", None)
-        current_value = getattr(current_snapshot, "total_equity_value", 0.0) if current_snapshot else 0.0
-        previous_value = getattr(previous_snapshot, "total_equity_value", 0.0) if previous_snapshot else 0.0
-        return self._build_gain_loss_result(current_value, previous_value)
+    # Add NAV DataFrame properties
+    @property
+    def nav_dataframe(self) -> pd.DataFrame:
+        """Current NAV DataFrame with all NAV-related columns."""
+        return self._copy_dataframe(getattr(self.data.current, "nav_dataframe", pd.DataFrame()))
 
-    def _calculate_options_gl(self, current_date: str, prior_date: str) -> GainLossResult:
-        current_snapshot = getattr(self.data, "current", None)
-        previous_snapshot = getattr(self.data, "previous", None)
-        current_value = getattr(current_snapshot, "total_option_value", 0.0) if current_snapshot else 0.0
-        previous_value = getattr(previous_snapshot, "total_option_value", 0.0) if previous_snapshot else 0.0
-        return self._build_gain_loss_result(current_value, previous_value)
+    @property
+    def previous_nav_dataframe(self) -> pd.DataFrame:
+        """Previous NAV DataFrame with all NAV-related columns."""
+        return self._copy_dataframe(getattr(self.data.previous, "nav_dataframe", pd.DataFrame()))
 
-    def _calculate_flex_options_gl(self, current_date: str, prior_date: str) -> GainLossResult:
-        return GainLossResult()
+    # Add convenient metric accessors
+    @property
+    def current_equity_value(self) -> float:
+        """Current total equity market value (calculated from holdings)."""
+        return self.data.current.metrics.total_equity_value
 
-    def _calculate_treasury_gl(self, current_date: str, prior_date: str) -> GainLossResult:
-        current_snapshot = getattr(self.data, "current", None)
-        previous_snapshot = getattr(self.data, "previous", None)
-        current_value = getattr(current_snapshot, "total_treasury_value", 0.0) if current_snapshot else 0.0
-        previous_value = getattr(previous_snapshot, "total_treasury_value", 0.0) if previous_snapshot else 0.0
-        return self._build_gain_loss_result(current_value, previous_value)
+    @property
+    def current_option_value(self) -> float:
+        """Current total regular option market value (calculated from holdings)."""
+        return self.data.current.metrics.total_option_value
+
+    @property
+    def current_flex_option_value(self) -> float:
+        """Current total flex option market value (calculated from holdings)."""
+        return self.data.current.metrics.total_flex_option_value
+
+    @property
+    def current_treasury_value(self) -> float:
+        """Current total treasury market value (calculated from holdings)."""
+        return self.data.current.metrics.total_treasury_value
+
+    @property
+    def current_tna(self) -> float:
+        """Current total net assets (reported by custodian/admin)."""
+        return self.data.current.reported_tna
+
+    @property
+    def calculated_tna(self) -> float:
+        """Current TNA calculated from holdings + cash."""
+        return self.data.current.calculated_tna
