@@ -151,6 +151,7 @@ class FundSnapshot:
         *,
         vest: Optional[FundHoldings] = None,
         custodian: Optional[FundHoldings] = None,
+        index: Optional[FundHoldings] = None,
         reported_cash: float = 0.0,
         reported_nav: float = 0.0,  # NAV per share
         reported_tna: float = 0.0,  # Total Net Assets
@@ -161,11 +162,12 @@ class FundSnapshot:
         index: Optional[pd.DataFrame] = None,
         overlap: Optional[pd.DataFrame] = None,
         fund_name: Optional[str] = None,
+        equity_trades: Optional[str] = None,
+        cr_rd_data: Optional[str] = None,
     ) -> None:
         self.vest = vest if isinstance(vest, FundHoldings) else FundHoldings()
-        self.custodian = (
-            custodian if isinstance(custodian, FundHoldings) else FundHoldings()
-        )
+        self.custodian = custodian if isinstance(custodian, FundHoldings) else FundHoldings()
+        self.index = index if isinstance(index, FundHoldings) else FundHoldings()
         self.cash = float(cash or 0.0)
         self.nav = float(nav or 0.0)
         self.expenses = float(expenses or 0.0)
@@ -175,16 +177,12 @@ class FundSnapshot:
 
         self.total_equity_value = self._compute_equity_value()
         self.total_option_value = self._compute_option_value()
-        self.total_option_delta_adjusted_notional = (
-            self._compute_option_delta_adjusted_notional()
-        )
+        self.total_option_delta_adjusted_notional = self._compute_option_delta_adjusted_notional()
         self.total_treasury_value = self._compute_treasury_value()
         self.flows = float(flows or 0.0)
         self.basket = basket if isinstance(basket, pd.DataFrame) else pd.DataFrame()
         self.index = index if isinstance(index, pd.DataFrame) else pd.DataFrame()
-        self.overlap = (
-            overlap if isinstance(overlap, pd.DataFrame) else pd.DataFrame()
-        )
+        self.overlap = overlap if isinstance(overlap, pd.DataFrame) else pd.DataFrame()
 
     def _filter_frame_by_fund(self, frame: pd.DataFrame) -> pd.DataFrame:
         """Filter DataFrame to only include rows for this fund."""
@@ -202,7 +200,6 @@ class FundSnapshot:
         # No fund column means data should already be filtered
         return frame
 
-
     def _frame_value_sum(self, frame: pd.DataFrame, columns: Sequence[str]) -> Optional[float]:
         if not isinstance(frame, pd.DataFrame) or frame.empty:
             return None
@@ -218,7 +215,6 @@ class FundSnapshot:
                 if not series.empty:
                     return float(series.sum())
         return None
-
 
     def _price_quantity_sum(self, frame: pd.DataFrame, multiplier: float = 1.0) -> Optional[float]:
         if not isinstance(frame, pd.DataFrame) or frame.empty:
@@ -295,20 +291,49 @@ class FundData:
         *,
         current: Optional[FundSnapshot] = None,
         previous: Optional[FundSnapshot] = None,
-        expense_ratio: float = 0.0,
+        index: Optional[FundHoldings] = None,  # ADD - current index holdings
+        previous_index: Optional[FundHoldings] = None,  # ADD - T-1 index holdings
+        equity_trades: Optional[pd.DataFrame] = None,  # ADD - trades data
+        cr_rd_data: Optional[pd.DataFrame] = None,  # ADD - corporate actions
     ) -> None:
         self.current = current if isinstance(current, FundSnapshot) else FundSnapshot()
-        self.previous = (
-            previous if isinstance(previous, FundSnapshot) else FundSnapshot()
-        )
-        self.expense_ratio = float(expense_ratio or 0.0)
+        self.previous = previous if isinstance(previous, FundSnapshot) else FundSnapshot()
+        self.index = index if isinstance(index, FundHoldings) else FundHoldings()
+        self.previous_index = previous_index if isinstance(previous_index, FundHoldings) else FundHoldings()
+        self.equity_trades = equity_trades if isinstance(equity_trades, pd.DataFrame) else pd.DataFrame()
+        self.cr_rd_data = cr_rd_data if isinstance(cr_rd_data, pd.DataFrame) else pd.DataFrame()
 
 class Fund:
     def __init__(self, name: str, config: Dict, base_cls=None):
         self.name = name
         self.config = config or {}
         self.base_cls = base_cls
-        self._data: Optional[FundData] = FundData()
+        self.data: Optional[FundData] = FundData()  # Keep this!
+
+    @property
+    def expense_ratio(self) -> float:
+        """Get expense ratio from config"""
+        return float(self.config.get("expense_ratio", 0.0) or 0.0)
+
+    @property
+    def equity_trades(self) -> pd.DataFrame:
+        """Equity trades DataFrame from FundData"""
+        return self._copy_dataframe(self.data.equity_trades)
+
+    @property
+    def cr_rd_data(self) -> pd.DataFrame:
+        """Corporate actions DataFrame from FundData"""
+        return self._copy_dataframe(self.data.cr_rd_data)
+
+    @property
+    def index_holdings(self) -> pd.DataFrame:
+        """Current index holdings"""
+        return self._copy_dataframe(self.data.index.equity)
+
+    @property
+    def previous_index_holdings(self) -> pd.DataFrame:
+        """Previous index holdings"""
+        return self._copy_dataframe(self.data.previous_index.equity)
 
     @staticmethod
     def _extract_numeric_value(source, candidates: Optional[list[str]] = None) -> float:

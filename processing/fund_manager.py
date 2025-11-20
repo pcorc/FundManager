@@ -270,6 +270,12 @@ class FundManager:
                 flex_options=cust_flex,
                 treasury=fund_data_dict.get('custodian_treasury', pd.DataFrame()),
             ),
+            index=FundHoldings(
+                equity=fund_data_dict.get('index', pd.DataFrame()),
+                options=pd.DataFrame(),
+                flex_options=pd.DataFrame(),
+                treasury=pd.DataFrame(),
+            ),
             reported_cash=self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
             reported_nav=self._extract_nav_per_share(fund_data_dict.get('nav', pd.DataFrame())),
             reported_ta=self._extract_total_assets(fund_data_dict),  # NEW
@@ -278,12 +284,14 @@ class FundManager:
             reported_shares_outstanding=self._extract_shares_outstanding(fund_data_dict.get('nav', pd.DataFrame())),
 
             # Add other values for T
+            equity_trades=fund_data_dict.get('equity_trades', pd.DataFrame()),
+            cr_rd_data=fund_data_dict.get('cr_rd', pd.DataFrame()),
             flows=self._extract_flow_value(fund_data_dict.get('flows', pd.DataFrame())),
             fund_name=fund_name,
         )
 
         # Populate T-1 snapshot
-        fund_data.previous = FundSnapshot(
+        previous_snapshot= FundSnapshot(
             vest=FundHoldings(
                 equity=fund_data_dict.get('vest_equity_t1', pd.DataFrame()),
                 options=vest_options_t1,  # Regular options only
@@ -296,6 +304,12 @@ class FundManager:
                 flex_options=cust_flex_t1,
                 treasury=fund_data_dict.get('custodian_treasury_t1', pd.DataFrame()),
             ),
+            index=FundHoldings(
+                equity=fund_data_dict.get('index', pd.DataFrame()),
+                options=pd.DataFrame(),
+                flex_options=pd.DataFrame(),
+                treasury=pd.DataFrame(),
+            ),
             reported_cash=self._extract_cash_value(fund_data_dict.get('cash_t1', pd.DataFrame())),
             reported_nav=self._extract_nav_per_share(fund_data_dict.get('nav_t1', pd.DataFrame())),
             reported_ta=self._extract_total_assets(fund_data_dict, nav_key='nav_t1'),  # NEW
@@ -303,23 +317,23 @@ class FundManager:
             reported_shares_outstanding=self._extract_shares_outstanding(fund_data_dict.get('nav_t1', pd.DataFrame())),
 
             # Add other values for T-1
+            equity_trades=pd.DataFrame(),
+            cr_rd_data=pd.DataFrame(),
             flows=self._extract_flow_value(fund_data_dict.get('flows_t1', pd.DataFrame())),
             fund_name=fund_name,
         )
 
-        # Populate index data
-        fund_data.index = FundHoldings(
-            equity=fund_data_dict.get('index', pd.DataFrame()),
-            options=pd.DataFrame(),
-            treasury=pd.DataFrame(),
+        fund_data = FundData(
+
         )
 
-        # Populate T-1 index data
-        fund_data.previous_index = FundHoldings(
-            equity=fund_data_dict.get('index_t1', pd.DataFrame()),
-            options=pd.DataFrame(),
-            treasury=pd.DataFrame(),
+        # Create Fund instance
+        fund = Fund(
+            name=fund_name,
+            config=fund_config.config,
+            base_cls=getattr(self.data_store, 'base_cls', None)
         )
+        fund.data = fund_data
 
         # Create Fund instance
         fund = Fund(
