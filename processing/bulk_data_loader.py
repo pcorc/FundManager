@@ -366,7 +366,7 @@ class BulkDataLoader:
         )
 
         columns = [table]
-        ticker_column = getattr(table, 'ticker', None)
+        ticker_column = getattr(table, 'eqyticker', None)
 
         if bbg_equity_table is not None and ticker_column is not None:
             columns.extend(

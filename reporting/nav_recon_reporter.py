@@ -57,24 +57,25 @@ def build_nav_reconciliation_reports(
     if not derived_holdings and not derived_nav:
         return None
 
+    date_str = str(report_date)
+    excel_path = Path(output_dir) / f"reconciliation_summary_{date_str}.xlsx"
+
     holdings_report: Optional[GeneratedReconciliationReport] = None
     if derived_holdings:
         holdings_report = generate_reconciliation_reports(
             derived_holdings,
             report_date,
             output_dir,
+            file_name_prefix="reconciliation_summary",
         )
 
     nav_report: Optional[GeneratedNAVReconciliationReport] = None
     if derived_nav:
         # Build the Excel path
-        excel_path = str(Path(output_dir) / f"nav_reconciliation_{report_date}.xlsx")
-
-        # Call generate_nav_reconciliation_reports with correct signature
         excel_output = generate_nav_reconciliation_reports(
-            derived_nav,  # reconciliation_results
-            str(report_date),  # date_str
-            excel_path  # excel_path
+            derived_nav,
+            str(report_date),
+            excel_path,
         )
 
         nav_report = GeneratedNAVReconciliationReport(excel_path=excel_output)

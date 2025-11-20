@@ -757,3 +757,7 @@
 2025-11-17 21:52:28,701 - compliance_report - WARNING - No prospectus 80% policy data for KNG
 2025-11-17 21:52:28,753 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_expost_2025-11-14.pdf
 2025-11-18 14:53:04,085 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_expost_2025-11-14.pdf
+2025-11-19 21:40:04,968 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-06.pdf
+2025-11-19 21:44:11,711 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-06.pdf
+2025-11-19 21:47:06,274 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-06.pdf
+2025-11-19 21:55:25,040 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-18.pdf

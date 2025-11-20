@@ -39,24 +39,26 @@ RECON_DESCRIPTOR_REGISTRY: Dict[str, ReconDescriptor] = {
         holdings_key="final_recon",
         holdings_ticker="eqyticker",
         price_ticker="eqyticker",
+        extra_callbacks=("_append_holdings_breakdowns",),
     ),
     "custodian_equity_t1": ReconDescriptor(
         holdings_key="final_recon",
         holdings_ticker="eqyticker",
         price_keys=(None, None),
+        extra_callbacks=("_append_holdings_breakdowns",),
     ),
     "custodian_option": ReconDescriptor(
         holdings_key="final_recon",
         holdings_ticker="optticker",
         price_ticker="optticker",
         price_transform="_select_standard_option_prices",
-        extra_callbacks=("_append_option_breakdowns",),
+        extra_callbacks=("_append_option_breakdowns","_append_holdings_breakdowns"),
     ),
     "custodian_option_t1": ReconDescriptor(
         holdings_key="final_recon",
         holdings_ticker="optticker",
         price_keys=(None, None),
-        extra_callbacks=("_append_option_t1_breakdowns",),
+        extra_callbacks=("_append_option_t1_breakdowns","_append_holdings_breakdowns"),
     ),
     "index_equity": ReconDescriptor(
         holdings_key="holdings_discrepancies",
@@ -83,6 +85,7 @@ RECON_DESCRIPTOR_REGISTRY: Dict[str, ReconDescriptor] = {
         price_keys=("price_discrepancies_T", None),
         price_ticker="cusip",
         require_holdings=False,
+        extra_callbacks=("_append_holdings_breakdowns",),
     ),
     "custodian_treasury_t1": ReconDescriptor(
         holdings_key="final_recon",
@@ -90,6 +93,7 @@ RECON_DESCRIPTOR_REGISTRY: Dict[str, ReconDescriptor] = {
         price_keys=(None, "price_discrepancies_T1"),
         price_ticker="cusip",
         require_holdings=False,
+        extra_callbacks=("_append_holdings_breakdowns",),
     ),
 }
 
@@ -183,7 +187,7 @@ class ReconciliationReport:
                     for callback_name in descriptor.extra_callbacks:
                         callback = getattr(self, callback_name, None)
                         if callback:
-                            callback(flat, fund, date_str, subresults or {})
+                            callback(flat, fund, date_str, subresults or {}, recon_type=recon_type)
         return flat
 
     def _process_from_descriptor(
@@ -238,6 +242,7 @@ class ReconciliationReport:
         fund: str,
         date_str: str,
         subresults: Mapping[str, Any],
+        recon_type: str | None = None,
     ) -> None:
         regular_df = subresults.get("regular_options")
         if not regular_df.empty:
@@ -291,6 +296,34 @@ class ReconciliationReport:
                 "optticker",
             )
             flat[(fund, date_str, "custodian_option_flex_holdings_t1")] = prepared
+
+    def _append_holdings_breakdowns(
+        self,
+        flat: Dict[Tuple[str, str, str], pd.DataFrame],
+        fund: str,
+        date_str: str,
+        subresults: Mapping[str, Any],
+        recon_type: str | None = None,
+    ) -> None:
+        final_df = subresults.get("final_recon")
+        if not isinstance(final_df, pd.DataFrame) or final_df.empty:
+            return
+
+        if "breakdown" not in final_df.columns or "discrepancy_type" not in final_df.columns:
+            return
+
+        breakdowns = (
+            final_df[["discrepancy_type", "breakdown"]]
+            .copy()
+            .assign(count=1)
+            .groupby(["discrepancy_type", "breakdown"], dropna=False)["count"]
+            .sum()
+            .reset_index()
+            .rename(columns={"count": "occurrences"})
+        )
+
+        key = f"{recon_type}_breakdowns" if recon_type else "holdings_breakdowns"
+        flat[(fund, date_str, key)] = breakdowns
 
     def _build_holdings_from_descriptor(
         self,
@@ -355,8 +388,14 @@ class ReconciliationReport:
         return price_t, price_t1
 
     def _apply_price_transform(
-        self, df: pd.DataFrame, descriptor: ReconDescriptor
+        self, df: pd.DataFrame | None, descriptor: ReconDescriptor
     ) -> pd.DataFrame:
+        if df is None:
+            return pd.DataFrame()
+
+        if not isinstance(df, pd.DataFrame):
+            return pd.DataFrame()
+
         if df.empty or not descriptor.price_transform:
             return df
 
@@ -433,7 +472,10 @@ class ReconciliationReport:
 
     def _limit_option_prices(self, df: pd.DataFrame, fund: str, recon_type: str) -> pd.DataFrame:
         vehicle = (FUND_DEFINITIONS.get(fund, {}).get("vehicle_wrapper") or "").lower()
-        if df.empty or "option" not in recon_type.lower():
+        recon_lower = recon_type.lower()
+        if df.empty or "option" not in recon_lower:
+            return df
+        if "flex" in recon_lower:
             return df
         if vehicle not in {"private_fund", "closed_end_fund"}:
             return df
@@ -623,8 +665,31 @@ class ReconciliationReport:
         if not price_comparison:
             return
         all_prices = pd.concat(price_comparison, ignore_index=True)
+        all_prices = self._limit_price_comparison_options(all_prices)
         comparison_df = self._build_price_comparison_df(all_prices)
         comparison_df.to_excel(writer, sheet_name="COMPREHENSIVE PRICE COMPARISON", index=False)
+
+    def _limit_price_comparison_options(self, all_prices: pd.DataFrame) -> pd.DataFrame:
+        if all_prices.empty or "RECON_TYPE" not in all_prices.columns:
+            return all_prices
+
+        limited_frames: list[pd.DataFrame] = []
+
+        for (_fund, recon_type), subset in all_prices.groupby(["FUND", "RECON_TYPE"]):
+            recon_lower = str(recon_type).lower()
+            if "flex" in recon_lower or "option" not in recon_lower:
+                limited_frames.append(subset)
+                continue
+
+            sorted_subset = subset.copy()
+            if "option_weight" in sorted_subset.columns:
+                sorted_subset = sorted_subset.sort_values("option_weight", ascending=False)
+            elif "price_diff" in sorted_subset.columns:
+                sorted_subset = sorted_subset.sort_values("price_diff", ascending=False)
+
+            limited_frames.append(sorted_subset.head(5))
+
+        return pd.concat(limited_frames, ignore_index=True)
 
     @staticmethod
     def _uses_index_flex(fund_name: Optional[str]) -> bool:

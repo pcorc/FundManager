@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
 import pandas as pd
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 import re
@@ -33,12 +33,14 @@ class NAVReconciliationExcelReport:
         results: Mapping[str, Any],
         report_date: str,
         output_path: Path,
+        workbook: Workbook | None = None,
     ) -> None:
         self.results = self._normalize_nav_payload(results)
         self.report_date = report_date
         self.output_path = output_path
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
-
+        self.workbook = workbook
+        self._using_existing_workbook = workbook is not None
         # Style definitions
         self.title_font = Font(bold=True, size=14)
         self.header_font = Font(bold=True, size=12)
@@ -64,10 +66,10 @@ class NAVReconciliationExcelReport:
 
     def _export(self) -> None:
         """Export the workbook with all sheets."""
-        workbook = Workbook()
+        workbook = self.workbook or Workbook()
 
-        # Remove default sheet
-        if workbook.active:
+        # Remove default sheet for new workbooks only
+        if not self._using_existing_workbook and workbook.active:
             workbook.remove(workbook.active)
 
         # Create fund sheets
@@ -78,8 +80,8 @@ class NAVReconciliationExcelReport:
 
         # Create summary sheet
         summary_ws = self._create_summary_sheet(workbook)
-        if summary_ws is not None:
-            # Move summary to first position
+        if summary_ws is not None and not self._using_existing_workbook:
+            # Move summary to first position only when creating a new workbook
             workbook._sheets.insert(0, workbook._sheets.pop(workbook._sheets.index(summary_ws)))
 
         workbook.save(self.output_path)
@@ -368,9 +370,9 @@ class NAVReconciliationExcelReport:
             "Ticker",
             "Qty T-1",
             "Qty T",
-            "Price T-1\n(Raw)",
+            "Price T-1\n(Vest)",
             "Price T\n(Raw)",
-            "Price T-1\n(Adj)",
+            "Price T-1\n(Cust)",
             "Price T\n(Adj)",
             "G/L",
             "G/L Adj",
@@ -470,9 +472,9 @@ class NAVReconciliationExcelReport:
             "Ticker",
             "Qty T-1",
             "Qty T",
-            "Price T-1\n(Raw)",
+            "Price T-1\n(Vest)",
             "Price T\n(Raw)",
-            "Price T-1\n(Adj)",
+            "Price T-1\n(Cust)",
             "Price T\n(Adj)",
             "G/L",
             "G/L Adj",
@@ -572,9 +574,9 @@ class NAVReconciliationExcelReport:
             "Ticker",
             "Qty T-1",
             "Qty T",
-            "Price T-1\n(Raw)",
+            "Price T-1\n(Vest)",
             "Price T\n(Raw)",
-            "Price T-1\n(Adj)",
+            "Price T-1\n(Cust)",
             "Price T\n(Adj)",
             "G/L",
             "G/L Adj",
@@ -728,7 +730,7 @@ class NAVReconciliationExcelReport:
 
 # ------------------------------------------------------------------
 
-def generate_nav_reconciliation_reports(reconciliation_results, date_str, excel_path):
+def generate_nav_reconciliation_reports(reconciliation_results, date_str, excel_path, *, workbook: Workbook | None = None):
     """
     Generate NAV reconciliation reports in Excel format.
 
@@ -768,10 +770,14 @@ def generate_nav_reconciliation_reports(reconciliation_results, date_str, excel_
     if output_path.suffix.lower() != ".xlsx":
         output_path = output_path / f"nav_reconciliation_{resolved_date}.xlsx"
 
+    if workbook is None and output_path.exists():
+        workbook = load_workbook(output_path)
+
     NAVReconciliationExcelReport(
         results=normalized,
         report_date=resolved_date,
         output_path=output_path,
+        workbook=workbook,
     )
 
     return str(output_path)

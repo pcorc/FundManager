@@ -359,9 +359,9 @@ if __name__ == "__main__":
     #  'FTCSH'
     # ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'], #
 
-    use_dater_t = "2025-11-14"
-    use_dater_t1 = "2025-11-13"
-    use_dater_t2 = "2025-11-12"
+    use_dater_t = "2025-11-19"
+    use_dater_t1 = "2025-11-18"
+    use_dater_t2 = "2025-11-17"
 
     # RUNTIME_OVERRIDES = {
     #     "analysis_type": "trading_compliance",
@@ -391,10 +391,10 @@ if __name__ == "__main__":
 
     # RUNTIME_OVERRIDES = {
     #     "analysis_type": "eod",
-    #     "as_of_date": "2025-11-06",
+    #     "as_of_date": "2025-11-18",
     #     #"funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'],
-    #     "funds": ["TDVI", "DOGG"],
-    #     "previous_date": "2025-11-05",
+    #     "funds": ["TDVI", "DOGG", "KNG", 'P21026', 'P2726'],
+    #     "previous_date": "2025-11-17",
     #     "eod_reports": ["compliance"],
     #     "compliance_tests": [
     #         "gics_compliance",

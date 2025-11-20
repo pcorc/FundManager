@@ -186,17 +186,19 @@ class NAVReconciliator:
                     price_t1_raw = ticker_data_t1.iloc[0].get("price", 0)
 
             price_t_adj = price_t_raw
-            price_t1_adj = price_t1_raw
+            price_t1_cust = price_t1_raw
 
             if not price_breaks.empty and ticker in price_breaks.index:
                 adj_data = price_breaks.loc[ticker]
                 if "price_t_adj" in adj_data:
                     price_t_adj = adj_data["price_t_adj"]
-                if "price_t1_adj" in adj_data:
-                    price_t1_adj = adj_data["price_t1_adj"]
+
+            cust_price = self._lookup_cust_price(price_breaks, ticker)
+            if cust_price is not None:
+                price_t1_cust = cust_price
 
             gl_raw = (price_t_raw - price_t1_raw) * qty_t
-            gl_adj = (price_t_adj - price_t1_adj) * qty_t
+            gl_adj = (price_t_adj - price_t1_cust) * qty_t
 
             if qty_t != 0 or qty_t1 != 0:
                 details_list.append(
@@ -206,7 +208,7 @@ class NAVReconciliator:
                         "quantity_t": qty_t,
                         "price_t1_raw": price_t1_raw,
                         "price_t_raw": price_t_raw,
-                        "price_t1_adj": price_t1_adj,
+                        "price_t1_adj": price_t1_cust,
                         "price_t_adj": price_t_adj,
                         "gl_raw": gl_raw,
                         "gl_adjusted": gl_adj,
@@ -262,17 +264,19 @@ class NAVReconciliator:
                     price_t1_raw = ticker_data_t1.iloc[0].get("price", 0)
 
             price_t_adj = price_t_raw
-            price_t1_adj = price_t1_raw
+            price_t1_cust = price_t1_raw
 
             if not price_breaks.empty and ticker in price_breaks.index:
                 adj_data = price_breaks.loc[ticker]
                 if "price_t_adj" in adj_data:
                     price_t_adj = adj_data["price_t_adj"]
-                if "price_t1_adj" in adj_data:
-                    price_t1_adj = adj_data["price_t1_adj"]
+
+            cust_price = self._lookup_cust_price(price_breaks, ticker)
+            if cust_price is not None:
+                price_t1_cust = cust_price
 
             gl_raw = (price_t_raw - price_t1_raw) * qty_t * 100
-            gl_adj = (price_t_adj - price_t1_adj) * qty_t * 100
+            gl_adj = (price_t_adj - price_t1_cust) * qty_t * 100
 
             if qty_t != 0 or qty_t1 != 0:
                 details_list.append(
@@ -282,7 +286,7 @@ class NAVReconciliator:
                         "quantity_t": qty_t,
                         "price_t1_raw": price_t1_raw,
                         "price_t_raw": price_t_raw,
-                        "price_t1_adj": price_t1_adj,
+                        "price_t1_adj": price_t1_cust,
                         "price_t_adj": price_t_adj,
                         "gl_raw": gl_raw,
                         "gl_adjusted": gl_adj,
@@ -341,17 +345,19 @@ class NAVReconciliator:
                     price_t1_raw = ticker_data_t1.iloc[0].get("price", 0)
 
             price_t_adj = price_t_raw
-            price_t1_adj = price_t1_raw
+            price_t1_cust = price_t1_raw
 
             if not price_breaks.empty and ticker in price_breaks.index:
                 adj_data = price_breaks.loc[ticker]
                 if "price_t_adj" in adj_data:
                     price_t_adj = adj_data["price_t_adj"]
-                if "price_t1_adj" in adj_data:
-                    price_t1_adj = adj_data["price_t1_adj"]
+
+            cust_price = self._lookup_cust_price(price_breaks, ticker)
+            if cust_price is not None:
+                price_t1_cust = cust_price
 
             gl_raw = (price_t_raw - price_t1_raw) * qty_t * 100
-            gl_adj = (price_t_adj - price_t1_adj) * qty_t * 100
+            gl_adj = (price_t_adj - price_t1_cust) * qty_t * 100
 
             if qty_t != 0 or qty_t1 != 0:
                 details_list.append(
@@ -361,7 +367,7 @@ class NAVReconciliator:
                         "quantity_t": qty_t,
                         "price_t1_raw": price_t1_raw,
                         "price_t_raw": price_t_raw,
-                        "price_t1_adj": price_t1_adj,
+                        "price_t1_adj": price_t1_cust,
                         "price_t_adj": price_t_adj,
                         "gl_raw": gl_raw,
                         "gl_adjusted": gl_adj,
@@ -547,6 +553,7 @@ class NAVReconciliator:
         flex_gl_result = GainLossResult(flex_gl.raw, flex_gl.adjusted)
         treasury_gl_result = GainLossResult(treasury_gl.raw, treasury_gl.adjusted)
 
+        shares_outstanding = self._extract_shares_outstanding()
         nav_summary = self._calculate_expected_nav(
             equity_gl_result,
             option_gl_result,
@@ -558,12 +565,16 @@ class NAVReconciliator:
             flows_adjustment,
             assignment_gl,
             other_impact,
+            expected_tna,
+            custodian_tna,
+            shares_outstanding,
         )
 
-        shares_outstanding = self._extract_shares_outstanding()
         expected_nav = nav_summary.get("expected_nav", 0.0)
         custodian_nav = nav_summary.get("current_nav", 0.0)
         nav_diff = nav_summary.get("difference", 0.0)
+        diff_pct_4 = nav_summary.get("diff_pct_4", 0.0)
+        diff_pct_2 = nav_summary.get("diff_pct_2", 0.0)
 
         results: Dict[str, object] = {
             "Beginning TNA": begin_tna,
@@ -589,8 +600,10 @@ class NAVReconciliator:
             "Expected NAV": expected_nav,
             "Custodian NAV": custodian_nav,
             "NAV Diff ($)": nav_diff,
-            "NAV Good (2 Digit)": abs(nav_diff) < 0.01,
-            "NAV Good (4 Digit)": abs(nav_diff) < 0.0001,
+            "Difference (%) - 4 Digit": diff_pct_4,
+            "Difference (%) - 2 Digit": diff_pct_2,
+            "NAV Good (2 Digit)": diff_pct_2 <= 0.000055,
+            "NAV Good (4 Digit)": diff_pct_4 <= 0.000055,
             "summary": nav_summary,
         }
 
@@ -608,6 +621,9 @@ class NAVReconciliator:
         flows_adjustment: float,
         assignment_gl: float = 0.0,
         other_impact: float = 0.0,
+        expected_tna: float = 0.0,
+        custodian_tna: float = 0.0,
+        shares_outstanding: float = 0.0,
     ) -> Dict[str, float]:
         prior_nav = self._extract_from_nav_data("previous", ["nav", "nav_price", "nav_value"]) or self._safe_float(
             getattr(getattr(self.fund, "data", None), "previous", None), "nav"
@@ -625,8 +641,11 @@ class NAVReconciliator:
             + other_impact
         )
 
-        expected_nav = prior_nav + net_gain + dividends - expenses - distributions + flows_adjustment
+        expected_nav = expected_tna / shares_outstanding if shares_outstanding else 0.0
+        rounded_expected_nav = round(expected_nav, 2)
         difference = current_nav - expected_nav
+        diff_pct_4 = abs(custodian_tna / expected_tna - 1) if expected_tna else 0
+        diff_pct_2 = abs(current_nav / rounded_expected_nav - 1) if rounded_expected_nav else 0
 
         return {
             "prior_nav": prior_nav,
@@ -638,6 +657,9 @@ class NAVReconciliator:
             "flows_adjustment": flows_adjustment,
             "expected_nav": expected_nav,
             "difference": difference,
+            "diff_pct_4": diff_pct_4,
+            "diff_pct_2": diff_pct_2,
+            "expected_tna": expected_tna,
         }
 
     def _build_summary(self, results: Mapping[str, object]) -> Dict[str, float]:
@@ -763,6 +785,27 @@ class NAVReconciliator:
                     if not series.empty:
                         return float(series.iloc[0])
         return 0.0
+
+    def _lookup_cust_price(self, price_breaks: pd.DataFrame, ticker: str) -> float | None:
+        """Extract the custodian price for a ticker when available."""
+
+        if price_breaks.empty:
+            return None
+
+        if ticker in price_breaks.index:
+            entry = price_breaks.loc[ticker]
+            if isinstance(entry, pd.Series):
+                return entry.get("price_cust")
+            if isinstance(entry, pd.DataFrame) and not entry.empty:
+                return entry.iloc[0].get("price_cust")
+
+        for col in ("eqyticker", "optticker", "cusip"):
+            if col in price_breaks.columns:
+                match = price_breaks[price_breaks[col] == ticker]
+                if not match.empty:
+                    return match.iloc[0].get("price_cust")
+
+        return None
 
     @staticmethod
     def _safe_float(obj, attribute: str) -> float:

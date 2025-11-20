@@ -525,13 +525,13 @@ class ComplianceChecker:
                 within_25_percent = sorted_df.head(1).copy()
 
             excluded_securities = (
-                within_25_percent["ticker"].tolist()
-                if "ticker" in within_25_percent.columns
+                within_25_percent["eqyticker"].tolist()
+                if "eqyticker" in within_25_percent.columns
                 else []
             )
 
             remaining_securities = (
-                sorted_df[~sorted_df["ticker"].isin(excluded_securities)].copy()
+                sorted_df[~sorted_df["eqyticker"].isin(excluded_securities)].copy()
                 if excluded_securities
                 else sorted_df.copy()
             )
@@ -580,7 +580,7 @@ class ComplianceChecker:
             columns_for_output = [
                 col
                 for col in [
-                    "ticker",
+                    "eqyticker",
                     share_col,
                     "net_market_value",
                     "vest_weight",
@@ -792,7 +792,6 @@ class ComplianceChecker:
     def real_estate_check(self, fund: Fund) -> ComplianceResult:
         try:
             vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
-            total_assets, total_net_assets = self._get_total_assets(fund)
 
             if vest_eqy_holdings.empty:
                 raise ValueError("Equity holdings missing")
@@ -833,7 +832,6 @@ class ComplianceChecker:
     def commodities_check(self, fund: Fund) -> ComplianceResult:
         try:
             vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
-            total_assets, total_net_assets = self._get_total_assets(fund)
 
             if vest_eqy_holdings.empty:
                 raise ValueError("Equity holdings missing")
@@ -1691,11 +1689,11 @@ class ComplianceChecker:
 
         share_col, share_series = self._resolve_share_series(df)
         df[share_col] = share_series
-        df["ticker"] = df["ticker"].astype(str)
+        df["eqyticker"] = df["eqyticker"].astype(str)
 
-        google_mask = df["ticker"].isin(["GOOG", "GOOGL"])
+        google_mask = df["eqyticker"].isin(["GOOG", "GOOGL"])
         if google_mask.any():
-            df.loc[google_mask, "ticker"] = "GOOGLE"
+            df.loc[google_mask, "eqyticker"] = "GOOGLE"
 
         numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
         aggregation = {
@@ -1706,12 +1704,12 @@ class ComplianceChecker:
             **{
                 column: "first"
                 for column in df.columns
-                if column not in numeric_columns + ["ticker"]
+                if column not in numeric_columns + ["eqyticker"]
             },
         }
 
         consolidated = (
-            df.groupby("ticker", as_index=False)
+            df.groupby("eqyticker", as_index=False)
             .agg(aggregation)
             .copy()
         )

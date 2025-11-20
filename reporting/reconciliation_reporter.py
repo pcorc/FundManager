@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any, Mapping, Optional
-
 from processing.fund_manager import ProcessingResults
 from reporting.nav_recon_reporting import (
     GeneratedNAVReconciliationReport,
@@ -48,11 +48,14 @@ def build_reconciliation_reports(
         if fund_result.nav_results
     }
 
+    excel_path = Path(output_dir) / f"reconciliation_summary_{report_date}.xlsx"
+
     reconciliation_report = (
         generate_reconciliation_reports(
             reconciliation_payload,
             report_date,
             output_dir,
+            file_name_prefix="reconciliation_summary",
         )
         if reconciliation_payload
         else None
@@ -62,7 +65,7 @@ def build_reconciliation_reports(
         generate_nav_reconciliation_reports(
             nav_payload,
             report_date,
-            output_dir,
+            excel_path,
         )
         if nav_payload
         else None
