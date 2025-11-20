@@ -145,20 +145,6 @@ class CombinedReconciliationReport:
             if link_id:
                 self._add_toc_link(label, link_id)
 
-        self.pdf.ln(5)
-
-        # Fund Details Section
-        self.pdf.set_font("Arial", "B", 12)
-        self.pdf.cell(0, 8, "Fund Details", ln=True)
-        self.pdf.ln(3)
-
-        for fund_name in sorted(self._get_all_funds()):
-            fund_link = self.fund_links.get(fund_name)
-            if fund_link is None:
-                continue
-            self._add_toc_link(fund_name, fund_link)
-            for section in ["NAV Reconciliation", "Holdings Reconciliation"]:
-                self._add_toc_sub_link(section, fund_link)
 
     def _add_toc_link(self, text: str, link_id: int) -> None:
         self.pdf.set_font("Arial", size=11)

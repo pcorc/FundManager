@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Mapping
+from typing import Dict, Mapping, Sequence
 
 import logging
 import pandas as pd
@@ -70,6 +70,13 @@ class NAVReconciliator:
             fund_name in INDEX_FLEX_FUNDS or self.flex_option_type == "index"
         )
 
+        self._component_key_map: dict[str, tuple[str | None, str | None]] = {
+            "equity": ("vest_equity", "vest_equity_t1"),
+            "options": ("vest_option", "vest_option_t1"),
+            "flex_options": ("vest_option", "vest_option_t1"),
+            "treasury": ("vest_treasury", "vest_treasury_t1"),
+        }
+
         # Containers that hold per component detail frames
         self.equity_details = pd.DataFrame(columns=self.DETAIL_COLUMNS)
         self.option_details = pd.DataFrame(columns=self.DETAIL_COLUMNS)
@@ -86,6 +93,21 @@ class NAVReconciliator:
                 return value
 
         return pd.DataFrame()
+
+    def _snapshot_key(self, component: str, snapshot: str) -> str | None:
+        mapping = self._component_key_map.get(component, (None, None))
+        return mapping[0] if snapshot == "current" else mapping[1]
+
+    def _extract_from_nav_data(self, snapshot: str, columns: Sequence[str]) -> float:
+        nav_key = "nav" if snapshot == "current" else "nav_t1"
+        nav_df = self.fund_data.get(nav_key)
+        if isinstance(nav_df, pd.DataFrame) and not nav_df.empty:
+            for column in columns:
+                if column in nav_df.columns:
+                    series = pd.to_numeric(nav_df[column], errors="coerce").dropna()
+                    if not series.empty:
+                        return float(series.iloc[0])
+        return 0.0
 
     # ------------------------------------------------------------------
     def run_nav_reconciliation(self) -> Dict[str, object]:
@@ -160,8 +182,12 @@ class NAVReconciliator:
         assignment_gl: float = 0.0,
         other_impact: float = 0.0,
     ) -> Dict[str, float]:
-        prior_nav = self._safe_float(getattr(getattr(self.fund, "data", None), "previous", None), "nav")
-        current_nav = self._safe_float(getattr(getattr(self.fund, "data", None), "current", None), "nav")
+        prior_nav = self._extract_from_nav_data("previous", ["nav", "nav_price", "nav_value"]) or self._safe_float(
+            getattr(getattr(self.fund, "data", None), "previous", None), "nav"
+        )
+        current_nav = self._extract_from_nav_data("current", ["nav", "nav_price", "nav_value"]) or self._safe_float(
+            getattr(getattr(self.fund, "data", None), "current", None), "nav"
+        )
 
         net_gain = (
             equity_gl.adjusted_gl
@@ -213,6 +239,13 @@ class NAVReconciliator:
 
     # ------------------------------------------------------------------
     def _component_gain_loss(self, asset_class: str) -> _ComponentGL:
+        current_value = self._fetch_component_value(asset_class, snapshot="current")
+        prior_value = self._fetch_component_value(asset_class, snapshot="previous")
+        difference = current_value - prior_value
+
+        if difference != 0.0:
+            return _ComponentGL(raw=difference, adjusted=difference)
+
         if isinstance(self.fund, Fund):
             gain_loss = self.fund.calculate_gain_loss(
                 str(self.analysis_date),
@@ -224,10 +257,7 @@ class NAVReconciliator:
                 adjusted=float(gain_loss.adjusted_gl or gain_loss.raw_gl or 0.0),
             )
 
-        current_value = self._fetch_component_value(asset_class, snapshot="current")
-        prior_value = self._fetch_component_value(asset_class, snapshot="previous")
-        difference = current_value - prior_value
-        return _ComponentGL(raw=difference, adjusted=difference)
+        return _ComponentGL()
 
     def _build_component_detail_frame(self, component: _ComponentGL) -> pd.DataFrame:
         if component.raw == 0.0 and component.adjusted == 0.0:
@@ -328,7 +358,9 @@ class NAVReconciliator:
         flows_adjustment: float,
         other_impact: float,
     ) -> Dict[str, object]:
-        begin_tna = self._safe_float(getattr(getattr(self.fund, "data", None), "previous", None), "total_net_assets")
+        begin_tna = self._extract_from_nav_data("previous", ["tna", "total_net_assets", "net_assets"]) or self._safe_float(
+            getattr(getattr(self.fund, "data", None), "previous", None), "total_net_assets"
+        )
         adjusted_begin_tna = begin_tna + flows_adjustment
 
         total_gain = (
@@ -341,7 +373,9 @@ class NAVReconciliator:
         )
 
         expected_tna = adjusted_begin_tna + total_gain + dividends - expenses - distributions
-        custodian_tna = self._safe_float(getattr(getattr(self.fund, "data", None), "current", None), "total_net_assets")
+        custodian_tna = self._extract_from_nav_data("current", ["tna", "total_net_assets", "net_assets"]) or self._safe_float(
+            getattr(getattr(self.fund, "data", None), "current", None), "total_net_assets"
+        )
         tna_diff = custodian_tna - expected_tna
 
         equity_gl_result = GainLossResult(equity_gl.raw, equity_gl.adjusted)
@@ -476,6 +510,12 @@ class NAVReconciliator:
 
     # ------------------------------------------------------------------
     def _fetch_component_value(self, component: str, *, snapshot: str) -> float:
+        key = self._snapshot_key(component, snapshot)
+        if key:
+            value = self._extract_numeric_from_data(key)
+            if value:
+                return value
+
         if isinstance(self.fund, Fund):
             data = getattr(getattr(self.fund, "data", None), snapshot, None)
             if data is not None:

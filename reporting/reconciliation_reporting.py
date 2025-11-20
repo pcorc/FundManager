@@ -199,7 +199,7 @@ class ReconciliationReport:
         holdings_df: pd.DataFrame | None = None
         if descriptor.holdings_key:
             holdings_raw = subresults.get(descriptor.holdings_key)
-            if not holdings_raw.empty:
+            if isinstance(holdings_raw, pd.DataFrame) and not holdings_raw.empty:
                 holdings_df = self._build_holdings_from_descriptor(
                     descriptor,
                     holdings_raw,
@@ -431,7 +431,20 @@ class ReconciliationReport:
         cols_to_keep = [col for col in base_cols + optional_cols if col in df.columns]
         return df[cols_to_keep] if cols_to_keep else df
 
+    def _limit_option_prices(self, df: pd.DataFrame, fund: str, recon_type: str) -> pd.DataFrame:
+        vehicle = (FUND_DEFINITIONS.get(fund, {}).get("vehicle_wrapper") or "").lower()
+        if df.empty or "option" not in recon_type.lower():
+            return df
+        if vehicle not in {"private_fund", "closed_end_fund"}:
+            return df
 
+        sorted_df = df.copy()
+        if "option_weight" in sorted_df.columns:
+            sorted_df = sorted_df.sort_values("option_weight", ascending=False)
+        elif "price_diff" in sorted_df.columns:
+            sorted_df = sorted_df.sort_values("price_diff", ascending=False)
+
+        return sorted_df.head(5)
 
     def _prepare_price_df(
         self,
@@ -443,6 +456,7 @@ class ReconciliationReport:
         price_cust_col: str = "price_cust",
     ) -> pd.DataFrame:
         df = df.copy()
+        df = self._limit_option_prices(df, fund, recon_type)
         df["FUND"] = fund
         df["RECON_TYPE"] = recon_type
         df["DATE"] = date_str
@@ -456,6 +470,9 @@ class ReconciliationReport:
             "price_vest",
             price_cust_col,
             "price_diff",
+            "price_pct_diff",
+            "option_weight",
+            "discrepancy_type",
         ]
         cols = [c for c in cols if c in df.columns]
         return df[cols] if cols else df

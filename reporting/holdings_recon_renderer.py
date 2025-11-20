@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Sequence
+from config.fund_definitions import FUND_DEFINITIONS
 
 import numpy as np
 import pandas as pd
@@ -265,7 +266,23 @@ class HoldingsReconciliationRenderer:
             self._print_discrepancy_table(final_df, "Option Discrepancies")
 
         price_t = recon_data.get("price_discrepancies_T")
-        self._print_price_discrepancies(price_t, price_label="Custodian")
+
+        def _print_custodian_equity_section(self, recon_data: Mapping[str, Any]) -> None:
+            final_df = recon_data.get("final_recon")
+            if isinstance(final_df, pd.DataFrame) and not final_df.empty:
+                self._draw_two_column_table([("Holdings Breaks", len(final_df))])
+                self._print_discrepancy_table(final_df, "Holdings Discrepancies")
+            else:
+                self._draw_two_column_table([("Holdings Breaks", 0)])
+
+            price_t = recon_data.get("price_discrepancies_T")
+            self._print_price_discrepancies(
+                price_t,
+                price_label="Custodian",
+                fund_name=fund_name,
+                recon_type="custodian_option_flex" if is_flex else "custodian_option",
+                is_flex=is_flex,
+            )
 
     def _print_custodian_treasury_section(
         self,
@@ -290,12 +307,44 @@ class HoldingsReconciliationRenderer:
         price_t: Any,
         *,
         price_label: str,
+        fund_name: str | None = None,
+        recon_type: str | None = None,
+        is_flex: bool = False,
     ) -> None:
         if isinstance(price_t, pd.DataFrame) and not price_t.empty:
-            self._draw_two_column_table([(f"{price_label} Price Breaks T", len(price_t))])
-            self._print_discrepancy_table(price_t, f"{price_label} Price Breaks T")
+            filtered = self._filter_option_price_breaks(price_t, fund_name, recon_type, is_flex)
+            self._draw_two_column_table([(f"{price_label} Price Breaks T", len(filtered))])
+            self._print_discrepancy_table(filtered, f"{price_label} Price Breaks T")
         else:
             self._draw_two_column_table([(f"{price_label} Price Breaks", 0)])
+
+    def _filter_option_price_breaks(
+        self,
+        price_df: pd.DataFrame,
+        fund_name: str | None,
+        recon_type: str | None,
+        is_flex: bool,
+    ) -> pd.DataFrame:
+        if not isinstance(price_df, pd.DataFrame) or price_df.empty:
+            return pd.DataFrame()
+
+        if not fund_name or not recon_type or "option" not in recon_type.lower():
+            return price_df
+
+        vehicle = (FUND_DEFINITIONS.get(fund_name, {}).get("vehicle_wrapper") or "").lower()
+        if vehicle not in {"private_fund", "closed_end_fund"}:
+            return price_df
+
+        if is_flex:
+            return price_df
+
+        working = price_df.copy()
+        if "option_weight" in working.columns:
+            working = working.sort_values("option_weight", ascending=False)
+        elif "price_diff" in working.columns:
+            working = working.sort_values("price_diff", ascending=False)
+
+        return working.head(5)
 
     def _has_recon_activity(self, recon_data: Mapping[str, Any]) -> bool:
         final_df = recon_data.get("final_recon")
