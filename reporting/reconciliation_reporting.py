@@ -37,12 +37,12 @@ class ReconDescriptor:
 RECON_DESCRIPTOR_REGISTRY: Dict[str, ReconDescriptor] = {
     "custodian_equity": ReconDescriptor(
         holdings_key="final_recon",
-        holdings_ticker="equity_ticker",
-        price_ticker="equity_ticker",
+        holdings_ticker="eqyticker",
+        price_ticker="eqyticker",
     ),
     "custodian_equity_t1": ReconDescriptor(
         holdings_key="final_recon",
-        holdings_ticker="equity_ticker",
+        holdings_ticker="eqyticker",
         price_keys=(None, None),
     ),
     "custodian_option": ReconDescriptor(
@@ -60,9 +60,9 @@ RECON_DESCRIPTOR_REGISTRY: Dict[str, ReconDescriptor] = {
     ),
     "index_equity": ReconDescriptor(
         holdings_key="holdings_discrepancies",
-        holdings_ticker="equity_ticker",
+        holdings_ticker="eqyticker",
         holdings_builder="_prepare_index_holdings_df",
-        price_ticker="equity_ticker",
+        price_ticker="eqyticker",
         price_cust_col="price_index",
     ),
     # "sg_option": ReconDescriptor(

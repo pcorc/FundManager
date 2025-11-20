@@ -55,8 +55,8 @@ class Reconciliator:
         recon_funcs = [
             ("custodian_equity", self.reconcile_custodian_equity),
             ("custodian_option", self.reconcile_custodian_option),
-            # ("custodian_treasury", self.reconcile_custodian_treasury),
-            # ("index_equity", self.reconcile_index_equity),
+            ("custodian_treasury", self.reconcile_custodian_treasury),
+            ("index_equity", self.reconcile_index_equity),
         ]
 
         for name, func in recon_funcs:

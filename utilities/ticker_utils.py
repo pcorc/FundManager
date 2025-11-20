@@ -51,9 +51,6 @@ def normalize_all_holdings(
         if key not in result:
             result[key] = value
 
-    if logger:
-        logger.info("Holdings normalization complete for fund %s", fund_name)
-
     return result
 
 

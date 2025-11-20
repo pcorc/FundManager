@@ -162,10 +162,10 @@ class NAVReconciliator:
         price_breaks = self.holdings_price_breaks.get("equity", pd.DataFrame())
 
         all_tickers: set[str] = set()
-        if not equity_t.empty and "equity_ticker" in equity_t.columns:
-            all_tickers.update(equity_t["equity_ticker"].unique())
-        if not equity_t1.empty and "equity_ticker" in equity_t1.columns:
-            all_tickers.update(equity_t1["equity_ticker"].unique())
+        if not equity_t.empty and "eqyticker" in equity_t.columns:
+            all_tickers.update(equity_t["eqyticker"].unique())
+        if not equity_t1.empty and "eqyticker" in equity_t1.columns:
+            all_tickers.update(equity_t1["eqyticker"].unique())
 
         for ticker in sorted(all_tickers):
             qty_t = 0
@@ -174,15 +174,15 @@ class NAVReconciliator:
             price_t1_raw = 0
 
             if not equity_t.empty:
-                ticker_data = equity_t[equity_t["equity_ticker"] == ticker]
+                ticker_data = equity_t[equity_t["eqyticker"] == ticker]
                 if not ticker_data.empty:
-                    qty_t = ticker_data.iloc[0].get("quantity", 0)
+                    qty_t = ticker_data.iloc[0].get("nav_shares", 0)
                     price_t_raw = ticker_data.iloc[0].get("price", 0)
 
             if not equity_t1.empty:
-                ticker_data_t1 = equity_t1[equity_t1["equity_ticker"] == ticker]
+                ticker_data_t1 = equity_t1[equity_t1["eqyticker"] == ticker]
                 if not ticker_data_t1.empty:
-                    qty_t1 = ticker_data_t1.iloc[0].get("quantity", 0)
+                    qty_t1 = ticker_data_t1.iloc[0].get("nav_shares", 0)
                     price_t1_raw = ticker_data_t1.iloc[0].get("price", 0)
 
             price_t_adj = price_t_raw
@@ -252,13 +252,13 @@ class NAVReconciliator:
             if not option_t.empty:
                 ticker_data = option_t[option_t["optticker"] == ticker]
                 if not ticker_data.empty:
-                    qty_t = ticker_data.iloc[0].get("quantity", 0)
+                    qty_t = ticker_data.iloc[0].get("nav_shares", 0)
                     price_t_raw = ticker_data.iloc[0].get("price", 0)
 
             if not option_t1.empty:
                 ticker_data_t1 = option_t1[option_t1["optticker"] == ticker]
                 if not ticker_data_t1.empty:
-                    qty_t1 = ticker_data_t1.iloc[0].get("quantity", 0)
+                    qty_t1 = ticker_data_t1.iloc[0].get("nav_shares", 0)
                     price_t1_raw = ticker_data_t1.iloc[0].get("price", 0)
 
             price_t_adj = price_t_raw
@@ -331,13 +331,13 @@ class NAVReconciliator:
             if not option_t.empty:
                 ticker_data = option_t[option_t["optticker"] == ticker]
                 if not ticker_data.empty:
-                    qty_t = ticker_data.iloc[0].get("quantity", 0)
+                    qty_t = ticker_data.iloc[0].get("nav_shares", 0)
                     price_t_raw = ticker_data.iloc[0].get("price", 0)
 
             if not option_t1.empty:
                 ticker_data_t1 = option_t1[option_t1["optticker"] == ticker]
                 if not ticker_data_t1.empty:
-                    qty_t1 = ticker_data_t1.iloc[0].get("quantity", 0)
+                    qty_t1 = ticker_data_t1.iloc[0].get("nav_shares", 0)
                     price_t1_raw = ticker_data_t1.iloc[0].get("price", 0)
 
             price_t_adj = price_t_raw
@@ -755,7 +755,6 @@ class NAVReconciliator:
             candidates = [
                 "shares_outstanding",
                 "shares",
-                "nav_shares",
                 "units",
             ]
             for column in candidates:
