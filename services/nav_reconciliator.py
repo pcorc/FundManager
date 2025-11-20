@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, Mapping, Sequence
-
+from datetime import datetime
 import logging
 import pandas as pd
 from pandas.tseries.offsets import BDay, MonthEnd
@@ -60,16 +60,9 @@ class NAVReconciliator:
         self.fund: Fund | None = fund
         self.socgen_custodian = socgen_custodian
         self.fund_definition = FUND_DEFINITIONS.get(fund_name, {})
-        metadata_flex = bool(self.fund_definition.get("has_flex_option"))
-        fund_flex = bool(getattr(self.fund, "has_flex_option", False))
-        self.has_flex_option = metadata_flex or fund_flex
+        self.has_flex_option = bool(self.fund_definition.get("has_flex_option"))
         self.flex_option_pattern = self.fund_definition.get("flex_option_pattern", "SPX|XSP")
-        flex_type = (
-            getattr(self.fund, "flex_option_type", None)
-            or self.fund_definition.get("flex_option_type")
-            or ""
-        )
-        self.flex_option_type = flex_type.lower() or None
+        self.flex_option_type = self.fund_definition.get("flex_option_type")
         self.uses_index_flex = (
             fund_name in INDEX_FLEX_FUNDS or self.flex_option_type == "index"
         )
@@ -137,8 +130,8 @@ class NAVReconciliator:
         }
 
         results["details"] = results["detailed_calculations"]
-        results["raw_equity"] = self._payload_frame("vest_equity", "equity_holdings")
-        results["raw_option"] = self._payload_frame("vest_option", "options_holdings")
+        results["raw_equity"] = self.fund_data.get("vest_equity")
+        results["raw_option"] = self.fund_data.get("vest_option")
 
         self.results = results
         self.summary = results.get("summary", {})  # type: ignore[assignment]
@@ -150,8 +143,8 @@ class NAVReconciliator:
     def _calculate_equity_gl_with_details(self) -> _ComponentGL:
         """Calculate equity G/L with ticker-level details."""
 
-        equity_t = self._payload_frame("vest_equity", "equity_holdings")
-        equity_t1 = self._payload_frame("vest_equity_t1", "equity_holdings_t1")
+        equity_t = self.fund_data.get("vest_equity")
+        equity_t1 = self.fund_data.get("vest_equity_t1")
 
         if equity_t.empty and equity_t1.empty:
             return self._component_gain_loss("equity")
@@ -194,12 +187,15 @@ class NAVReconciliator:
                 if "price_t_adj" in adj_data:
                     price_t_adj = adj_data["price_t_adj"]
 
+            price_t_cust = price_t_adj
+
             cust_price = self._lookup_cust_price(price_breaks, ticker)
             if cust_price is not None:
                 price_t1_cust = cust_price
+                price_t_cust = cust_price
 
-            gl_raw = (price_t_raw - price_t1_raw) * qty_t
-            gl_adj = (price_t_adj - price_t1_cust) * qty_t
+            gl_raw = (price_t_raw - price_t1_cust) * qty_t
+            gl_adj = (price_t_cust - price_t1_cust) * qty_t
 
             if qty_t != 0 or qty_t1 != 0:
                 details_list.append(
@@ -210,7 +206,7 @@ class NAVReconciliator:
                         "price_t1_raw": price_t1_raw,
                         "price_t_raw": price_t_raw,
                         "price_t1_adj": price_t1_cust,
-                        "price_t_adj": price_t_adj,
+                        "price_t_adj": price_t_cust,
                         "gl_raw": gl_raw,
                         "gl_adjusted": gl_adj,
                     }
@@ -226,8 +222,8 @@ class NAVReconciliator:
     def _calculate_option_gl_with_details(self) -> _ComponentGL:
         """Calculate option G/L with ticker-level details (non-flex)."""
 
-        option_t = self._payload_frame("vest_option", "option_holdings")
-        option_t1 = self._payload_frame("vest_option_t1", "option_holdings_t1")
+        option_t = self.fund_data.get("vest_option")
+        option_t1 = self.fund_data.get("vest_option_t1")
 
         if option_t.empty and option_t1.empty:
             return self._component_gain_loss("options")
@@ -271,12 +267,15 @@ class NAVReconciliator:
                 if "price_t_adj" in adj_data:
                     price_t_adj = adj_data["price_t_adj"]
 
+            price_t_cust = price_t_adj
+
             cust_price = self._lookup_cust_price(price_breaks, ticker)
             if cust_price is not None:
                 price_t1_cust = cust_price
+                price_t_cust = cust_price
 
-            gl_raw = (price_t_raw - price_t1_raw) * qty_t * 100
-            gl_adj = (price_t_adj - price_t1_cust) * qty_t * 100
+            gl_raw = (price_t_raw - price_t1_cust) * qty_t * 100
+            gl_adj = (price_t_cust - price_t1_cust) * qty_t * 100
 
             if qty_t != 0 or qty_t1 != 0:
                 details_list.append(
@@ -287,7 +286,7 @@ class NAVReconciliator:
                         "price_t1_raw": price_t1_raw,
                         "price_t_raw": price_t_raw,
                         "price_t1_adj": price_t1_cust,
-                        "price_t_adj": price_t_adj,
+                        "price_t_adj": price_t_cust,
                         "gl_raw": gl_raw,
                         "gl_adjusted": gl_adj,
                     }
@@ -308,8 +307,8 @@ class NAVReconciliator:
         if not self.has_flex_option: 
             return _ComponentGL()
 
-        option_t = self._payload_frame("vest_option", "option_holdings")
-        option_t1 = self._payload_frame("vest_option_t1", "option_holdings_t1")
+        option_t = self.fund_data.get("vest_option")
+        option_t1 = self.fund_data.get("vest_option_t1")
 
         if option_t.empty and option_t1.empty:
             return self._component_gain_loss("flex_options")
@@ -352,12 +351,14 @@ class NAVReconciliator:
                 adj_data = price_breaks.loc[ticker]
                 if "price_t_adj" in adj_data:
                     continue
+            price_t_cust = price_t_adj
             cust_price = self._lookup_cust_price(price_breaks, ticker)
             if cust_price is not None:
                 price_t1_cust = cust_price
+                price_t_cust = cust_price
 
-            gl_raw = (price_t_raw - price_t1_raw) * qty_t * 100
-            gl_adj = (price_t_adj - price_t1_cust) * qty_t * 100
+            gl_raw = (price_t_raw - price_t1_cust) * qty_t * 100
+            gl_adj = (price_t_cust - price_t1_cust) * qty_t * 100
 
             if qty_t != 0 or qty_t1 != 0:
                 details_list.append(
@@ -368,7 +369,7 @@ class NAVReconciliator:
                         "price_t1_raw": price_t1_raw,
                         "price_t_raw": price_t_raw,
                         "price_t1_adj": price_t1_cust,
-                        "price_t_adj": price_t_adj,
+                        "price_t_adj": price_t_cust,
                         "gl_raw": gl_raw,
                         "gl_adjusted": gl_adj,
                     }
@@ -405,14 +406,6 @@ class NAVReconciliator:
 
         return all_tickers
 
-    # ------------------------------------------------------------------
-    def _payload_frame(self, *keys: str) -> pd.DataFrame:
-        """Return the first DataFrame within fund_data matching keys."""
-        for key in keys:
-            value = self.fund_data.get(key)
-            if isinstance(value, pd.DataFrame):
-                return value
-        return pd.DataFrame()
 
     def _snapshot_key(self, component: str, snapshot: str) -> str | None:
         mapping = self._component_key_map.get(component, (None, None))
@@ -420,13 +413,18 @@ class NAVReconciliator:
 
     def _extract_from_nav_data(self, snapshot: str, columns: Sequence[str]) -> float:
         nav_key = "nav" if snapshot == "current" else "nav_t1"
-        nav_df = self.fund_data.get(nav_key)
-        if isinstance(nav_df, pd.DataFrame) and not nav_df.empty:
+        nav_data = self.fund_data.get(nav_key)
+        if isinstance(nav_data, pd.DataFrame) and not nav_data.empty:
             for column in columns:
-                if column in nav_df.columns:
-                    series = pd.to_numeric(nav_df[column], errors="coerce").dropna()
+                if column in nav_data.columns:
+                    series = pd.to_numeric(nav_data[column], errors="coerce").dropna()
                     if not series.empty:
                         return float(series.iloc[0])
+        if isinstance(nav_data, Mapping):
+            for column in columns:
+                value = nav_data.get(column)
+                if isinstance(value, (int, float)):
+                    return float(value)
         return 0.0
 
     def _calculate_treasury_gl(self) -> _ComponentGL:
@@ -442,16 +440,9 @@ class NAVReconciliator:
         if difference != 0.0:
             return _ComponentGL(raw=difference, adjusted=difference)
 
-        if isinstance(self.fund, Fund):
-            gain_loss = self.fund.calculate_gain_loss(
-                str(self.analysis_date),
-                str(self.prior_date),
-                asset_class,
-            )
-            return _ComponentGL(
-                raw=float(gain_loss.raw_gl or 0.0),
-                adjusted=float(gain_loss.adjusted_gl or gain_loss.raw_gl or 0.0),
-            )
+        gl_value = self._extract_numeric_from_data(f"{asset_class}_gl")
+        if gl_value:
+            return _ComponentGL(raw=gl_value, adjusted=gl_value)
 
         return _ComponentGL()
 
@@ -477,27 +468,103 @@ class NAVReconciliator:
         )
 
     def _calculate_dividends(self) -> float:
-        if isinstance(self.fund, Fund):
-            return float(self.fund.get_dividends(str(self.analysis_date)) or 0.0)
-        return self._extract_numeric_from_data("dividends")
+        """Calculate dividend income from equity holdings."""
+
+        equity_holdings = self.fund_data.get("equity_holdings", pd.DataFrame())
+        if not isinstance(equity_holdings, pd.DataFrame) or equity_holdings.empty:
+            return 0.0
+
+        if "dividend" not in equity_holdings.columns or "quantity" not in equity_holdings.columns:
+            return 0.0
+
+        return float((equity_holdings["dividend"] * equity_holdings["quantity"]).sum())
 
     def _calculate_expenses(self) -> float:
-        if isinstance(self.fund, Fund):
-            return float(self.fund.get_expenses(str(self.analysis_date)) or 0.0)
-        return self._extract_numeric_from_data("expenses")
+        """Calculate expense accruals using fund definition expense ratio."""
+
+        nav = self.fund_data.get("nav", pd.DataFrame())
+        if not isinstance(nav, pd.DataFrame):
+            nav = pd.DataFrame(nav)
+
+        expense_ratio = float(
+            self.fund_definition.get("expense_ratio")
+            or self.fund_data.get("expense_ratio")
+            or 0.0
+        )
+
+        cust_tna_series = nav.get("total_net_assets", pd.Series([0]))
+        cust_tna = float(cust_tna_series.iloc[0] if not cust_tna_series.empty else 0.0)
+
+        analysis_date = datetime.strptime(self.analysis_date, "%Y-%m-%d").date()
+        days = 3 if analysis_date.weekday() == 4 else 1
+        return cust_tna * expense_ratio * (days / 365)
 
     def _calculate_distributions(self) -> float:
-        if isinstance(self.fund, Fund):
-            return float(self.fund.get_distributions(str(self.analysis_date)) or 0.0)
-        return self._extract_numeric_from_data("distributions")
+        """Calculate distribution amount when the analysis date matches the ex-date."""
+
+        distributions = self.fund_data.get("distributions", pd.DataFrame())
+        if not isinstance(distributions, pd.DataFrame) or distributions.empty:
+            return 0.0
+
+        if "ex_date" not in distributions.columns or "fund" not in distributions.columns:
+            return 0.0
+
+        distributions = distributions.copy()
+        distributions["ex_date"] = pd.to_datetime(distributions["ex_date"], errors="coerce").dt.date
+        if distributions["ex_date"].isna().all():
+            return 0.0
+
+        fund_distro = distributions[
+            (distributions["fund"] == self.fund_name)
+            & (distributions["ex_date"] == self.analysis_date)
+        ]
+
+        if fund_distro.empty or "distro_amt" not in fund_distro.columns:
+            return 0.0
+
+        distro_amount = pd.to_numeric(fund_distro["distro_amt"], errors="coerce").fillna(0.0).sum()
+
+        if distro_amount:
+            self.logger.info(
+                "Distribution going ex on %s: $%s",
+                self.analysis_date,
+                f"{distro_amount:,.2f}",
+            )
+
+        return float(distro_amount)
 
     def _calculate_t1_flows_adjustment(self) -> float:
-        if isinstance(self.fund, Fund):
-            return float(
-                self.fund.get_flows_adjustment(str(self.analysis_date), str(self.prior_date))
-                or 0.0
-            )
-        return self._extract_numeric_from_data("flows_adjustment")
+        """Calculate T-1 flows adjustment for creations/redemptions."""
+
+        t1_flows = self.fund_data.get("t1_flows", pd.DataFrame())
+        t1_nav = self.fund_data.get("t1_nav", pd.DataFrame())
+
+        if not isinstance(t1_flows, pd.DataFrame):
+            t1_flows = pd.DataFrame(t1_flows)
+        if not isinstance(t1_nav, pd.DataFrame):
+            t1_nav = pd.DataFrame(t1_nav)
+
+        shares_per_creation_unit = 50000
+
+        beg_tna_series = t1_nav.get("total_net_assets", pd.Series([0]))
+        beg_shares_series = t1_nav.get("shares_outstanding", pd.Series([0]))
+
+        beg_tna = float(beg_tna_series.iloc[0] if not beg_tna_series.empty else 0.0)
+        beg_shares = float(beg_shares_series.iloc[0] if not beg_shares_series.empty else 0.0)
+
+        tna_t1_flows_adjustment = 0.0
+
+        if not t1_flows.empty and "net_units" in t1_flows.columns:
+            net_t1_flows = pd.to_numeric(t1_flows["net_units"], errors="coerce").fillna(0.0)
+            net_units = float(net_t1_flows.iloc[0]) if not net_t1_flows.empty else 0.0
+
+            if beg_shares > 0:
+                flows_adjustment_per_share = net_units * (beg_tna / beg_shares)
+                tna_t1_flows_adjustment = flows_adjustment_per_share * shares_per_creation_unit
+
+        adjusted_beg_tna = beg_tna + tna_t1_flows_adjustment
+
+        return adjusted_beg_tna
 
     def _calculate_rolled_option_gl(self) -> float:
         current_value = self._fetch_component_value("options", snapshot="current")
@@ -553,8 +620,8 @@ class NAVReconciliator:
         flows_adjustment: float,
         other_impact: float,
     ) -> Dict[str, object]:
-        begin_tna = self._extract_from_nav_data("previous", ["tna", "total_net_assets", "net_assets"]) or self._safe_float(
-            getattr(getattr(self.fund, "data", None), "previous", None), "total_net_assets"
+        begin_tna = self._extract_from_nav_data("previous", ["total_net_assets"]) or self._extract_numeric_from_data(
+            "beginning_tna"
         )
         adjusted_begin_tna = begin_tna + flows_adjustment
 
@@ -568,8 +635,8 @@ class NAVReconciliator:
         )
 
         expected_tna = adjusted_begin_tna + total_gain + dividends - expenses - distributions
-        custodian_tna = self._extract_from_nav_data("current", ["tna", "total_net_assets", "net_assets"]) or self._safe_float(
-            getattr(getattr(self.fund, "data", None), "current", None), "total_net_assets"
+        custodian_tna = self._extract_from_nav_data("current", ["total_net_assets"]) or self._extract_numeric_from_data(
+            "custodian_tna"
         )
         tna_diff = custodian_tna - expected_tna
 
@@ -650,12 +717,8 @@ class NAVReconciliator:
         custodian_tna: float = 0.0,
         shares_outstanding: float = 0.0,
     ) -> Dict[str, float]:
-        prior_nav = self._extract_from_nav_data("previous", ["nav", "nav_price", "nav_value"]) or self._safe_float(
-            getattr(getattr(self.fund, "data", None), "previous", None), "nav"
-        )
-        current_nav = self._extract_from_nav_data("current", ["nav", "nav_price", "nav_value"]) or self._safe_float(
-            getattr(getattr(self.fund, "data", None), "current", None), "nav"
-        )
+        prior_nav = self._extract_from_nav_data("previous", ["nav"])
+        current_nav = self._extract_from_nav_data("current", ["nav"])
 
         net_gain = (
             equity_gl.adjusted_gl
@@ -715,10 +778,9 @@ class NAVReconciliator:
 
         timestamp = pd.Timestamp(analysis_date)
         tenor = ""
-        if isinstance(self.fund, Fund):
-            config = getattr(self.fund, "config", {}) or {}
-            if isinstance(config, Mapping):
-                tenor = str(config.get("option_roll_tenor", "")).lower()
+        config = self.fund_data.get("config") or {}
+        if isinstance(config, Mapping):
+            tenor = str(config.get("option_roll_tenor", "")).lower()
 
         if tenor == "weekly":
             return timestamp.weekday() == 4
@@ -768,24 +830,21 @@ class NAVReconciliator:
             if value:
                 return value
 
-        if isinstance(self.fund, Fund):
-            data = getattr(getattr(self.fund, "data", None), snapshot, None)
-            if data is not None:
-                attr = {
-                    "equity": "total_equity_value",
-                    "options": "total_option_value",
-                    "flex_options": "total_option_value",
-                    "treasury": "total_treasury_value",
-                }.get(component)
-                if attr:
-                    return self._safe_float(data, attr)
         return 0.0
 
     def _extract_numeric_from_data(self, key: str) -> float:
         value = self.fund_data.get(key)
+        if value is None:
+            nav_data = self.fund_data.get("nav")
+            if isinstance(nav_data, Mapping) and key in nav_data:
+                value = nav_data.get(key)
         try:
             if isinstance(value, (int, float)):
                 return float(value)
+            if isinstance(value, Mapping):
+                numeric_values = [v for v in value.values() if isinstance(v, (int, float))]
+                if numeric_values:
+                    return float(sum(numeric_values))
             if isinstance(value, pd.Series):
                 return float(pd.to_numeric(value, errors="coerce").fillna(0.0).sum())
             if isinstance(value, pd.DataFrame) and not value.empty:
@@ -798,18 +857,24 @@ class NAVReconciliator:
 
     def _extract_shares_outstanding(self) -> float:
         nav_data = self.fund_data.get("nav")
+        candidates = [
+            "shares_outstanding",
+            "shares",
+            "units",
+        ]
         if isinstance(nav_data, pd.DataFrame) and not nav_data.empty:
-            candidates = [
-                "shares_outstanding",
-                "shares",
-                "units",
-            ]
             for column in candidates:
                 if column in nav_data.columns:
                     series = pd.to_numeric(nav_data[column], errors="coerce").dropna()
                     if not series.empty:
                         return float(series.iloc[0])
+        if isinstance(nav_data, Mapping):
+            for column in candidates:
+                value = nav_data.get(column)
+                if isinstance(value, (int, float)):
+                    return float(value)
         return 0.0
+
 
     def _lookup_cust_price(self, price_breaks: pd.DataFrame, ticker: str) -> float | None:
         """Extract the custodian price for a ticker when available."""
@@ -831,16 +896,3 @@ class NAVReconciliator:
                     return match.iloc[0].get("price_cust")
 
         return None
-
-    @staticmethod
-    def _safe_float(obj, attribute: str) -> float:
-        if obj is None:
-            return 0.0
-        try:
-            value = getattr(obj, attribute, 0.0)
-        except AttributeError:
-            return 0.0
-        try:
-            return float(value or 0.0)
-        except (TypeError, ValueError):
-            return 0.0

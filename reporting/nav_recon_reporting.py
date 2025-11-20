@@ -418,7 +418,7 @@ class NAVReconciliationExcelReport:
                 adj_t_cell.fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
             col += 1
 
-            gl_formula = f"=(E{data_row}-D{data_row})*C{data_row}"
+            gl_formula = f"=(E{data_row}-F{data_row})*C{data_row}"
             ws.cell(row=data_row, column=col, value=gl_formula).number_format = self.currency_format
             col += 1
 
@@ -520,7 +520,7 @@ class NAVReconciliationExcelReport:
                 adj_t_cell.fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
             col += 1
 
-            gl_formula = f"=(E{data_row}-D{data_row})*C{data_row}*100"
+            gl_formula = f"=(E{data_row}-F{data_row})*C{data_row}*100"
             ws.cell(row=data_row, column=col, value=gl_formula).number_format = self.currency_format
             col += 1
 
@@ -622,7 +622,7 @@ class NAVReconciliationExcelReport:
                 adj_t_cell.fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
             col += 1
 
-            gl_formula = f"=(E{data_row}-D{data_row})*C{data_row}*100"
+            gl_formula = f"=(E{data_row}-F{data_row})*C{data_row}*100"
             ws.cell(row=data_row, column=col, value=gl_formula).number_format = self.currency_format
             col += 1
 
