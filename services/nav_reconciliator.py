@@ -11,6 +11,7 @@ from pandas.tseries.offsets import BDay, MonthEnd
 from domain.fund import Fund, GainLossResult
 from config.fund_definitions import FUND_DEFINITIONS, INDEX_FLEX_FUNDS
 
+
 @dataclass
 class _ComponentGL:
     """Container for raw/adjusted gain-loss values and optional detail frame."""
@@ -21,16 +22,18 @@ class _ComponentGL:
 
 
 class NAVReconciliator:
-    """Calculate daily NAV reconciliation metrics for a fund."""
+    """Calculate daily NAV reconciliation metrics for a fund with detailed ticker-level breakdowns."""
 
     DETAIL_COLUMNS = [
         "ticker",
         "quantity_t1",
         "quantity_t",
-        "price_t1",
-        "price_t",
-        "raw_gl",
-        "adjusted_gl",
+        "price_t1_raw",
+        "price_t_raw",
+        "price_t1_adj",
+        "price_t_adj",
+        "gl_raw",
+        "gl_adjusted",
     ]
 
     def __init__(
@@ -84,51 +87,25 @@ class NAVReconciliator:
         self.treasury_details = pd.DataFrame(columns=self.DETAIL_COLUMNS)
 
     # ------------------------------------------------------------------
-    def _payload_frame(self, *keys: str) -> pd.DataFrame:
-        """Return the first DataFrame within ``fund_data`` matching ``keys``."""
-
-        for key in keys:
-            value = self.fund_data.get(key)
-            if isinstance(value, pd.DataFrame):
-                return value
-
-        return pd.DataFrame()
-
-    def _snapshot_key(self, component: str, snapshot: str) -> str | None:
-        mapping = self._component_key_map.get(component, (None, None))
-        return mapping[0] if snapshot == "current" else mapping[1]
-
-    def _extract_from_nav_data(self, snapshot: str, columns: Sequence[str]) -> float:
-        nav_key = "nav" if snapshot == "current" else "nav_t1"
-        nav_df = self.fund_data.get(nav_key)
-        if isinstance(nav_df, pd.DataFrame) and not nav_df.empty:
-            for column in columns:
-                if column in nav_df.columns:
-                    series = pd.to_numeric(nav_df[column], errors="coerce").dropna()
-                    if not series.empty:
-                        return float(series.iloc[0])
-        return 0.0
-
-    # ------------------------------------------------------------------
     def run_nav_reconciliation(self) -> Dict[str, object]:
-        """Main reconciliation orchestrator."""
+        """Main reconciliation orchestrator with detailed ticker-level data."""
 
         self.logger.info("Starting NAV reconciliation for %s", self.fund_name)
 
         is_assignment_day = self._is_option_settlement_date(self.analysis_date)
 
-        equity_gl = self._calculate_equity_gl()
+        # Calculate component G/Ls with details
+        equity_gl = self._calculate_equity_gl_with_details()
 
         assignment_gl = 0.0
         if is_assignment_day:
             assignment_gl = self.process_assignments(self.prior_date)
             rolled_gl = self._calculate_rolled_option_gl()
             option_gl = _ComponentGL(raw=rolled_gl, adjusted=rolled_gl)
-            self.option_details = self._build_component_detail_frame(option_gl)
         else:
-            option_gl = self._calculate_option_gl()
+            option_gl = self._calculate_option_gl_with_details()
 
-        flex_gl = self._calculate_flex_option_gl()
+        flex_gl = self._calculate_flex_option_gl_with_details()
         treasury_gl = self._calculate_treasury_gl()
 
         dividends = self._calculate_dividends()
@@ -152,10 +129,10 @@ class NAVReconciliator:
 
         # Expose detailed calculations for downstream reporting
         results["detailed_calculations"] = {
-            "equity": self.equity_details,
-            "options": self.option_details,
-            "flex_options": self.flex_details,
-            "treasury": self.treasury_details,
+            "equity_details": self.equity_details,
+            "option_details": self.option_details,
+            "flex_details": self.flex_details,
+            "treasury_details": self.treasury_details,
         }
 
         results["details"] = results["detailed_calculations"]
@@ -169,75 +146,263 @@ class NAVReconciliator:
         return self.results
 
     # ------------------------------------------------------------------
-    def _calculate_expected_nav(
-        self,
-        equity_gl: GainLossResult,
-        options_gl: GainLossResult,
-        flex_gl: GainLossResult,
-        treasury_gl: GainLossResult,
-        dividends: float,
-        expenses: float,
-        distributions: float,
-        flows_adjustment: float,
-        assignment_gl: float = 0.0,
-        other_impact: float = 0.0,
-    ) -> Dict[str, float]:
-        prior_nav = self._extract_from_nav_data("previous", ["nav", "nav_price", "nav_value"]) or self._safe_float(
-            getattr(getattr(self.fund, "data", None), "previous", None), "nav"
-        )
-        current_nav = self._extract_from_nav_data("current", ["nav", "nav_price", "nav_value"]) or self._safe_float(
-            getattr(getattr(self.fund, "data", None), "current", None), "nav"
-        )
+    def _calculate_equity_gl_with_details(self) -> _ComponentGL:
+        """Calculate equity G/L with ticker-level details."""
 
-        net_gain = (
-            equity_gl.adjusted_gl
-            + options_gl.adjusted_gl
-            + flex_gl.adjusted_gl
-            + treasury_gl.adjusted_gl
-            + assignment_gl
-            + other_impact
-        )
+        equity_t = self._payload_frame("vest_equity", "equity_holdings")
+        equity_t1 = self._payload_frame("vest_equity_t1", "equity_holdings_t1")
 
-        expected_nav = prior_nav + net_gain + dividends - expenses - distributions + flows_adjustment
-        difference = current_nav - expected_nav
+        if equity_t.empty and equity_t1.empty:
+            return self._component_gain_loss("equity")
 
-        return {
-            "prior_nav": prior_nav,
-            "current_nav": current_nav,
-            "net_gain": net_gain,
-            "dividends": dividends,
-            "expenses": expenses,
-            "distributions": distributions,
-            "flows_adjustment": flows_adjustment,
-            "expected_nav": expected_nav,
-            "difference": difference,
-        }
+        details_list = []
+        total_gl_raw = 0.0
+        total_gl_adj = 0.0
+
+        price_breaks = self.holdings_price_breaks.get("equity", pd.DataFrame())
+
+        all_tickers: set[str] = set()
+        if not equity_t.empty and "equity_ticker" in equity_t.columns:
+            all_tickers.update(equity_t["equity_ticker"].unique())
+        if not equity_t1.empty and "equity_ticker" in equity_t1.columns:
+            all_tickers.update(equity_t1["equity_ticker"].unique())
+
+        for ticker in sorted(all_tickers):
+            qty_t = 0
+            qty_t1 = 0
+            price_t_raw = 0
+            price_t1_raw = 0
+
+            if not equity_t.empty:
+                ticker_data = equity_t[equity_t["equity_ticker"] == ticker]
+                if not ticker_data.empty:
+                    qty_t = ticker_data.iloc[0].get("quantity", 0)
+                    price_t_raw = ticker_data.iloc[0].get("price", 0)
+
+            if not equity_t1.empty:
+                ticker_data_t1 = equity_t1[equity_t1["equity_ticker"] == ticker]
+                if not ticker_data_t1.empty:
+                    qty_t1 = ticker_data_t1.iloc[0].get("quantity", 0)
+                    price_t1_raw = ticker_data_t1.iloc[0].get("price", 0)
+
+            price_t_adj = price_t_raw
+            price_t1_adj = price_t1_raw
+
+            if not price_breaks.empty and ticker in price_breaks.index:
+                adj_data = price_breaks.loc[ticker]
+                if "price_t_adj" in adj_data:
+                    price_t_adj = adj_data["price_t_adj"]
+                if "price_t1_adj" in adj_data:
+                    price_t1_adj = adj_data["price_t1_adj"]
+
+            gl_raw = (price_t_raw - price_t1_raw) * qty_t
+            gl_adj = (price_t_adj - price_t1_adj) * qty_t
+
+            if qty_t != 0 or qty_t1 != 0:
+                details_list.append(
+                    {
+                        "ticker": ticker,
+                        "quantity_t1": qty_t1,
+                        "quantity_t": qty_t,
+                        "price_t1_raw": price_t1_raw,
+                        "price_t_raw": price_t_raw,
+                        "price_t1_adj": price_t1_adj,
+                        "price_t_adj": price_t_adj,
+                        "gl_raw": gl_raw,
+                        "gl_adjusted": gl_adj,
+                    }
+                )
+
+                total_gl_raw += gl_raw
+                total_gl_adj += gl_adj
+
+        self.equity_details = pd.DataFrame(details_list, columns=self.DETAIL_COLUMNS)
+        return _ComponentGL(raw=total_gl_raw, adjusted=total_gl_adj, details=self.equity_details)
 
     # ------------------------------------------------------------------
-    def _calculate_equity_gl(self) -> _ComponentGL:
-        result = self._component_gain_loss("equity")
-        self.equity_details = self._build_component_detail_frame(result)
-        return result
+    def _calculate_option_gl_with_details(self) -> _ComponentGL:
+        """Calculate option G/L with ticker-level details (non-flex)."""
 
-    def _calculate_option_gl(self) -> _ComponentGL:
-        result = self._component_gain_loss("options")
-        self.option_details = self._build_component_detail_frame(result)
-        return result
+        option_t = self._payload_frame("vest_option", "option_holdings")
+        option_t1 = self._payload_frame("vest_option_t1", "option_holdings_t1")
 
-    def _calculate_flex_option_gl(self) -> _ComponentGL:
-        if self.has_flex_option:
-            result = self._component_gain_loss("flex_options")
-        else:
-            result = _ComponentGL()
-        self.flex_details = self._build_component_detail_frame(result)
-        return result
+        if option_t.empty and option_t1.empty:
+            return self._component_gain_loss("options")
+
+        details_list = []
+        total_gl_raw = 0.0
+        total_gl_adj = 0.0
+
+        price_breaks = self.holdings_price_breaks.get("option", pd.DataFrame())
+
+        all_tickers: set[str] = set()
+        if not option_t.empty and "optticker" in option_t.columns:
+            non_flex = option_t[~option_t["optticker"].str.contains("SPX|XSP", na=False)]
+            all_tickers.update(non_flex["optticker"].unique())
+        if not option_t1.empty and "optticker" in option_t1.columns:
+            non_flex_t1 = option_t1[~option_t1["optticker"].str.contains("SPX|XSP", na=False)]
+            all_tickers.update(non_flex_t1["optticker"].unique())
+
+        for ticker in sorted(all_tickers):
+            qty_t = 0
+            qty_t1 = 0
+            price_t_raw = 0
+            price_t1_raw = 0
+
+            if not option_t.empty:
+                ticker_data = option_t[option_t["optticker"] == ticker]
+                if not ticker_data.empty:
+                    qty_t = ticker_data.iloc[0].get("quantity", 0)
+                    price_t_raw = ticker_data.iloc[0].get("price", 0)
+
+            if not option_t1.empty:
+                ticker_data_t1 = option_t1[option_t1["optticker"] == ticker]
+                if not ticker_data_t1.empty:
+                    qty_t1 = ticker_data_t1.iloc[0].get("quantity", 0)
+                    price_t1_raw = ticker_data_t1.iloc[0].get("price", 0)
+
+            price_t_adj = price_t_raw
+            price_t1_adj = price_t1_raw
+
+            if not price_breaks.empty and ticker in price_breaks.index:
+                adj_data = price_breaks.loc[ticker]
+                if "price_t_adj" in adj_data:
+                    price_t_adj = adj_data["price_t_adj"]
+                if "price_t1_adj" in adj_data:
+                    price_t1_adj = adj_data["price_t1_adj"]
+
+            gl_raw = (price_t_raw - price_t1_raw) * qty_t * 100
+            gl_adj = (price_t_adj - price_t1_adj) * qty_t * 100
+
+            if qty_t != 0 or qty_t1 != 0:
+                details_list.append(
+                    {
+                        "ticker": ticker,
+                        "quantity_t1": qty_t1,
+                        "quantity_t": qty_t,
+                        "price_t1_raw": price_t1_raw,
+                        "price_t_raw": price_t_raw,
+                        "price_t1_adj": price_t1_adj,
+                        "price_t_adj": price_t_adj,
+                        "gl_raw": gl_raw,
+                        "gl_adjusted": gl_adj,
+                    }
+                )
+
+                total_gl_raw += gl_raw
+                total_gl_adj += gl_adj
+
+        self.option_details = pd.DataFrame(details_list, columns=self.DETAIL_COLUMNS)
+        return _ComponentGL(raw=total_gl_raw, adjusted=total_gl_adj, details=self.option_details)
+
+    # ------------------------------------------------------------------
+    def _calculate_flex_option_gl_with_details(self) -> _ComponentGL:
+        """Calculate flex option G/L with ticker-level details."""
+
+        if not self.has_flex_option:
+            return _ComponentGL()
+
+        option_t = self._payload_frame("vest_option", "option_holdings")
+        option_t1 = self._payload_frame("vest_option_t1", "option_holdings_t1")
+
+        if option_t.empty and option_t1.empty:
+            return self._component_gain_loss("flex_options")
+
+        details_list = []
+        total_gl_raw = 0.0
+        total_gl_adj = 0.0
+
+        price_breaks = self.holdings_price_breaks.get("option", pd.DataFrame())
+
+        all_tickers: set[str] = set()
+        if not option_t.empty and "optticker" in option_t.columns:
+            flex_only = option_t[option_t["optticker"].str.contains("SPX|XSP", na=False)]
+            all_tickers.update(flex_only["optticker"].unique())
+        if not option_t1.empty and "optticker" in option_t1.columns:
+            flex_only_t1 = option_t1[option_t1["optticker"].str.contains("SPX|XSP", na=False)]
+            all_tickers.update(flex_only_t1["optticker"].unique())
+
+        for ticker in sorted(all_tickers):
+            qty_t = 0
+            qty_t1 = 0
+            price_t_raw = 0
+            price_t1_raw = 0
+
+            if not option_t.empty:
+                ticker_data = option_t[option_t["optticker"] == ticker]
+                if not ticker_data.empty:
+                    qty_t = ticker_data.iloc[0].get("quantity", 0)
+                    price_t_raw = ticker_data.iloc[0].get("price", 0)
+
+            if not option_t1.empty:
+                ticker_data_t1 = option_t1[option_t1["optticker"] == ticker]
+                if not ticker_data_t1.empty:
+                    qty_t1 = ticker_data_t1.iloc[0].get("quantity", 0)
+                    price_t1_raw = ticker_data_t1.iloc[0].get("price", 0)
+
+            price_t_adj = price_t_raw
+            price_t1_adj = price_t1_raw
+
+            if not price_breaks.empty and ticker in price_breaks.index:
+                adj_data = price_breaks.loc[ticker]
+                if "price_t_adj" in adj_data:
+                    price_t_adj = adj_data["price_t_adj"]
+                if "price_t1_adj" in adj_data:
+                    price_t1_adj = adj_data["price_t1_adj"]
+
+            gl_raw = (price_t_raw - price_t1_raw) * qty_t * 100
+            gl_adj = (price_t_adj - price_t1_adj) * qty_t * 100
+
+            if qty_t != 0 or qty_t1 != 0:
+                details_list.append(
+                    {
+                        "ticker": ticker,
+                        "quantity_t1": qty_t1,
+                        "quantity_t": qty_t,
+                        "price_t1_raw": price_t1_raw,
+                        "price_t_raw": price_t_raw,
+                        "price_t1_adj": price_t1_adj,
+                        "price_t_adj": price_t_adj,
+                        "gl_raw": gl_raw,
+                        "gl_adjusted": gl_adj,
+                    }
+                )
+
+                total_gl_raw += gl_raw
+                total_gl_adj += gl_adj
+
+        self.flex_details = pd.DataFrame(details_list, columns=self.DETAIL_COLUMNS)
+        return _ComponentGL(raw=total_gl_raw, adjusted=total_gl_adj, details=self.flex_details)
+
+    # ------------------------------------------------------------------
+    def _payload_frame(self, *keys: str) -> pd.DataFrame:
+        """Return the first DataFrame within fund_data matching keys."""
+        for key in keys:
+            value = self.fund_data.get(key)
+            if isinstance(value, pd.DataFrame):
+                return value
+        return pd.DataFrame()
+
+    def _snapshot_key(self, component: str, snapshot: str) -> str | None:
+        mapping = self._component_key_map.get(component, (None, None))
+        return mapping[0] if snapshot == "current" else mapping[1]
+
+    def _extract_from_nav_data(self, snapshot: str, columns: Sequence[str]) -> float:
+        nav_key = "nav" if snapshot == "current" else "nav_t1"
+        nav_df = self.fund_data.get(nav_key)
+        if isinstance(nav_df, pd.DataFrame) and not nav_df.empty:
+            for column in columns:
+                if column in nav_df.columns:
+                    series = pd.to_numeric(nav_df[column], errors="coerce").dropna()
+                    if not series.empty:
+                        return float(series.iloc[0])
+        return 0.0
 
     def _calculate_treasury_gl(self) -> _ComponentGL:
         result = self._component_gain_loss("treasury")
         self.treasury_details = self._build_component_detail_frame(result)
         return result
 
-    # ------------------------------------------------------------------
     def _component_gain_loss(self, asset_class: str) -> _ComponentGL:
         current_value = self._fetch_component_value(asset_class, snapshot="current")
         prior_value = self._fetch_component_value(asset_class, snapshot="previous")
@@ -269,16 +434,17 @@ class NAVReconciliator:
                     "ticker": "TOTAL",
                     "quantity_t1": 0.0,
                     "quantity_t": 0.0,
-                    "price_t1": 0.0,
-                    "price_t": 0.0,
-                    "raw_gl": component.raw,
-                    "adjusted_gl": component.adjusted,
+                    "price_t1_raw": 0.0,
+                    "price_t_raw": 0.0,
+                    "price_t1_adj": 0.0,
+                    "price_t_adj": 0.0,
+                    "gl_raw": component.raw,
+                    "gl_adjusted": component.adjusted,
                 }
             ],
             columns=self.DETAIL_COLUMNS,
         )
 
-    # ------------------------------------------------------------------
     def _calculate_dividends(self) -> float:
         if isinstance(self.fund, Fund):
             return float(self.fund.get_dividends(str(self.analysis_date)) or 0.0)
@@ -302,7 +468,6 @@ class NAVReconciliator:
             )
         return self._extract_numeric_from_data("flows_adjustment")
 
-    # ------------------------------------------------------------------
     def _calculate_rolled_option_gl(self) -> float:
         current_value = self._fetch_component_value("options", snapshot="current")
         return current_value
@@ -344,7 +509,6 @@ class NAVReconciliator:
 
         return 0.0
 
-    # ------------------------------------------------------------------
     def _calculate_nav_comparison(
         self,
         equity_gl: _ComponentGL,
@@ -432,7 +596,50 @@ class NAVReconciliator:
 
         return results
 
-    # ------------------------------------------------------------------
+    def _calculate_expected_nav(
+        self,
+        equity_gl: GainLossResult,
+        options_gl: GainLossResult,
+        flex_gl: GainLossResult,
+        treasury_gl: GainLossResult,
+        dividends: float,
+        expenses: float,
+        distributions: float,
+        flows_adjustment: float,
+        assignment_gl: float = 0.0,
+        other_impact: float = 0.0,
+    ) -> Dict[str, float]:
+        prior_nav = self._extract_from_nav_data("previous", ["nav", "nav_price", "nav_value"]) or self._safe_float(
+            getattr(getattr(self.fund, "data", None), "previous", None), "nav"
+        )
+        current_nav = self._extract_from_nav_data("current", ["nav", "nav_price", "nav_value"]) or self._safe_float(
+            getattr(getattr(self.fund, "data", None), "current", None), "nav"
+        )
+
+        net_gain = (
+            equity_gl.adjusted_gl
+            + options_gl.adjusted_gl
+            + flex_gl.adjusted_gl
+            + treasury_gl.adjusted_gl
+            + assignment_gl
+            + other_impact
+        )
+
+        expected_nav = prior_nav + net_gain + dividends - expenses - distributions + flows_adjustment
+        difference = current_nav - expected_nav
+
+        return {
+            "prior_nav": prior_nav,
+            "current_nav": current_nav,
+            "net_gain": net_gain,
+            "dividends": dividends,
+            "expenses": expenses,
+            "distributions": distributions,
+            "flows_adjustment": flows_adjustment,
+            "expected_nav": expected_nav,
+            "difference": difference,
+        }
+
     def _build_summary(self, results: Mapping[str, object]) -> Dict[str, float]:
         summary = results.get("summary") if isinstance(results, Mapping) else {}
         if isinstance(summary, Mapping):
@@ -455,7 +662,6 @@ class NAVReconciliator:
                 pass
         self.logger.info("Completed NAV reconciliation for %s", self.fund_name)
 
-    # ------------------------------------------------------------------
     def _is_option_settlement_date(self, analysis_date) -> bool:
         if analysis_date is None:
             return False
@@ -508,7 +714,6 @@ class NAVReconciliator:
 
         return False
 
-    # ------------------------------------------------------------------
     def _fetch_component_value(self, component: str, *, snapshot: str) -> float:
         key = self._snapshot_key(component, snapshot)
         if key:
