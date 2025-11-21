@@ -359,26 +359,26 @@ if __name__ == "__main__":
     #  'FTCSH'
     # ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', 'P21026', 'P2726', "P30128", 'P31027', 'P3727', 'R21126', 'HE3B1', 'HE3B2', 'TR2B1', 'TR2B2'], #
 
-    use_dater_t = "2025-11-19"
-    use_dater_t1 = "2025-11-18"
-    use_dater_t2 = "2025-11-17"
+    use_dater_t = "2025-11-06"
+    use_dater_t1 = "2025-11-05"
+    use_dater_t2 = "2025-11-04"
 
     RUNTIME_OVERRIDES = {
         "analysis_type": "trading_compliance",
         "as_of_date": use_dater_t,
-        "funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', "DOGG"],
+        "funds": ['KNG', 'TDVI', 'RDVI', 'SDVD', 'FDND', 'FGSI', 'DOGG', ],
         "compliance_tests": [
-            "gics_compliance",
-            "prospectus_80pct_policy",
+            # "gics_compliance",
+            # "prospectus_80pct_policy",
             "diversification_40act_check",
             "diversification_IRS_check",
-            "diversification_IRC_check",
-            "max_15pct_illiquid_sai",
-            "real_estate_check",
-            "commodities_check",
-            "twelve_d1a_other_inv_cos",
-            "twelve_d2_insurance_cos",
-            "twelve_d3_sec_biz",
+            # "diversification_IRC_check",
+            # "max_15pct_illiquid_sai",
+            # "real_estate_check",
+            # "commodities_check",
+            # "twelve_d1a_other_inv_cos",
+            # "twelve_d2_insurance_cos",
+            # "twelve_d3_sec_biz",
         ],
         "ex_ante_date": use_dater_t,
         "ex_post_date": use_dater_t,

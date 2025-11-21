@@ -280,8 +280,8 @@ class FundManager:
             reported_nav=self._extract_nav_per_share(fund_data_dict.get('nav', pd.DataFrame())),
             reported_ta=self._extract_total_assets(fund_data_dict),  # NEW
             reported_tna=self._extract_total_net_assets(fund_data_dict),
-            reported_expenses=self._extract_expense_value(fund_data_dict.get('expenses', pd.DataFrame())),
-            reported_shares_outstanding=self._extract_shares_outstanding(fund_data_dict.get('nav', pd.DataFrame())),
+            reported_expenses=self._extract_expense_value(fund_data_dict, nav_key='nav'),
+            reported_shares_outstanding=self._extract_shares_outstanding(fund_data_dict, nav_key='nav'),
 
             # Add other values for T
             equity_trades=fund_data_dict.get('equity_trades', pd.DataFrame()),
@@ -312,8 +312,8 @@ class FundManager:
             ),
             reported_cash=self._extract_cash_value(fund_data_dict.get('cash_t1', pd.DataFrame())),
             reported_nav=self._extract_nav_per_share(fund_data_dict.get('nav_t1', pd.DataFrame())),
-            reported_ta=self._extract_total_assets(fund_data_dict, nav_key='nav_t1'),  # NEW
-            reported_expenses=self._extract_expense_value(fund_data_dict.get('expenses_t1', pd.DataFrame())),
+            reported_ta=self._extract_total_assets(fund_data_dict, nav_key='nav_t1'),
+            reported_expenses=self._extract_expense_value(fund_data_dict, nav_key='nav_t1'),
             reported_shares_outstanding=self._extract_shares_outstanding(fund_data_dict.get('nav_t1', pd.DataFrame())),
 
             # Add other values for T-1
@@ -362,17 +362,11 @@ class FundManager:
             return 0.0
 
         # Try different column names for total assets
-        for col in ['total_assets', 'gross_assets', 'ta', 'gross_value']:
+        for col in ['total_assets', 'gross_assets', 'gross_value']:
             if col in nav_df.columns:
                 series = pd.to_numeric(nav_df[col], errors='coerce').dropna()
                 if not series.empty:
                     return float(series.iloc[0])
-
-        # If no total_assets column, try to calculate from TNA + expenses
-        tna = self._extract_total_net_assets(fund_data_dict, nav_key)
-        expenses = self._extract_expense_value(fund_data_dict.get(nav_key.replace('nav', 'expenses'), pd.DataFrame()))
-        if tna > 0:
-            return tna + expenses  # Gross = Net + Expenses
 
         return 0.0
 
@@ -399,15 +393,20 @@ class FundManager:
                     return nav_source[col].iloc[0] if len(nav_source) > 0 else 0.0
         return 0.0
 
-    def _extract_expense_value(self, expense_data: pd.DataFrame) -> float:
+
+    def _extract_expense_value(self, fund_data_dict: dict, nav_key: str = 'nav') -> float:
         """Extract expense value"""
-        if expense_data.empty:
+        nav_df = fund_data_dict.get(nav_key, pd.DataFrame())
+        if nav_df.empty:
             return 0.0
 
-        expense_columns = ['expense_amount', 'expenses', 'amount', 'value']
-        for col in expense_columns:
-            if col in expense_data.columns:
-                return expense_data[col].sum()
+        # Try different column names for total assets
+        for col in ['expense_amount', 'expenses']:
+            if col in nav_df.columns:
+                series = pd.to_numeric(nav_df[col], errors='coerce').dropna()
+                if not series.empty:
+                    return float(series.iloc[0])
+
         return 0.0
 
     def _extract_flow_value(self, flows_data: pd.DataFrame) -> float:
@@ -421,14 +420,17 @@ class FundManager:
                 return flows_data[col].sum()
         return 0.0
 
-    def _extract_shares_outstanding(self, nav_df: pd.DataFrame) -> float:
+    def _extract_shares_outstanding(self, fund_data_dict: dict, nav_key: str = 'nav') -> float:
         """Extract shares outstanding from NAV DataFrame"""
+        nav_df = fund_data_dict.get(nav_key, pd.DataFrame())
         if nav_df.empty:
             return 0.0
 
-        for col in ['shares_outstanding', 'shares', 'units', 'total_shares']:
+        # Try different column names for total assets
+        for col in ['shares_outstanding', 'shares', 'total_shares']:
             if col in nav_df.columns:
                 series = pd.to_numeric(nav_df[col], errors='coerce').dropna()
                 if not series.empty:
                     return float(series.iloc[0])
+
         return 0.0
