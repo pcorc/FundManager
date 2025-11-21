@@ -297,15 +297,24 @@ class ComplianceChecker:
             expenses = self._get_expenses(fund)
             vest_eqy_holdings = self._consolidate_holdings_by_issuer(fund, vest_eqy_holdings)
 
-            holdings_df = pd.merge(
-                vest_eqy_holdings,
-                vest_opt_holdings,
-                left_on="eqyticker",
-                right_on="equity_underlying_ticker",
-                how="outer",
-                suffixes=("", "_option"),
-            )
-            holdings_df = self._fill_numeric_defaults(holdings_df)
+
+            # Get fund configuration for flex options
+            has_listed_option = fund_config.config.get('has_listed_option', False)
+            has_flex = fund_config.config.get('has_flex_option', False)
+            flex_option_type = fund_config.config.get('flex_option_type', '')
+
+            if has_listed_option:
+                holdings_df = pd.merge(
+                    vest_eqy_holdings,
+                    vest_opt_holdings,
+                    left_on="eqyticker",
+                    right_on="equity_underlying_ticker",
+                    how="outer",
+                    suffixes=("", "_option"),
+                )
+                holdings_df = self._fill_numeric_defaults(holdings_df)
+            else:
+                holdings_df = vest_eqy_holdings
 
             overlap_details_df = pd.DataFrame(
                 columns=["security_ticker", "security_weight", "overlap_market_value", "overlap_weight"]
@@ -1999,7 +2008,8 @@ class ComplianceChecker:
 
     def _get_overlap(self, fund: Fund) -> pd.DataFrame:
         """Get overlap data from fund."""
-        return self.get_overlap_data(fund)
+        return fund.overlap_holdings
+
     def calculate_summary_metrics(self, fund: Fund) -> ComplianceResult:
         """Calculate summary metrics using Fund object properties directly."""
 

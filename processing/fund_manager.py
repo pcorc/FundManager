@@ -335,9 +335,9 @@ class FundManager:
 
         return fund
 
-    def _extract_total_net_assets(self, nav_source):
+    def _extract_total_net_assets(self, nav_df):
         """Extract Total Net Assets from NAV data"""
-        if isinstance(nav_source, pd.DataFrame) and not nav_source.empty:
+        if isinstance(nav_df, pd.DataFrame) and not nav_df.empty:
 
             for col in ['total_net_assets', 'tna', 'net_assets', 'nav_total']:
                 if col in nav_df.columns:
@@ -346,9 +346,9 @@ class FundManager:
                         return float(series.iloc[0])
         return 0.0
 
-    def _extract_total_assets(self, nav_source):
+    def _extract_total_assets(self, nav_df):
         """Extract Total Assets (gross) from NAV data"""
-        if isinstance(nav_source, pd.DataFrame) and not nav_source.empty:
+        if isinstance(nav_df, pd.DataFrame) and not nav_df.empty:
 
             for col in ['total_assets', 'gross_assets', 'gross_value']:
                 if col in nav_df.columns:
@@ -382,9 +382,9 @@ class FundManager:
         return 0.0
 
 
-    def _extract_expense_value(self, nav_source):
+    def _extract_expense_value(self, nav_df):
         """Extract expense value"""
-        if isinstance(nav_source, pd.DataFrame) and not nav_source.empty:
+        if isinstance(nav_df, pd.DataFrame) and not nav_df.empty:
             for col in ['expense_amount', 'expenses']:
                 if col in nav_df.columns:
                     series = pd.to_numeric(nav_df[col], errors='coerce').dropna()
@@ -404,9 +404,9 @@ class FundManager:
                 return flows_data[col].sum()
         return 0.0
 
-    def _extract_shares_outstanding(self, nav_source):
+    def _extract_shares_outstanding(self, nav_df):
         """Extract shares outstanding from NAV DataFrame"""
-        if isinstance(nav_source, pd.DataFrame) and not nav_source.empty:
+        if isinstance(nav_df, pd.DataFrame) and not nav_df.empty:
 
             for col in ['shares_outstanding', 'shares', 'total_shares']:
                 if col in nav_df.columns:
