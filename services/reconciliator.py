@@ -28,7 +28,7 @@ class ReconciliationResult:
 
 
 class Reconciliator:
-    def __init__(self, fund_name, fund_data, analysis_type=None):
+    def __init__(self, fund_name, fund_data, analysis_type, fund: Fund):
         self.fund_name = fund_name
         self.fund_data = fund_data
         self.analysis_type = analysis_type
@@ -43,12 +43,13 @@ class Reconciliator:
         self.is_diversified = fund_name in DIVERSIFIED_FUNDS
         self.is_non_diversified = fund_name in NON_DIVERSIFIED_FUNDS
         self.uses_index_flex = fund_name in INDEX_FLEX_FUNDS
-        self.fund = fund_data.get('fund_object') if isinstance(fund_data, dict) else None
         self.holdings_price_breaks = fund_data.get("holdings_price_breaks", {}) if isinstance(fund_data, dict) else {}
         self.summary_rows = []  # Initialize summary_rows list
         self.has_sg_equity = self._check_sg_equity()  # Add property check
         # Container populated by the detail builders that feed PDF/Excel outputs
         self._detailed_calculations: Dict[str, Dict[str, pd.DataFrame]] = {}
+        self.fund: Optional[Fund] = fund
+
 
     def run_all_reconciliations(self):
         """Run all reconciliations using Fund object data"""
@@ -69,12 +70,12 @@ class Reconciliator:
 
     def reconcile_custodian_equity(self):
         # 1) Load today & prior data
-        df_oms = self.fund_data.get('vest_equity', pd.DataFrame())
-        df_cust = self.fund_data.get('custodian_equity', pd.DataFrame())
-        df_oms1 = self.fund_data.get('vest_equity_t1', pd.DataFrame())
-        df_cust1 = self.fund_data.get('custodian_equity_t1', pd.DataFrame())
-        df_trades = self.fund_data.get('trades_data', pd.DataFrame())
-        df_crrd = self.fund_data.get('cr_rd_data', pd.DataFrame())
+        df_oms = self.fund.equity_holdings
+        df_cust = self.fund.custodian_equity_holdings
+        df_oms1 = self.fund.previous_equity_holdings
+        df_cust1 = self.fund.previous_custodian_equity_holdings
+        df_trades = self.fund.equity_trades
+        df_crrd = self.fund.cr_rd_data
 
         # must have eqyticker
         if 'eqyticker' not in df_oms.columns or 'eqyticker' not in df_cust.columns:
@@ -213,11 +214,11 @@ class Reconciliator:
             merged_data=pd.DataFrame()
         )
 
-        df_oms = self.fund_data.get('vest_option', pd.DataFrame())
-        df_cust = self.fund_data.get('custodian_option', pd.DataFrame())
-        df_oms1 = self.fund_data.get('vest_option_t1', pd.DataFrame())
-        df_cust1 = self.fund_data.get('custodian_option_t1', pd.DataFrame())
-        df_trades = self.fund_data.get('trades_data', pd.DataFrame())
+        df_oms = self.fund.options_holdings
+        df_cust = self.fund.custodian_option_holdings
+        df_oms1 = self.fund.previous_options_holdings
+        df_cust1 = self.fund.previous_custodian_option_holdings
+        df_trades = self.fund_data.get('trades_data', pd.DataFrame())  # This might still be in fund_data
 
         # Step 2: Check if all dataframes are empty
         if df_oms.empty and df_cust.empty:
@@ -405,8 +406,8 @@ class Reconciliator:
     def reconcile_custodian_treasury(self):
         """Reconcile custodian treasury holdings for current date"""
 
-        df_oms = self.fund_data.get('vest_treasury', pd.DataFrame()).copy()
-        df_cust = self.fund_data.get('custodian_treasury_holdings', pd.DataFrame()).copy()
+        df_oms = self.fund.treasury_holdings
+        df_cust = self.fund.custodian_treasury_holdings
 
         if df_oms.empty and df_cust.empty:
             self.results['custodian_treasury'] = ReconciliationResult(
@@ -465,13 +466,13 @@ class Reconciliator:
             indicator=True
         )
 
-        quantity_series = df['quantity'] if 'quantity' in df else pd.Series(0.0, index=df.index)
+        quantity_series = df['nav_shares'] if 'nav_shares' in df else pd.Series(0.0, index=df.index)
         shares_series = df['shares_cust'] if 'shares_cust' in df else pd.Series(0.0, index=df.index)
-        df['quantity'] = self._coerce_numeric_series(quantity_series)
+        df['nav_shares'] = self._coerce_numeric_series(quantity_series)
         df['shares_cust'] = self._coerce_numeric_series(shares_series)
         df['in_vest'] = df['_merge'] != 'right_only'
         df['in_cust'] = df['_merge'] != 'left_only'
-        df['quantity_diff'] = df['quantity'] - df['shares_cust']
+        df['quantity_diff'] = df['nav_shares'] - df['shares_cust']
 
         mask_missing = df['in_vest'] != df['in_cust']
         mask_qty = df['in_vest'] & df['in_cust'] & df['quantity_diff'].abs().gt(0)
@@ -489,7 +490,7 @@ class Reconciliator:
             )
             df_issues['breakdown'] = np.where(
                 df_issues['discrepancy_type'] == 'Quantity Mismatch',
-                "Vest=" + df_issues['quantity'].round(2).astype(str)
+                "Vest=" + df_issues['nav_shares'].round(2).astype(str)
                 + " | Cust=" + df_issues['shares_cust'].round(2).astype(str),
                 "Present in Vest: " + df_issues['in_vest'].map({True: 'Yes', False: 'No'})
                 + " | Present in Cust: " + df_issues['in_cust'].map({True: 'Yes', False: 'No'})
@@ -497,7 +498,7 @@ class Reconciliator:
         else:
             df_issues = pd.DataFrame(columns=[
                 'cusip',
-                'quantity',
+                'nav_shares',
                 'shares_cust',
                 'in_vest',
                 'in_cust',
@@ -592,15 +593,15 @@ class Reconciliator:
         }
 
         # Get the dataframes
-        nav_today = self.fund_data.get("nav", pd.DataFrame())
-        nav_prior = self.fund_data.get("nav_t1", pd.DataFrame())
-        eq_today = self.fund_data.get("vest_equity", pd.DataFrame())
-        eq_prior = self.fund_data.get("vest_equity_t1", pd.DataFrame())
-        opt_today = self.fund_data.get("vest_option", pd.DataFrame())
-        opt_prior = self.fund_data.get("vest_option_t1", pd.DataFrame())
+        nav_today = self.fund.nav_dataframe
+        nav_prior = self.fund.previous_nav_dataframe
+        eq_today = self.fund.equity_holdings
+        eq_prior = self.fund.previous_equity_holdings
+        opt_today = self.fund.options_holdings
+        opt_prior = self.fund.previous_options_holdings
 
         # Get expense ratio
-        expense_rat = self.fund_data.get("expense_ratio", 0.0)
+        expense_rat = self.fund.data.expense_ratio if self.fund else 0.0
 
         # Process equity details
         if not eq_today.empty and not eq_prior.empty:
@@ -623,6 +624,12 @@ class Reconciliator:
                     df_eq.copy(), kind="equity", key_col="eqyticker"
                 )
 
+                price_breaks = self.holdings_price_breaks.get('equity', pd.DataFrame()) if hasattr(self, 'holdings_price_breaks') else pd.DataFrame()
+                cust_price_map = {
+                    ticker: self._lookup_cust_price(price_breaks, ticker) for ticker in df_eq['eqyticker']
+                }
+                price_t1_cust = df_eq['eqyticker'].map(cust_price_map).fillna(df_eq['price_t1'])
+
                 # Create detailed equity dataframe
                 equity_detail = pd.DataFrame({
                     'ticker': df_eq['eqyticker'],
@@ -630,12 +637,15 @@ class Reconciliator:
                     'quantity_t': df_eq['quantity_t'],
                     'price_t1_raw': df_eq['price_t1'],
                     'price_t_raw': df_eq['price_t'],
-                    'price_t1_adj': df_eq_adj.get('price_t1', df_eq['price_t1']),
+                    'price_t1_cust': price_t1_cust,
+                    'price_t1_adj': price_t1_cust,
                     'price_t_adj': df_eq_adj.get('price_t', df_eq['price_t']),
                     'quantity_used': df_eq[qty_col],
                     'gl': df_eq["gl"],
                     'gl_adjusted': df_eq_adj.get("gl_adj", df_eq["gl"])
                 })
+
+                equity_detail['gl_adjusted'] = (equity_detail['price_t_adj'] - equity_detail['price_t1_cust']) * equity_detail['quantity_used']
 
                 detailed_data['equity_details'] = equity_detail
 
@@ -673,18 +683,28 @@ class Reconciliator:
                         regular_opt.copy(), kind="option", key_col="optticker"
                     )
 
+                    price_breaks = self.holdings_price_breaks.get('option', pd.DataFrame()) if hasattr(self, 'holdings_price_breaks') else pd.DataFrame()
+                    cust_price_map = {
+                        ticker: self._lookup_cust_price(price_breaks, ticker) for ticker in regular_opt['optticker']
+                    }
+                    price_t1_cust = regular_opt['optticker'].map(cust_price_map).fillna(regular_opt['price_t1'])
+
                     option_detail = pd.DataFrame({
                         'ticker': regular_opt['optticker'],
                         'quantity_t1': regular_opt['quantity_t1'],
                         'quantity_t': regular_opt['quantity_t'],
                         'price_t1_raw': regular_opt['price_t1'],
                         'price_t_raw': regular_opt['price_t'],
-                        'price_t1_adj': regular_opt_adj.get('price_t1', regular_opt['price_t1']),
+                        'price_t1_cust': price_t1_cust,
+                        'price_t1_adj': price_t1_cust,
                         'price_t_adj': regular_opt_adj.get('price_t', regular_opt['price_t']),
                         'quantity_used': regular_opt[qty_col],
                         'gl': regular_opt["gl"],
                         'gl_adjusted': regular_opt_adj.get("gl_adj", regular_opt["gl"])
                     })
+                    option_detail['gl_adjusted'] = (
+                        option_detail['price_t_adj'] - option_detail['price_t1_cust']
+                    ) * option_detail['quantity_used'] * 100
                     detailed_data['option_details'] = option_detail
 
             # Flex options
@@ -700,18 +720,28 @@ class Reconciliator:
                         flex_opt.copy(), kind="option", key_col="optticker"
                     )
 
+                    price_breaks = self.holdings_price_breaks.get('option', pd.DataFrame()) if hasattr(self, 'holdings_price_breaks') else pd.DataFrame()
+                    cust_price_map = {
+                        ticker: self._lookup_cust_price(price_breaks, ticker) for ticker in flex_opt['optticker']
+                    }
+                    price_t1_cust = flex_opt['optticker'].map(cust_price_map).fillna(flex_opt['price_t1'])
+
                     flex_detail = pd.DataFrame({
                         'ticker': flex_opt['optticker'],
                         'quantity_t1': flex_opt['quantity_t1'],
                         'quantity_t': flex_opt['quantity_t'],
                         'price_t1_raw': flex_opt['price_t1'],
                         'price_t_raw': flex_opt['price_t'],
-                        'price_t1_adj': flex_opt_adj.get('price_t1', flex_opt['price_t1']),
+                        'price_t1_cust': price_t1_cust,
+                        'price_t1_adj': price_t1_cust,
                         'price_t_adj': flex_opt_adj.get('price_t', flex_opt['price_t']),
                         'quantity_used': flex_opt[qty_col],
                         'gl': flex_opt["gl"],
                         'gl_adjusted': flex_opt_adj.get("gl_adj", flex_opt["gl"])
                     })
+                    flex_detail['gl_adjusted'] = (
+                        flex_detail['price_t_adj'] - flex_detail['price_t1_cust']
+                    ) * flex_detail['quantity_used'] * 100
                     detailed_data['flex_details'] = flex_detail
 
             # Track price adjustments
@@ -773,8 +803,8 @@ class Reconciliator:
             return
 
         # Get data from fund_data dictionary (not self.fund_data)
-        df_oms = self.fund_data.get('vest_equity', pd.DataFrame())
-        df_index = self.fund_data.get('index_holdings', pd.DataFrame())
+        df_oms = self.fund.equity_holdings
+        df_index = self.fund.index_holdings
 
         # Check if data is available
         if df_oms.empty or df_index.empty:
@@ -827,7 +857,7 @@ class Reconciliator:
         """Calculate price discrepancies between vest and custodian"""
         if {'price_vest', 'price_cust'}.issubset(df.columns):
             df_price = df.copy()
-            df_price['price_diff'] = (df_price['price_vest'] - df_price['price_cust']).abs()
+            df_price['price_diff'] = (float(df_price['price_vest']) - df_price['price_cust']).abs()
             price_discrepancies = df_price.loc[
                 df_price['price_diff'] > 0.005,
                 [ticker_col, 'price_vest', 'price_cust', 'price_diff']
@@ -910,6 +940,27 @@ class Reconciliator:
             return price_discrepancies.reset_index(drop=True)
         return pd.DataFrame()
 
+    def _lookup_cust_price(self, price_breaks: pd.DataFrame, ticker: str) -> float | None:
+        """Extract custodian price for a ticker when available."""
+
+        if price_breaks.empty:
+            return None
+
+        if ticker in price_breaks.index:
+            entry = price_breaks.loc[ticker]
+            if isinstance(entry, pd.Series):
+                return entry.get('price_cust')
+            if isinstance(entry, pd.DataFrame) and not entry.empty:
+                return entry.iloc[0].get('price_cust')
+
+        for col in ('eqyticker', 'optticker', 'cusip'):
+            if col in price_breaks.columns:
+                match = price_breaks[price_breaks[col] == ticker]
+                if not match.empty:
+                    return match.iloc[0].get('price_cust')
+
+        return None
+
     def add_summary_row(self, test_name: str, ticker: str, description: str, value):
         """Capture summary rows without emitting them to the logger."""
 
@@ -935,16 +986,16 @@ class Reconciliator:
 
         equity_details = {
             # Current day holdings
-            'vest_current': self.fund_data.get('vest_equity', pd.DataFrame()).copy(),
-            'custodian_current': self.fund_data.get('custodian_equity', pd.DataFrame()).copy(),
+            'vest_current': self.fund.equity_holdings.copy(),
+            'custodian_current': self.fund.custodian_equity_holdings.copy(),
 
             # T-1 holdings
-            'vest_previous': self.fund_data.get('vest_equity_t1', pd.DataFrame()).copy(),
-            'custodian_previous': self.fund_data.get('custodian_equity_t1', pd.DataFrame()).copy(),
+            'vest_previous': self.fund.previous_equity_holdings.copy(),
+            'custodian_previous': self.fund.previous_custodian_equity_holdings.copy(),
 
             # Other inputs
-            'trades': self.fund_data.get('equity_trades', pd.DataFrame()).copy(),
-            'corporate_actions': self.fund_data.get('cr_rd_data', pd.DataFrame()).copy(),
+            'trades': self.fund.equity_trades.copy(),
+            'corporate_actions': self.fund.cr_rd_data.copy(),
         }
 
         reconciliation_outputs = {
@@ -957,7 +1008,6 @@ class Reconciliator:
                 'final': _safe_result_df('custodian_equity_t1', 'final_recon'),
             },
             'index_equity': {
-                # index_equity returns dict, not ReconciliationResult
                 'final': self.results.get('index_equity', {}).get('significant_diffs', pd.DataFrame()).copy()
                 if isinstance(self.results.get('index_equity'), dict) else pd.DataFrame(),
             },
@@ -976,8 +1026,8 @@ class Reconciliator:
 
     def reconcile_sg_option(self):
         """Reconcile SocGen options (for ex-ante/ex-post only)"""
-        df_oms = self.fund_data.get('vest_option', pd.DataFrame())
-        df_sg = self.fund_data.get('sg_option', pd.DataFrame())
+        df_oms = self.fund.equity_holdings
+        df_sg = self.fund_data.get('sg_equity', pd.DataFrame())
 
         if df_oms.empty or df_sg.empty:
             self.results['sg_option'] = ReconciliationResult(
