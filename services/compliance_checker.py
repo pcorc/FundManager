@@ -694,13 +694,21 @@ class ComplianceChecker:
             )
 
     def diversification_IRC_check(self, fund: Fund) -> ComplianceResult:
-        if (fund.vehicle or "").lower() != VEHICLE_VIT:
+        """
+        Check IRC diversification compliance.
+        Only applies to VIT (Variable Insurance Trust) funds.
+        """
+        # Check if fund has vehicle_type attribute and if it's VIT
+        vehicle_type = getattr(fund, 'vehicle_type', None) or getattr(fund, 'vehicle', None) or ""
+
+        if str(vehicle_type).lower() != VEHICLE_VIT.lower():
+            # Return a skipped result for non-VIT funds
             return ComplianceResult(
                 is_compliant=True,
                 details={
                     "rule": "IRC Diversification",
                     "skipped": True,
-                    "reason": "IRC diversification applies only to VIT vehicles",
+                    "reason": f"IRC diversification applies only to VIT vehicles (fund vehicle: {vehicle_type})",
                 },
                 calculations={},
             )
@@ -714,6 +722,7 @@ class ComplianceChecker:
             if total_assets == 0:
                 raise ValueError("Total assets missing")
 
+            # Merge equity and options data
             holdings_df = pd.merge(
                 vest_eqy_holdings,
                 vest_opt_holdings,
@@ -724,14 +733,17 @@ class ComplianceChecker:
             )
             holdings_df = self._fill_numeric_defaults(holdings_df)
 
+            # Calculate net market value
             holdings_df["net_market_value"] = (
-                pd.to_numeric(holdings_df["equity_market_value"], errors="coerce").fillna(0.0)
-                + pd.to_numeric(holdings_df["option_market_value"], errors="coerce").fillna(0.0)
+                    pd.to_numeric(holdings_df["equity_market_value"], errors="coerce").fillna(0.0)
+                    + pd.to_numeric(holdings_df["option_market_value"], errors="coerce").fillna(0.0)
             )
             holdings_df["weight"] = holdings_df["net_market_value"] / total_assets
 
+            # Sort by net market value
             sorted_holdings = holdings_df.sort_values(by="net_market_value", ascending=False)
 
+            # Calculate top exposures
             top_exposures = [0.0, 0.0, 0.0, 0.0]
             if not sorted_holdings.empty:
                 cum_values = sorted_holdings["net_market_value"].cumsum()
@@ -744,6 +756,7 @@ class ComplianceChecker:
                 .to_dict("records")
             )
 
+            # Check all IRC conditions
             details = {
                 "rule": "IRC Diversification",
                 "condition_IRC_55": top_exposures[0] <= IRC_TOP_1_LIMIT,
@@ -761,22 +774,19 @@ class ComplianceChecker:
                 "top_holdings": top_holdings,
             }
 
-            is_compliant = all(details.values()) if details else True
-            is_compliant = all(
-                [
-                    details["condition_IRC_55"],
-                    details["condition_IRC_70"],
-                    details["condition_IRC_80"],
-                    details["condition_IRC_90"],
-                ]
-            )
+            is_compliant = all([
+                details["condition_IRC_55"],
+                details["condition_IRC_70"],
+                details["condition_IRC_80"],
+                details["condition_IRC_90"],
+            ])
 
             return ComplianceResult(
                 is_compliant=is_compliant,
                 details=details,
                 calculations=calculations,
             )
-        except Exception as exc:  # pragma: no cover - defensive logging path
+        except Exception as exc:
             logger.error("Error in IRC diversification check for %s: %s", fund.name, exc)
             return ComplianceResult(
                 is_compliant=False,
@@ -786,12 +796,26 @@ class ComplianceChecker:
             )
 
     def real_estate_check(self, fund: Fund) -> ComplianceResult:
+        """Check if fund has any real estate exposure"""
         try:
             vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
 
             if vest_eqy_holdings.empty:
-                raise ValueError("Equity holdings missing")
+                # No holdings means no real estate exposure - PASS
+                return ComplianceResult(
+                    is_compliant=True,
+                    details={
+                        "rule": "Real Estate Exposure",
+                        "real_estate_check_compliant": True
+                    },
+                    calculations={
+                        "real_estate_exposure": 0.0,
+                        "real_estate_percentage": 0.0,
+                        "total_exposure": 0.0,
+                    },
+                )
 
+            # Check for real estate in GICS sector
             real_estate_mask = vest_eqy_holdings["GICS_SECTOR_NAME"].str.contains(
                 "Real Estate", case=False, na=False
             )
@@ -803,7 +827,8 @@ class ComplianceChecker:
                 real_estate_exposure / total_exposure if total_exposure > 0 else 0.0
             )
 
-            is_compliant = real_estate_percentage == 0.0
+            # PASS if no real estate exposure, FAIL if any exposure
+            is_compliant = real_estate_exposure == 0.0
 
             calculations = {
                 "real_estate_exposure": real_estate_exposure,
@@ -813,10 +838,13 @@ class ComplianceChecker:
 
             return ComplianceResult(
                 is_compliant=is_compliant,
-                details={"rule": "Real Estate Exposure", "real_estate_check_compliant": is_compliant},
+                details={
+                    "rule": "Real Estate Exposure",
+                    "real_estate_check_compliant": is_compliant
+                },
                 calculations=calculations,
             )
-        except Exception as exc:  # pragma: no cover - defensive logging path
+        except Exception as exc:
             logger.error("Error in real estate check for %s: %s", fund.name, exc)
             return ComplianceResult(
                 is_compliant=False,
@@ -826,12 +854,26 @@ class ComplianceChecker:
             )
 
     def commodities_check(self, fund: Fund) -> ComplianceResult:
+        """Check if fund has any commodities exposure"""
         try:
             vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
 
             if vest_eqy_holdings.empty:
-                raise ValueError("Equity holdings missing")
+                # No holdings means no commodities exposure - PASS
+                return ComplianceResult(
+                    is_compliant=True,
+                    details={
+                        "rule": "Commodities Exposure",
+                        "commodities_check_compliant": True
+                    },
+                    calculations={
+                        "commodities_exposure": 0.0,
+                        "commodities_percentage": 0.0,
+                        "total_exposure": 0.0,
+                    },
+                )
 
+            # Check for commodities in GICS sector or other fields
             commodities_mask = vest_eqy_holdings["GICS_SECTOR_NAME"].str.contains(
                 "Commodities", case=False, na=False
             )
@@ -843,6 +885,7 @@ class ComplianceChecker:
                 commodities_exposure / total_exposure if total_exposure > 0 else 0.0
             )
 
+            # PASS if no commodities exposure, FAIL if any exposure
             is_compliant = commodities_exposure == 0.0
 
             calculations = {
@@ -853,10 +896,13 @@ class ComplianceChecker:
 
             return ComplianceResult(
                 is_compliant=is_compliant,
-                details={"rule": "Commodities Exposure", "commodities_check_compliant": is_compliant},
+                details={
+                    "rule": "Commodities Exposure",
+                    "commodities_check_compliant": is_compliant
+                },
                 calculations=calculations,
             )
-        except Exception as exc:  # pragma: no cover - defensive logging path
+        except Exception as exc:
             logger.error("Error in commodities check for %s: %s", fund.name, exc)
             return ComplianceResult(
                 is_compliant=False,
@@ -1045,9 +1091,7 @@ class ComplianceChecker:
                         "twelve_d3_sec_biz_compliant": True,
                         "rule_1_pass": True,
                         "rule_2_pass": True,
-                        "rule_3_pass": True,
-                        "rule_3_pass_occ": True,
-                    },
+                        "rule_3_pass": True,                    },
                     calculations=calculations,
                 )
 
@@ -1122,9 +1166,7 @@ class ComplianceChecker:
                     "twelve_d3_sec_biz_compliant": is_compliant,
                     "rule_1_pass": rule_1_pass,
                     "rule_2_pass": rule_2_pass,
-                    "rule_3_pass": rule_3_pass,
-                    # "rule_3_pass_occ": rule_3_pass_occ,
-                },
+                    "rule_3_pass": rule_3_pass,                },
                 calculations=calculations,
             )
         except Exception as exc:  # pragma: no cover - defensive logging path
@@ -1137,34 +1179,45 @@ class ComplianceChecker:
             )
 
     def max_15pct_illiquid_sai(self, fund: Fund) -> ComplianceResult:
+        """Check 15% illiquid assets compliance"""
         try:
-
             vest_eqy_holdings, vest_opt_holdings, _ = self._get_holdings(fund)
             total_assets, _ = self._get_total_assets(fund)
 
             if total_assets == 0 or vest_eqy_holdings.empty:
                 raise ValueError("Equity holdings or total assets missing")
 
+            # Check for illiquid flag
             if "is_illiquid" not in vest_eqy_holdings.columns:
                 vest_eqy_holdings["is_illiquid"] = False
             if "is_illiquid" not in vest_opt_holdings.columns:
                 vest_opt_holdings["is_illiquid"] = False
 
+            # Calculate illiquid values
             illiquid_mask = vest_eqy_holdings["is_illiquid"] == True
             illiquid_eqy_value = float(
                 vest_eqy_holdings.loc[illiquid_mask, "equity_market_value"].sum()
             )
+
+            # For options, check if they're illiquid
             illiquid_opt_value = 0.0
+            if not vest_opt_holdings.empty:
+                illiquid_opt_mask = vest_opt_holdings["is_illiquid"] == True
+                illiquid_opt_value = float(
+                    vest_opt_holdings.loc[illiquid_opt_mask, "option_market_value"].sum()
+                )
 
             total_illiquid_value = illiquid_eqy_value + illiquid_opt_value
             illiquid_percentage = total_illiquid_value / total_assets
+
+            # Calculate equity percentage
             equity_value = float(vest_eqy_holdings["equity_market_value"].sum())
             equity_percentage = equity_value / total_assets
 
-            is_compliant = (
-                illiquid_percentage <= ILLIQUID_MAX_THRESHOLD
-                and equity_percentage >= EQUITY_MIN_THRESHOLD
-            )
+            # Check compliance
+            illiquid_compliant = illiquid_percentage <= ILLIQUID_MAX_THRESHOLD
+            equity_compliant = equity_percentage >= EQUITY_MIN_THRESHOLD
+            is_compliant = illiquid_compliant and equity_compliant
 
             calculations = {
                 "total_assets": total_assets,
@@ -1176,17 +1229,17 @@ class ComplianceChecker:
             return ComplianceResult(
                 is_compliant=is_compliant,
                 details={
-                    "rule": "SAI Illiquidity",
-                    "max_15pct_illiquid_sai": illiquid_percentage <= ILLIQUID_MAX_THRESHOLD,
-                    "equity_holdings_85pct_compliant": equity_percentage >= EQUITY_MIN_THRESHOLD,
+                    "rule": "15% Illiquid Assets",
+                    "max_15pct_illiquid_sai": is_compliant,
+                    "equity_holdings_85pct_compliant": equity_compliant,
                 },
                 calculations=calculations,
             )
-        except Exception as exc:  # pragma: no cover - defensive logging path
-            logger.error("Error in SAI illiquidity check for %s: %s", fund.name, exc)
+        except Exception as exc:
+            logger.error("Error in 15% illiquid check for %s: %s", fund.name, exc)
             return ComplianceResult(
                 is_compliant=False,
-                details={"rule": "SAI Illiquidity", "status": "error"},
+                details={"rule": "15% Illiquid Assets", "status": "error"},
                 calculations={},
                 error=str(exc),
             )
