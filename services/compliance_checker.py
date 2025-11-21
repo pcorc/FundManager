@@ -73,9 +73,7 @@ class ComplianceChecker:
         analysis = (analysis_type or "eod").strip().lower()
         self.analysis_type = analysis if analysis in {"eod", "ex_ante", "ex_post"} else "eod"
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+
     def run_compliance_tests(self, test_functions: Optional[list[str]] = None) -> Dict[str, Dict[str, ComplianceResult]]:
         """Execute the requested compliance checks for every fund."""
 
@@ -141,9 +139,7 @@ class ComplianceChecker:
 
         return results
 
-    # ------------------------------------------------------------------
-    # Individual compliance checks
-    # ------------------------------------------------------------------
+
     def calculate_summary_metrics(self, fund: Fund) -> ComplianceResult:
 
         calculations = {
@@ -1196,8 +1192,46 @@ class ComplianceChecker:
             )
 
     def gics_compliance(self, fund: Fund) -> ComplianceResult:
+
         try:
-            equity_df = getattr(fund.data.current.vest, "equity", pd.DataFrame())
+            # Proper null checking and access
+            if not fund.data or not fund.data.current:
+                return ComplianceResult(
+                    is_compliant=False,
+                    details={
+                        "rule": "GICS Concentration",
+                        "status": "no_data",
+                        "fund": fund.name,
+                    },
+                    calculations={},
+                    error="Fund data is not available"
+                )
+
+            current = fund.data.current
+
+            # Access equity holdings properly
+            equity_df = pd.DataFrame()
+            if current.vest and current.vest.equity is not None:
+                equity_df = current.vest.equity.copy()
+
+            if equity_df.empty:
+                return ComplianceResult(
+                    is_compliant=False,
+                    details={
+                        "rule": "GICS Concentration",
+                        "status": "no_equity_data",
+                        "fund": fund.name,
+                    },
+                    calculations={},
+                    error="Equity holdings are unavailable for analysis"
+                )
+
+            # Rest of the implementation...
+            # Access index data properly
+            index_df = pd.DataFrame()
+            if hasattr(current, 'index') and current.index is not None:
+                index_df = current.index.copy()
+
             if not isinstance(equity_df, pd.DataFrame) or equity_df.empty:
                 return ComplianceResult(
                     is_compliant=False,
@@ -1661,18 +1695,39 @@ class ComplianceChecker:
 
         return exceeding_fund_gics, exceeding_index_gics, calculations
 
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
     def _get_holdings(self, fund: Fund) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """Return copies of the fund's current holdings snapshots."""
+        """Return copies of the fund's current holdings snapshots.
+        Note: This combines regular and flex options into a single DataFrame.
+        """
 
-        equity = getattr(fund.data.current.vest, "equity", pd.DataFrame())
-        options = getattr(fund.data.current.vest, "options", pd.DataFrame())
-        treasury = getattr(fund.data.current.vest, "treasury", pd.DataFrame())
+        # Initialize defaults
+        equity = pd.DataFrame()
+        combined_options = pd.DataFrame()
+        treasury = pd.DataFrame()
 
-        return equity.copy(), options.copy(), treasury.copy()
+        if not fund.data or not fund.data.current:
+            return equity, combined_options, treasury
+
+        current_snapshot = fund.data.current
+
+        # Access vest holdings properly
+        if current_snapshot.vest:
+            equity = current_snapshot.vest.equity.copy() if isinstance(current_snapshot.vest.equity, pd.DataFrame) else pd.DataFrame()
+
+            # Combine regular and flex options
+            options = current_snapshot.vest.options.copy() if isinstance(current_snapshot.vest.options, pd.DataFrame) else pd.DataFrame()
+            flex_options = current_snapshot.vest.flex_options.copy() if isinstance(current_snapshot.vest.flex_options, pd.DataFrame) else pd.DataFrame()
+
+            if not options.empty and not flex_options.empty:
+                combined_options = pd.concat([options, flex_options], ignore_index=True)
+            elif not options.empty:
+                combined_options = options
+            elif not flex_options.empty:
+                combined_options = flex_options
+
+            treasury = current_snapshot.vest.treasury.copy() if isinstance(current_snapshot.vest.treasury, pd.DataFrame) else pd.DataFrame()
+
+        return equity, combined_options, treasury
 
     def _consolidate_holdings_by_issuer(
         self, fund: Fund, holdings_df: pd.DataFrame
@@ -1879,41 +1934,86 @@ class ComplianceChecker:
         return result
 
     def _get_total_assets(self, fund: Fund) -> Tuple[float, float]:
-        snapshot = getattr(fund, "data", None)
-        if snapshot is None:
+        """Get total assets and total net assets from fund."""
+
+        if not fund.data or not fund.data.current:
             return 0.0, 0.0
 
-        current = getattr(snapshot, "current", None)
-        if current is None:
-            return 0.0, 0.0
+        current = fund.data.current
+        total_assets = current.total_assets if current.total_assets is not None else 0.0
+        total_net_assets = current.total_net_assets if current.total_net_assets is not None else 0.0
 
-        total_assets = getattr(current, "total_assets", 0.0) or 0.0
-        total_net_assets = getattr(current, "total_net_assets", 0.0) or 0.0
         return float(total_assets), float(total_net_assets)
 
     def _get_cash_value(self, fund: Fund) -> float:
-        snapshot = getattr(fund.data, "current", None)
-        if snapshot is None:
+        """Get cash value from fund."""
+
+        if not fund.data or not fund.data.current:
             return 0.0
-        return float(getattr(snapshot, "cash", 0.0) or 0.0)
+
+        return float(fund.data.current.cash) if fund.data.current.cash is not None else 0.0
 
     def _get_expenses(self, fund: Fund) -> float:
-        try:
-            current = getattr(fund.data, "current", None)
-            if current is not None and hasattr(current, "expenses"):
-                return float(getattr(current, "expenses", 0.0) or 0.0)
-            return float(getattr(fund.data, "expenses", 0.0) or 0.0)
-        except Exception:
+        """Get expenses from fund."""
+
+        if not fund.data or not fund.data.current:
             return 0.0
 
-    def _get_overlap(self, fund: Fund) -> pd.DataFrame:
-        overlap = getattr(fund.data.current, "overlap", pd.DataFrame())
+        current = fund.data.current
 
-        if not isinstance(overlap, pd.DataFrame) or overlap.empty:
+        # Check if expenses exists on current snapshot
+        if hasattr(current, 'expenses') and current.expenses is not None:
+            return float(current.expenses)
+
+        # Fallback to fund.data level if needed
+        if hasattr(fund.data, 'expenses') and fund.data.expenses is not None:
+            return float(fund.data.expenses)
+
+        return 0.0
+
+    def _get_overlap(self, fund: Fund) -> pd.DataFrame:
+        """Get overlap data from fund."""
+
+        if not fund.data or not fund.data.current:
             return pd.DataFrame(columns=["security_ticker", "security_weight"])
 
-        overlap["security_weight"] = pd.to_numeric(
-            overlap.get("security_weight", pd.Series(dtype=float)), errors="coerce"
-        ).fillna(0.0)
-        return overlap[["security_ticker", "security_weight"]]
+        current = fund.data.current
 
+        # Properly check for overlap attribute
+        if isinstance(current.overlap, pd.DataFrame) and not current.overlap.empty:
+            overlap = current.overlap.copy()
+            overlap["security_weight"] = pd.to_numeric(
+                overlap.get("security_weight", pd.Series(dtype=float)), errors="coerce"
+            ).fillna(0.0)
+            return overlap[["security_ticker", "security_weight"]]
+
+        return pd.DataFrame(columns=["security_ticker", "security_weight"])
+
+    def calculate_summary_metrics(self, fund: Fund) -> ComplianceResult:
+        """Calculate summary metrics using proper domain model access."""
+
+        if not fund.data or not fund.data.current:
+            return ComplianceResult(
+                is_compliant=False,
+                details={"rule": "summary_metrics", "status": "error"},
+                calculations={},
+                error="Fund data not available"
+            )
+
+        current = fund.data.current
+
+        calculations = {
+            "cash_value": current.cash if current.cash is not None else 0.0,
+            "equity_market_value": current.total_equity_value if current.total_equity_value is not None else 0.0,
+            "option_delta_adjusted_notional": current.total_option_delta_adjusted_notional if current.total_option_delta_adjusted_notional is not None else 0.0,
+            "option_market_value": current.total_option_value if current.total_option_value is not None else 0.0,
+            "treasury": current.total_treasury_value if current.total_treasury_value is not None else 0.0,
+            "total_assets": current.total_assets if current.total_assets is not None else 0.0,
+            "total_net_assets": current.total_net_assets if current.total_net_assets is not None else 0.0,
+        }
+
+        return ComplianceResult(
+            is_compliant=True,
+            details={"rule": "summary_metrics", "status": "calculated"},
+            calculations=calculations,
+        )

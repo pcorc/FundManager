@@ -219,7 +219,7 @@ class FundManager:
 
         # Get fund configuration for flex options
         has_flex = fund_config.config.get('has_flex_option', False)
-        flex_option_type = fund_config.config.get('flex_option_type', '').lower()
+        flex_option_type = fund_config.config.get('flex_option_type', '')
 
         # Determine flex pattern based on flex_option_type
         if has_flex:
@@ -323,10 +323,6 @@ class FundManager:
             fund_name=fund_name,
         )
 
-        fund_data = FundData(
-
-        )
-
         # Create Fund instance
         fund = Fund(
             name=fund_name,
@@ -385,7 +381,7 @@ class FundManager:
         if cash_data.empty:
             return 0.0
 
-        cash_columns = ['cash_value', 'cash', 'amount', 'value', 'end_balance']
+        cash_columns = ['cash_value']
         for col in cash_columns:
             if col in cash_data.columns:
                 return cash_data[col].sum()

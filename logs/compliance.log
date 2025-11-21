@@ -761,3 +761,13 @@
 2025-11-19 21:44:11,711 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-06.pdf
 2025-11-19 21:47:06,274 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-06.pdf
 2025-11-19 21:55:25,040 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-18.pdf
+2025-11-20 18:47:28,265 - compliance_report - WARNING - No prospectus 80% policy data for DOGG
+2025-11-20 18:47:28,266 - compliance_report - WARNING - No prospectus 80% policy data for P21026
+2025-11-20 18:47:28,266 - compliance_report - WARNING - No prospectus 80% policy data for P2726
+2025-11-20 18:47:28,331 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-18.pdf
+2025-11-20 18:54:51,043 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-18.pdf
+2025-11-20 18:58:21,986 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-18.pdf
+2025-11-20 19:04:22,101 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-18.pdf
+2025-11-20 19:06:39,682 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-18.pdf
+2025-11-20 19:10:25,092 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-18.pdf
+2025-11-20 20:37:11,177 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_2025-11-18.pdf

@@ -28,7 +28,6 @@ class FundHoldings:
 
 class FundMetrics:
     """Computed metrics from holdings data."""
-
     def __init__(self, snapshot: 'FundSnapshot'):
         self.snapshot = snapshot
 
@@ -63,10 +62,10 @@ class FundMetrics:
     def total_holdings_value(self) -> float:
         """Total value of all holdings (equity + options + flex + treasury)."""
         return (
-                self.total_equity_value +
-                self.total_option_value +
-                self.total_flex_option_value +
-                self.total_treasury_value
+            self.total_equity_value +
+            self.total_option_value +
+            self.total_flex_option_value +
+            self.total_treasury_value
         )
 
     def _compute_equity_value(self) -> float:
@@ -143,6 +142,7 @@ class FundMetrics:
                 return value
         return 0.0
 
+
 class FundSnapshot:
     """Container for all holdings data at a point in time."""
 
@@ -155,11 +155,11 @@ class FundSnapshot:
         reported_cash: float = 0.0,
         reported_nav: float = 0.0,  # NAV per share
         reported_tna: float = 0.0,  # Total Net Assets
+        reported_ta: float = 0.0,  # Total  Assets
         reported_expenses: float = 0.0,  # What custodian reports for expenses
         reported_shares_outstanding: float = 0.0,
         flows: float = 0.0,
         basket: Optional[pd.DataFrame] = None,
-        index: Optional[pd.DataFrame] = None,
         overlap: Optional[pd.DataFrame] = None,
         fund_name: Optional[str] = None,
         equity_trades: Optional[str] = None,
@@ -168,21 +168,93 @@ class FundSnapshot:
         self.vest = vest if isinstance(vest, FundHoldings) else FundHoldings()
         self.custodian = custodian if isinstance(custodian, FundHoldings) else FundHoldings()
         self.index = index if isinstance(index, FundHoldings) else FundHoldings()
-        self.cash = float(cash or 0.0)
-        self.nav = float(nav or 0.0)
-        self.expenses = float(expenses or 0.0)
-        self.total_assets = float(total_assets or 0.0)
-        self.total_net_assets = float(total_net_assets or 0.0)
-        self.fund_name = fund_name
 
-        self.total_equity_value = self._compute_equity_value()
-        self.total_option_value = self._compute_option_value()
-        self.total_option_delta_adjusted_notional = self._compute_option_delta_adjusted_notional()
-        self.total_treasury_value = self._compute_treasury_value()
-        self.flows = float(flows or 0.0)
+        # Store reported values from custodian/admin
+        self.reported_cash = float(reported_cash)
+        self.reported_nav = float(reported_nav)
+        self.reported_ta = float(reported_ta)
+        self.reported_tna = float(reported_tna)
+        self.reported_expenses = float(reported_expenses)
+        self.reported_shares_outstanding = float(reported_shares_outstanding)
+
+        # Other data
+        self.flows = float(flows)
         self.basket = basket if isinstance(basket, pd.DataFrame) else pd.DataFrame()
-        self.index = index if isinstance(index, pd.DataFrame) else pd.DataFrame()
         self.overlap = overlap if isinstance(overlap, pd.DataFrame) else pd.DataFrame()
+        self.fund_name = fund_name
+        self.equity_trades = equity_trades if isinstance(equity_trades, pd.DataFrame) else pd.DataFrame()
+        self.cr_rd_data = cr_rd_data if isinstance(cr_rd_data, pd.DataFrame) else pd.DataFrame()
+
+        # Initialize metrics (computed from holdings)
+        self._metrics = None
+
+    @property
+    def metrics(self) -> FundMetrics:
+        """Lazy-loaded computed metrics from holdings."""
+        if self._metrics is None:
+            self._metrics = FundMetrics(self)
+        return self._metrics
+
+    # Computed properties for backward compatibility
+    @property
+    def cash(self) -> float:
+        """Cash value (alias for reported_cash)."""
+        return self.reported_cash
+
+    @property
+    def nav(self) -> float:
+        """NAV per share (alias for reported_nav)."""
+        return self.reported_nav
+
+    @property
+    def expenses(self) -> float:
+        """Expenses (alias for reported_expenses)."""
+        return self.reported_expenses
+
+    @property
+    def total_assets(self) -> float:
+        """Total Assets (alias for reported_ta)."""
+        return self.reported_ta
+
+    @property
+    def total_net_assets(self) -> float:
+        """Total Net Assets (alias for reported_tna)."""
+        return self.reported_tna
+
+    @property
+    def shares_outstanding(self) -> float:
+        """Shares outstanding (alias for reported_shares_outstanding)."""
+        return self.reported_shares_outstanding
+
+    @property
+    def total_equity_value(self) -> float:
+        """Total equity value from metrics."""
+        return self.metrics.total_equity_value
+
+    @property
+    def total_option_value(self) -> float:
+        """Total regular option value from metrics."""
+        return self.metrics.total_option_value
+
+    @property
+    def total_flex_option_value(self) -> float:
+        """Total flex option value from metrics."""
+        return self.metrics.total_flex_option_value
+
+    @property
+    def total_treasury_value(self) -> float:
+        """Total treasury value from metrics."""
+        return self.metrics.total_treasury_value
+
+    @property
+    def total_option_delta_adjusted_notional(self) -> float:
+        """Total option delta-adjusted notional from metrics."""
+        return self.metrics.total_option_delta_adjusted_notional
+
+    @property
+    def calculated_tna(self) -> float:
+        """Calculate TNA from holdings + cash."""
+        return self.metrics.total_holdings_value + self.reported_cash
 
     def _filter_frame_by_fund(self, frame: pd.DataFrame) -> pd.DataFrame:
         """Filter DataFrame to only include rows for this fund."""
@@ -201,6 +273,7 @@ class FundSnapshot:
         return frame
 
     def _frame_value_sum(self, frame: pd.DataFrame, columns: Sequence[str]) -> Optional[float]:
+        """Sum values from specified columns in dataframe."""
         if not isinstance(frame, pd.DataFrame) or frame.empty:
             return None
 
@@ -217,6 +290,7 @@ class FundSnapshot:
         return None
 
     def _price_quantity_sum(self, frame: pd.DataFrame, multiplier: float = 1.0) -> Optional[float]:
+        """Calculate value from price * quantity."""
         if not isinstance(frame, pd.DataFrame) or frame.empty:
             return None
 
@@ -232,56 +306,7 @@ class FundSnapshot:
                 return float((price * quantity * multiplier).sum())
         return None
 
-    def _compute_equity_value(self) -> float:
-        for frame in (self.vest.equity, self.custodian.equity):
-            value = self._frame_value_sum(
-                frame, ["equity_market_value", "market_value", "net_market_value"]
-            )
-            if value is not None:
-                return value
-            fallback = self._price_quantity_sum(frame)
-            if fallback is not None:
-                return fallback
-        return 0.0
 
-    def _compute_option_value(self) -> float:
-        for frame in (self.vest.options, self.custodian.options):
-            value = self._frame_value_sum(
-                frame, ["option_market_value", "market_value", "net_market_value"]
-            )
-            if value is not None:
-                return value
-            fallback = self._price_quantity_sum(frame, multiplier=100.0)
-            if fallback is not None:
-                return fallback
-        return 0.0
-
-    def _compute_option_delta_adjusted_notional(self) -> float:
-        for frame in (self.vest.options, self.custodian.options):
-            value = self._frame_value_sum(
-                frame,
-                [
-                    "option_delta_adjusted_notional",
-                    "delta_adjusted_notional",
-                ],
-            )
-            if value is not None:
-                return value
-        return 0.0
-
-    def _compute_treasury_value(self) -> float:
-        """Compute treasury value with proper fund filtering."""
-        for frame in (self.vest.treasury, self.custodian.treasury):
-            # CRITICAL: Filter frame to ensure we only sum this fund's treasury
-            value = self._frame_value_sum(
-                frame, ["treasury_market_value", "market_value", "net_market_value"]
-            )
-            if value is not None:
-                return value
-            fallback = self._price_quantity_sum(frame)
-            if fallback is not None:
-                return fallback
-        return 0.0
 
 class FundData:
     """Complete fund data for current day (T) and prior day (T-1)."""
@@ -303,12 +328,14 @@ class FundData:
         self.equity_trades = equity_trades if isinstance(equity_trades, pd.DataFrame) else pd.DataFrame()
         self.cr_rd_data = cr_rd_data if isinstance(cr_rd_data, pd.DataFrame) else pd.DataFrame()
 
+
 class Fund:
     def __init__(self, name: str, config: Dict, base_cls=None):
         self.name = name
         self.config = config or {}
         self.base_cls = base_cls
         self.data: Optional[FundData] = FundData()  # Keep this!
+
 
     @property
     def expense_ratio(self) -> float:
@@ -425,12 +452,26 @@ class Fund:
         return value or None
 
     @property
+    def vehicle(self) -> Optional[str]:
+        """Fund vehicle type from config."""
+        value = self.config.get("vehicle")
+        return value if isinstance(value, str) else None
+
+    @property
     def is_private_fund(self) -> bool:
-        return (self.vehicle or "").lower() == "private_fund"
+        """Check if fund is private."""
+        vehicle = self.vehicle  # Use the property to avoid None issues
+        if vehicle is None:
+            return False
+        return vehicle.lower() == "private_fund"
 
     @property
     def is_closed_end_fund(self) -> bool:
-        return (self.vehicle or "").lower() == "closed_end_fund"
+        """Check if fund is closed-end."""
+        vehicle = self.vehicle  # Use the property to avoid None issues
+        if vehicle is None:
+            return False
+        return vehicle.lower() == "closed_end_fund"
 
     @property
     def has_listed_option(self) -> bool:

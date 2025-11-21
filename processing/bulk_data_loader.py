@@ -1059,8 +1059,8 @@ class BulkDataLoader:
         try:
             latest_uploads = (
                 self.session.query(
-                    UMB.fund,
-                    UMB.as_of_date,
+                    UMB.fund.label('fund'),
+                    UMB.as_of_date.label('date'),
                     UMB.portfolio_id,
                     UMB.type,
                     UMB.description,
@@ -1088,7 +1088,7 @@ class BulkDataLoader:
                     latest_uploads,
                     and_(
                         UMB.fund == latest_uploads.c.fund,
-                        UMB.as_of_date == latest_uploads.c.as_of_date,
+                        UMB.as_of_date == latest_uploads.c.date,
                         UMB.portfolio_id == latest_uploads.c.portfolio_id,
                         UMB.type == latest_uploads.c.type,
                         UMB.description == latest_uploads.c.description,
