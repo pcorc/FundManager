@@ -790,11 +790,13 @@ CLOSED_END_FUNDS = {
     for fund, payload in FUND_DEFINITIONS.items()
     if payload.get("vehicle_wrapper", "").lower() == "closed_end_fund"
 }
+
 PRIVATE_FUNDS = {
     fund
     for fund, payload in FUND_DEFINITIONS.items()
     if payload.get("vehicle_wrapper", "").lower() == "private_fund"
 }
+
 ETF_FUNDS = {
     fund
     for fund, payload in FUND_DEFINITIONS.items()
@@ -830,4 +832,11 @@ INDEX_FLEX_FUNDS = {
     for fund, payload in FUND_DEFINITIONS.items()
     if bool(payload.get("has_flex_option"))
     and (payload.get("flex_option_type") or "").lower() == "index"
+}
+
+SINGLE_STOCK_FLEX_FUNDS = {
+    fund
+    for fund, payload in FUND_DEFINITIONS.items()
+    if bool(payload.get("has_flex_option"))
+    and (payload.get("flex_option_type") or "").lower() == "single_stock"
 }
