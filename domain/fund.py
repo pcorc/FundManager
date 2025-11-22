@@ -197,34 +197,32 @@ class FundSnapshot:
 
     # Computed properties for backward compatibility
     @property
-    def cash(self) -> float:
-        """Cash value (alias for reported_cash)."""
-        return self.reported_cash
+    def cash_value(self) -> float:
+        return float(getattr(self.data.current, "reported_cash", 0.0) or 0.0)
 
     @property
     def nav(self) -> float:
-        """NAV per share (alias for reported_nav)."""
-        return self.reported_nav
+        """NAV per share (reported by custodian/admin)."""
+        return float(getattr(self.data.current, "reported_nav", 0.0) or 0.0)
 
     @property
     def expenses(self) -> float:
-        """Expenses (alias for reported_expenses)."""
-        return self.reported_expenses
+        return float(getattr(self.data.current, "reported_expenses", 0.0) or 0.0)
 
     @property
     def total_assets(self) -> float:
-        """Total Assets (alias for reported_ta)."""
-        return self.reported_ta
+        """Total Assets (reported by custodian/admin)."""
+        return float(getattr(self.data.current, "total_assets", 0.0) or 0.0)
 
     @property
     def total_net_assets(self) -> float:
-        """Total Net Assets (alias for reported_tna)."""
-        return self.reported_tna
+        """Total Net Assets (reported by custodian/admin)."""
+        return float(getattr(self.data.current, "total_net_assets", 0.0) or 0.0)
 
     @property
     def shares_outstanding(self) -> float:
-        """Shares outstanding (alias for reported_shares_outstanding)."""
-        return self.reported_shares_outstanding
+        """Shares outstanding (reported by custodian/admin)."""
+        return float(getattr(self.data.current, "reported_shares_outstanding", 0.0) or 0.0)
 
     @property
     def total_equity_value(self) -> float:
@@ -419,14 +417,6 @@ class Fund:
     @property
     def cash_value(self) -> float:
         return float(getattr(self.data.current, "cash", 0.0)) or 0.0
-
-    @property
-    def total_assets(self) -> float:
-        return float(getattr(self.data.current, "total_assets", 0.0)) or 0.0
-
-    @property
-    def total_net_assets(self) -> float:
-        return float(getattr(self.data.current, "total_net_assets", 0.0)) or 0.0
 
     @property
     def total_equity_value(self) -> float:

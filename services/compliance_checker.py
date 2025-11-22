@@ -159,7 +159,7 @@ class ComplianceChecker:
     def prospectus_80pct_policy(self, fund: Fund) -> ComplianceResult:
         try:
 
-            total_assets, total_net_assets = self._get_total_assets(fund)
+            total_assets, total_net_assets = fund.total_assets, fund.total_net_assets
             total_cash_value = fund.data.current.cash
             total_equity_market_value = float(fund.data.current.total_equity_value)
             total_opt_market_value = float(fund.data.current.total_option_value)
@@ -291,12 +291,14 @@ class ComplianceChecker:
 
     def diversification_IRS_check(self, fund: Fund) -> ComplianceResult:
         try:
-            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
-            total_assets, total_net_assets = self._get_total_assets(fund)
-            overlap_df = self._get_overlap(fund)
-            expenses = self._get_expenses(fund)
-            vest_eqy_holdings = self._consolidate_holdings_by_issuer(fund, vest_eqy_holdings)
+            regular_options = fund.options_holdings
+            flex_options = fund.flex_options_holdings
+            vest_eqy_holdings = fund.equity_holdings
+            vest_treasury_holdings = fund.treasury_holdings
+            overlap_df = fund.overlap_holdings
+            expenses = fund.expenses
 
+            vest_eqy_holdings = self._consolidate_holdings_by_issuer(fund, vest_eqy_holdings)
 
             # Get fund configuration for flex options
             has_listed_option = fund_config.config.get('has_listed_option', False)
@@ -474,9 +476,12 @@ class ComplianceChecker:
             )
 
         try:
-            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
-            total_assets, total_net_assets = self._get_total_assets(fund)
-            expenses = self._get_expenses(fund)
+            regular_options = fund.options_holdings
+            flex_options = fund.flex_options_holdings
+            vest_eqy_holdings = fund.equity_holdings
+            vest_treasury_holdings = fund.treasury_holdings
+            total_assets, total_net_assets = fund.total_assets, fund.total_net_assets
+            expenses = fund.expenses
             vest_eqy_holdings = self._consolidate_holdings_by_issuer(fund, vest_eqy_holdings)
 
             registration = (fund.diversification_status or "unknown").replace("_", "-")
@@ -1190,7 +1195,7 @@ class ComplianceChecker:
         """Check 15% illiquid assets compliance"""
         try:
             vest_eqy_holdings, vest_opt_holdings, _ = self._get_holdings(fund)
-            total_assets, _ = self._get_total_assets(fund)
+            total_assets, total_net_assets = fund.total_assets, fund.total_net_assets
 
             if total_assets == 0 or vest_eqy_holdings.empty:
                 raise ValueError("Equity holdings or total assets missing")
@@ -1756,40 +1761,6 @@ class ComplianceChecker:
 
         return exceeding_fund_gics, exceeding_index_gics, calculations
 
-    def _get_holdings(self, fund: Fund) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """Return copies of the fund's current holdings snapshots.
-        Note: This combines regular and flex options into a single DataFrame.
-        """
-
-        # Initialize defaults
-        equity = pd.DataFrame()
-        combined_options = pd.DataFrame()
-        treasury = pd.DataFrame()
-
-        if not fund.data or not fund.data.current:
-            return equity, combined_options, treasury
-
-        current_snapshot = fund.data.current
-
-        # Access vest holdings properly
-        if current_snapshot.vest:
-            equity = current_snapshot.vest.equity.copy() if isinstance(current_snapshot.vest.equity, pd.DataFrame) else pd.DataFrame()
-
-            # Combine regular and flex options
-            options = current_snapshot.vest.options.copy() if isinstance(current_snapshot.vest.options, pd.DataFrame) else pd.DataFrame()
-            flex_options = current_snapshot.vest.flex_options.copy() if isinstance(current_snapshot.vest.flex_options, pd.DataFrame) else pd.DataFrame()
-
-            if not options.empty and not flex_options.empty:
-                combined_options = pd.concat([options, flex_options], ignore_index=True)
-            elif not options.empty:
-                combined_options = options
-            elif not flex_options.empty:
-                combined_options = flex_options
-
-            treasury = current_snapshot.vest.treasury.copy() if isinstance(current_snapshot.vest.treasury, pd.DataFrame) else pd.DataFrame()
-
-        return equity, combined_options, treasury
-
     def _consolidate_holdings_by_issuer(
         self, fund: Fund, holdings_df: pd.DataFrame
     ) -> pd.DataFrame:
@@ -1993,22 +1964,6 @@ class ComplianceChecker:
         if len(numeric_cols):
             result.loc[:, numeric_cols] = result.loc[:, numeric_cols].fillna(0)
         return result
-
-    def _get_total_assets(self, fund: Fund) -> Tuple[float, float]:
-        """Get total assets and total net assets from fund."""
-        return fund.total_assets, fund.total_net_assets
-
-    def _get_cash_value(self, fund: Fund) -> float:
-        """Get cash value from fund."""
-        return fund.cash_value
-
-    def _get_expenses(self, fund: Fund) -> float:
-        """Get expenses from fund."""
-        return fund.expenses
-
-    def _get_overlap(self, fund: Fund) -> pd.DataFrame:
-        """Get overlap data from fund."""
-        return fund.overlap_holdings
 
     def calculate_summary_metrics(self, fund: Fund) -> ComplianceResult:
         """Calculate summary metrics using Fund object properties directly."""
