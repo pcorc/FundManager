@@ -293,7 +293,7 @@ class FundManager:
         )
 
         # Populate T-1 snapshot
-        previous_snapshot= FundSnapshot(
+        fund_data.previous= FundSnapshot(
             vest=FundHoldings(
                 equity=fund_data_dict.get('vest_equity_t1', pd.DataFrame()),
                 options=vest_options_t1,  # Regular options only

@@ -159,7 +159,7 @@ class ComplianceChecker:
     def prospectus_80pct_policy(self, fund: Fund) -> ComplianceResult:
         try:
 
-            total_assets, total_net_assets = fund.total_assets, fund.total_net_assets
+            total_assets, total_net_assets = fund.data.current.total_assets, fund.data.current.total_net_assets
             total_cash_value = fund.data.current.cash
             total_equity_market_value = float(fund.data.current.total_equity_value)
             total_opt_market_value = float(fund.data.current.total_option_value)
@@ -291,12 +291,10 @@ class ComplianceChecker:
 
     def diversification_IRS_check(self, fund: Fund) -> ComplianceResult:
         try:
-            regular_options = fund.options_holdings
-            flex_options = fund.flex_options_holdings
-            vest_eqy_holdings = fund.equity_holdings
-            vest_treasury_holdings = fund.treasury_holdings
-            overlap_df = fund.overlap_holdings
-            expenses = fund.expenses
+            vest_eqy_holdings = fund.data.current.equity_holdings
+            total_assets, total_net_assets = fund.data.current.total_assets, fund.data.current.total_net_assets
+            overlap_df = fund.data.current.overlap_holdings
+            expenses = fund.data.current.expenses
 
             vest_eqy_holdings = self._consolidate_holdings_by_issuer(fund, vest_eqy_holdings)
 
@@ -476,12 +474,12 @@ class ComplianceChecker:
             )
 
         try:
-            regular_options = fund.options_holdings
-            flex_options = fund.flex_options_holdings
-            vest_eqy_holdings = fund.equity_holdings
-            vest_treasury_holdings = fund.treasury_holdings
-            total_assets, total_net_assets = fund.total_assets, fund.total_net_assets
-            expenses = fund.expenses
+            vest_opt_holdings = fund.data.current.options_holdings
+            vest_flex_options = fund.data.current.flex_options_holdings
+            vest_eqy_holdings = fund.data.current.equity_holdings
+            vest_treasury_holdings = fund.data.current.treasury_holdings
+            total_assets, total_net_assets = fund.data.current.total_assets, fund.data.current.total_net_assets
+            expenses = fund.data.current.expenses
             vest_eqy_holdings = self._consolidate_holdings_by_issuer(fund, vest_eqy_holdings)
 
             registration = (fund.diversification_status or "unknown").replace("_", "-")
@@ -491,6 +489,7 @@ class ComplianceChecker:
                 holdings_df = vest_eqy_holdings.copy()
                 holdings_df["option_market_value"] = 0.0
                 holdings_df["net_market_value"] = holdings_df["equity_market_value"]
+            # we want another condition that
             else:
                 holdings_df = pd.merge(
                     vest_eqy_holdings,
@@ -500,23 +499,8 @@ class ComplianceChecker:
                     right_on="equity_underlying_ticker",
                     suffixes=("", "_option"),
                 )
-                holdings_df["equity_market_value"] = pd.to_numeric(
-                    holdings_df.get("equity_market_value", 0.0), errors="coerce"
-                ).fillna(0.0)
-                if "option_market_value" in holdings_df.columns:
-                    holdings_df["option_market_value"] = pd.to_numeric(
-                        holdings_df["option_market_value"], errors="coerce"
-                    ).fillna(0.0)
-                    holdings_df = holdings_df[~holdings_df["optticker"].str.startswith(("4SPX", "4XSP", "SPX", "XSP"), na=False)]
-                else:
-                    holdings_df["option_market_value"] = 0.0
-                    holdings_df = holdings_df[~holdings_df["optticker"].str.startswith(("4SPX", "4XSP", "SPX", "XSP"), na=False)]
 
-                holdings_df["net_market_value"] = (
-                    holdings_df["equity_market_value"] + holdings_df["option_market_value"]
-                )
-
-            holdings_df = self._fill_numeric_defaults(holdings_df)
+                holdings_df["net_market_value"] = holdings_df["equity_market_value"] + holdings_df["option_market_value"]
 
             non_qualifying_assets = 0.0
             condition_1_met = (
@@ -726,8 +710,12 @@ class ComplianceChecker:
             )
 
         try:
-            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
-            total_assets, total_net_assets = self._get_total_assets(fund)
+            regular_options = fund.data.current.options_holdings
+            flex_options = fund.flex_options_holdings
+            vest_eqy_holdings = fund.data.current.equity_holdings
+            total_assets, total_net_assets = fund.data.current.total_assets, fund.data.current.total_net_assets
+            expenses = fund.data.current.expenses
+            vest_eqy_holdings = self._consolidate_holdings_by_issuer(fund, vest_eqy_holdings)
 
             if vest_eqy_holdings.empty:
                 raise ValueError("Equity holdings missing")
@@ -737,7 +725,7 @@ class ComplianceChecker:
             # Merge equity and options data
             holdings_df = pd.merge(
                 vest_eqy_holdings,
-                vest_opt_holdings,
+                regular_options,
                 how="left",
                 left_on="eqyticker",
                 right_on="equity_underlying_ticker",
@@ -810,7 +798,8 @@ class ComplianceChecker:
     def real_estate_check(self, fund: Fund) -> ComplianceResult:
         """Check if fund has any real estate exposure"""
         try:
-            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
+
+            vest_eqy_holdings = fund.data.current.equity_holdings
 
             if vest_eqy_holdings.empty:
                 # No holdings means no real estate exposure - PASS
@@ -869,7 +858,7 @@ class ComplianceChecker:
     def commodities_check(self, fund: Fund) -> ComplianceResult:
         """Check if fund has any commodities exposure"""
         try:
-            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
+            vest_eqy_holdings = fund.data.current.equity_holdings
 
             if vest_eqy_holdings.empty:
                 # No holdings means no commodities exposure - PASS
@@ -926,8 +915,10 @@ class ComplianceChecker:
 
     def twelve_d1a_other_inv_cos(self, fund: Fund) -> ComplianceResult:
         try:
-            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
-            total_assets, total_net_assets = self._get_total_assets(fund)
+
+            vest_eqy_holdings = fund.data.current.equity_holdings
+            total_assets, total_net_assets = fund.data.current.total_assets, fund.data.current.total_net_assets
+
             if total_assets == 0 or vest_eqy_holdings.empty:
                 raise ValueError("Equity holdings or total assets missing")
 
@@ -1011,8 +1002,8 @@ class ComplianceChecker:
 
     def twelve_d2_insurance_cos(self, fund: Fund) -> ComplianceResult:
         try:
-            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
-            total_assets, total_net_assets = self._get_total_assets(fund)
+            vest_eqy_holdings = fund.data.current.equity_holdings
+            total_assets, total_net_assets = fund.data.current.total_assets, fund.data.current.total_net_assets
 
             insurance_mask = (
                 vest_eqy_holdings["GICS_INDUSTRY_GROUP_NAME"].eq("Insurance")
@@ -1081,8 +1072,9 @@ class ComplianceChecker:
 
     def twelve_d3_sec_biz(self, fund: Fund) -> ComplianceResult:
         try:
-            vest_eqy_holdings, vest_opt_holdings, vest_treasury_holdings = self._get_holdings(fund)
-            total_assets, total_net_assets = self._get_total_assets(fund)
+            vest_eqy_holdings = fund.data.current.equity_holdings
+            vest_opt_holdings = fund.data.current.option_holdings
+            total_assets, total_net_assets = fund.data.current.total_assets, fund.data.current.total_net_assets
 
             sec_biz_mask = vest_eqy_holdings["GICS_INDUSTRY_NAME"].isin(["Capital Markets", "Banks"])
             sec_related_businesses = vest_eqy_holdings[sec_biz_mask].copy()
@@ -1194,8 +1186,9 @@ class ComplianceChecker:
     def max_15pct_illiquid_sai(self, fund: Fund) -> ComplianceResult:
         """Check 15% illiquid assets compliance"""
         try:
-            vest_eqy_holdings, vest_opt_holdings, _ = self._get_holdings(fund)
-            total_assets, total_net_assets = fund.total_assets, fund.total_net_assets
+            vest_opt_holdings = fund.data.current.options_holdings
+            vest_eqy_holdings = fund.data.current.equity_holdings
+            total_assets = fund.data.current.total_assets
 
             if total_assets == 0 or vest_eqy_holdings.empty:
                 raise ValueError("Equity holdings or total assets missing")
@@ -1273,14 +1266,9 @@ class ComplianceChecker:
                     error="Fund data is not available"
                 )
 
-            current = fund.data.current
+            vest_eqy_holdings = fund.data.current.equity_holdings
 
-            # Access equity holdings properly
-            equity_df = pd.DataFrame()
-            if current.vest and current.vest.equity is not None:
-                equity_df = current.vest.equity.copy()
-
-            if equity_df.empty:
+            if vest_eqy_holdings.empty:
                 return ComplianceResult(
                     is_compliant=False,
                     details={
@@ -1295,10 +1283,10 @@ class ComplianceChecker:
             # Rest of the implementation...
             # Access index data properly
             index_df = pd.DataFrame()
-            if hasattr(current, 'index') and current.index is not None:
-                index_df = current.index.copy()
+            if fund.data.current is not None:
+                index_df = fund.data.current.index.copy()
 
-            if not isinstance(equity_df, pd.DataFrame) or equity_df.empty:
+            if not isinstance(vest_eqy_holdings, pd.DataFrame) or vest_eqy_holdings.empty:
                 return ComplianceResult(
                     is_compliant=False,
                     details={
@@ -1310,9 +1298,8 @@ class ComplianceChecker:
                     error="Equity holdings are unavailable for analysis",
                 )
 
-            equity_df = equity_df.copy()
             equity_values = pd.to_numeric(
-                equity_df.get("equity_market_value", 0.0), errors="coerce"
+                vest_eqy_holdings.get("equity_market_value", 0.0), errors="coerce"
             ).fillna(0.0)
             total_equity_value = float(equity_values.sum())
             if total_equity_value == 0.0:
@@ -1328,9 +1315,9 @@ class ComplianceChecker:
                 )
 
             fund_weights = equity_values / total_equity_value
-            fund_weights.index = equity_df.index
+            fund_weights.index = vest_eqy_holdings.index
 
-            gics_summary_fund = self._summarize_gics_exposure(equity_df, fund_weights)
+            gics_summary_fund = self._summarize_gics_exposure(vest_eqy_holdings, fund_weights)
             if not gics_summary_fund:
                 return ComplianceResult(
                     is_compliant=False,
@@ -1438,8 +1425,8 @@ class ComplianceChecker:
                 industry_mismatches = sorted(fund_over_inds - index_over_inds)
                 overall_status = "PASS" if len(industry_mismatches) == 0 else "FAIL"
 
-            total_assets, total_net_assets = self._get_total_assets(fund)
-
+            total_assets, total_net_assets = fund.data.current.total_assets, fund.data.current.total_net_assets
+            
             calculations.setdefault("meta", {})
             calculations["meta"].update(
                 {
@@ -1667,10 +1654,6 @@ class ComplianceChecker:
                 error=str(exc),
             )
 
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
     @staticmethod
     def _resolve_gics_compliance_group(fund_name: str) -> str:
         mapping = {
@@ -1952,18 +1935,6 @@ class ComplianceChecker:
 
         return share_col, pd.Series(0.0, index=df.index, dtype=float)
 
-    @staticmethod
-    def _fill_numeric_defaults(df: pd.DataFrame) -> pd.DataFrame:
-        """Replace missing values in numeric columns with zero."""
-
-        if df.empty:
-            return df.copy()
-
-        result = df.copy()
-        numeric_cols = result.select_dtypes(include=["number"]).columns
-        if len(numeric_cols):
-            result.loc[:, numeric_cols] = result.loc[:, numeric_cols].fillna(0)
-        return result
 
     def calculate_summary_metrics(self, fund: Fund) -> ComplianceResult:
         """Calculate summary metrics using Fund object properties directly."""

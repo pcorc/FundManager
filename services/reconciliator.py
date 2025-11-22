@@ -973,7 +973,6 @@ class Reconciliator:
             }
         )
 
-
     def _build_equity_details(self):
         """Assemble detailed calculations for downstream reporting."""
 
@@ -1022,7 +1021,6 @@ class Reconciliator:
         """Check if this fund has SG equity data"""
         sg_equity = self.fund_data.get('sg_equity', pd.DataFrame()) if isinstance(self.fund_data, dict) else pd.DataFrame()
         return not sg_equity.empty
-
 
     def reconcile_sg_option(self):
         """Reconcile SocGen options (for ex-ante/ex-post only)"""
@@ -1074,7 +1072,6 @@ class Reconciliator:
                                  row['optticker'],
                                  f"Vest: {row.get('quantity_vest', 0)}, SG: {row.get('quantity_sg', 0)}",
                                  row['quantity_diff'])
-
 
     def reconcile_sg_equity(self):
         """Reconcile SocGen equity (for ex-ante/ex-post only)"""
