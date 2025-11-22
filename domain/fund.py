@@ -72,6 +72,7 @@ class FundHoldings:
             treasury=self.treasury.copy() if isinstance(self.treasury, pd.DataFrame) else pd.DataFrame(),
         )
 
+
 class FundMetrics:
     """Computed metrics from holdings data."""
     def __init__(self, snapshot: 'FundSnapshot'):
@@ -359,6 +360,7 @@ class FundSnapshot:
                 return float((price * quantity * multiplier).sum())
         return None
 
+
 class FundData:
     """Complete fund data for current day (T) and prior day (T-1)."""
 
@@ -367,17 +369,17 @@ class FundData:
         *,
         current: Optional[FundSnapshot] = None,
         previous: Optional[FundSnapshot] = None,
-        index: Optional[FundHoldings] = None,  # ADD - current index holdings
-        previous_index: Optional[FundHoldings] = None,  # ADD - T-1 index holdings
-        equity_trades: Optional[pd.DataFrame] = None,  # ADD - trades data
-        cr_rd_data: Optional[pd.DataFrame] = None,  # ADD - corporate actions
+        # index: Optional[FundHoldings] = None,  # ADD - current index holdings
+        # previous_index: Optional[FundHoldings] = None,  # ADD - T-1 index holdings
+        # equity_trades: Optional[pd.DataFrame] = None,  # ADD - trades data
+        # cr_rd_data: Optional[pd.DataFrame] = None,  # ADD - corporate actions
     ) -> None:
         self.current = current if isinstance(current, FundSnapshot) else FundSnapshot()
         self.previous = previous if isinstance(previous, FundSnapshot) else FundSnapshot()
-        self.index = index if isinstance(index, FundHoldings) else FundHoldings()
-        self.previous_index = previous_index if isinstance(previous_index, FundHoldings) else FundHoldings()
-        self.equity_trades = equity_trades if isinstance(equity_trades, pd.DataFrame) else pd.DataFrame()
-        self.cr_rd_data = cr_rd_data if isinstance(cr_rd_data, pd.DataFrame) else pd.DataFrame()
+        # self.index = index if isinstance(index, FundHoldings) else FundHoldings()
+        # self.previous_index = previous_index if isinstance(previous_index, FundHoldings) else FundHoldings()
+        # self.equity_trades = equity_trades if isinstance(equity_trades, pd.DataFrame) else pd.DataFrame()
+        # self.cr_rd_data = cr_rd_data if isinstance(cr_rd_data, pd.DataFrame) else pd.DataFrame()
 
 
 class Fund:
