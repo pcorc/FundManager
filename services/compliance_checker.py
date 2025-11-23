@@ -138,18 +138,27 @@ class ComplianceChecker:
 
         return results
 
-    def _get_current_totals(self, fund: Fund) -> tuple[float, float, float, float]:
-        """Return custodian total assets, total net assets, expenses, and cash."""
-        snapshot = getattr(fund.data, "current", None)
-        custodian = getattr(snapshot, "custodian", None) if snapshot else None
 
-        total_assets = float(getattr(custodian, "ta", 0.0) or 0.0) if custodian else 0.0
-        total_net_assets = float(getattr(custodian, "tna", 0.0) or 0.0) if custodian else 0.0
-        expenses = float(getattr(custodian, "expenses", 0.0) or 0.0) if custodian else 0.0
-        cash_value = float(getattr(custodian, "cash", 0.0) or 0.0) if custodian else 0.0
+    def calculate_summary_metrics(self, fund: Fund) -> ComplianceResult:
 
-        return total_assets, total_net_assets, expenses, cash_value
+        total_assets, total_net_assets, expenses, cash_value = self._get_current_totals(fund)
 
+        calculations = {
+            "cash_value": cash_value,
+            "equity_market_value": fund.data.current.total_equity_value,
+            "option_delta_adjusted_notional": fund.data.current.total_option_delta_adjusted_notional,
+            "option_market_value": fund.data.current.total_option_value,
+            "treasury": fund.data.current.total_treasury_value,
+            "total_assets": total_assets,
+            "total_net_assets": total_net_assets,
+            "expenses": expenses,
+        }
+
+        return ComplianceResult(
+            is_compliant=True,
+            details={"rule": "summary_metrics", "status": "calculated"},
+            calculations=calculations,
+        )
 
     def prospectus_80pct_policy(self, fund: Fund) -> ComplianceResult:
         try:
@@ -287,17 +296,14 @@ class ComplianceChecker:
     def diversification_IRS_check(self, fund: Fund) -> ComplianceResult:
         try:
             vest_eqy_holdings = fund.data.current.equity_holdings
+            vest_opt_holdings = fund.data.current.options_holdings
+
             total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
             overlap_df = fund.data.current.overlap_holdings
 
             vest_eqy_holdings = self._consolidate_holdings_by_issuer(fund, vest_eqy_holdings)
 
-            # Get fund configuration for flex options
-            has_listed_option = fund_config.config.get('has_listed_option', False)
-            has_flex = fund_config.config.get('has_flex_option', False)
-            flex_option_type = fund_config.config.get('flex_option_type', '')
-
-            if has_listed_option:
+            if fund.has_listed_option:
                 holdings_df = pd.merge(
                     vest_eqy_holdings,
                     vest_opt_holdings,
@@ -306,7 +312,6 @@ class ComplianceChecker:
                     how="outer",
                     suffixes=("", "_option"),
                 )
-                holdings_df = self._fill_numeric_defaults(holdings_df)
             else:
                 holdings_df = vest_eqy_holdings
 
@@ -382,8 +387,11 @@ class ComplianceChecker:
             if "EQY_SH_OUT_million" not in bottom_50_df.columns:
                 bottom_50_df["EQY_SH_OUT_million"] = 1.0
             denom = bottom_50_df["EQY_SH_OUT_million"].replace(0, 1)
-            share_col, share_series = self._resolve_share_series(bottom_50_df)
+
+            share_col = "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
+            share_series = pd.Series(0.0, index=bottom_50_df.index, dtype=float)
             bottom_50_df[share_col] = share_series
+
             bottom_50_df["exceeds_10_percent"] = (
                 share_series / denom
             ) > IRS_OWNERSHIP_LIMIT
@@ -539,7 +547,8 @@ class ComplianceChecker:
                 pd.to_numeric(remaining_securities["EQY_SH_OUT_million"], errors="coerce").replace(0, 1)
             )
 
-            share_col, share_series = self._resolve_share_series(remaining_securities)
+            share_col = "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
+            share_series = pd.Series(0.0, index=remaining_securities.index, dtype=float)
             remaining_securities[share_col] = share_series
 
             remaining_securities["vest_ownership_of_float"] = (
@@ -722,7 +731,6 @@ class ComplianceChecker:
                 right_on="equity_underlying_ticker",
                 suffixes=("", "_option"),
             )
-            holdings_df = self._fill_numeric_defaults(holdings_df)
 
             # Calculate net market value
             holdings_df["net_market_value"] = (
@@ -1022,7 +1030,8 @@ class ComplianceChecker:
             if "EQY_SH_OUT_million" not in insurance_holdings.columns:
                 insurance_holdings["EQY_SH_OUT_million"] = 0.0
 
-            share_col, share_series = self._resolve_share_series(insurance_holdings)
+            share_col = "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
+            share_series = pd.Series(0.0, index=insurance_holdings.index, dtype=float)
             insurance_holdings[share_col] = share_series
 
             with np.errstate(divide="ignore", invalid="ignore"):
@@ -1092,8 +1101,11 @@ class ComplianceChecker:
             sec_related_businesses["EQY_SH_OUT_million"] = sec_related_businesses[
                 "EQY_SH_OUT_million"
             ].replace(0, np.nan)
-            share_col, share_series = self._resolve_share_series(sec_related_businesses)
+
+            share_col = "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
+            share_series = pd.Series(0.0, index=sec_related_businesses.index, dtype=float)
             sec_related_businesses[share_col] = share_series
+
             sec_related_businesses["ownership_pct"] = (
                 share_series / sec_related_businesses["EQY_SH_OUT_million"]
             ).fillna(0.0)
@@ -1570,7 +1582,8 @@ class ComplianceChecker:
             df.get("equity_market_value", 0.0), errors="coerce"
         ).fillna(0.0)
 
-        share_col, share_series = self._resolve_share_series(df)
+        share_col = "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
+        share_series = pd.Series(0.0, index=df.index, dtype=float)
         df[share_col] = share_series
         df["eqyticker"] = df["eqyticker"].astype(str)
 
@@ -1713,89 +1726,16 @@ class ComplianceChecker:
 
         return merged, overlap_details.reindex(columns=overlap_columns).reset_index(drop=True)
 
-    @property
-    def share_column(self) -> str:
-        """Preferred share column name for the active analysis type."""
 
-        return "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
+    def _get_current_totals(self, fund: Fund) -> tuple[float, float, float, float]:
+        """Return custodian total assets, total net assets, expenses, and cash."""
+        snapshot = getattr(fund.data, "current", None)
+        custodian = getattr(snapshot, "custodian", None) if snapshot else None
 
-    def _resolve_share_series(
-        self,
-        df: pd.DataFrame,
-        *,
-        preferred: Optional[str] = None,
-    ) -> Tuple[str, pd.Series]:
-        """Return the share column name to use and the numeric series for calculations."""
+        total_assets = float(getattr(custodian, "ta", 0.0) or 0.0) if custodian else 0.0
+        total_net_assets = float(getattr(custodian, "tna", 0.0) or 0.0) if custodian else 0.0
+        expenses = float(getattr(custodian, "expenses", 0.0) or 0.0) if custodian else 0.0
+        cash_value = float(getattr(custodian, "cash", 0.0) or 0.0) if custodian else 0.0
 
-        if not isinstance(df, pd.DataFrame):
-            share_col = preferred or self.share_column
-            return share_col, pd.Series(dtype=float)
+        return total_assets, total_net_assets, expenses, cash_value
 
-        if df.empty:
-            share_col = preferred or self.share_column
-            return share_col, pd.Series(0.0, index=df.index, dtype=float)
-
-        share_col = preferred or self.share_column
-        candidates: list[str] = [share_col]
-        for fallback in ("nav_shares", "iiv_shares", "shares", "quantity", "units"):
-            if fallback not in candidates:
-                candidates.append(fallback)
-
-        for column in candidates:
-            if column in df.columns:
-                series = pd.to_numeric(df[column], errors="coerce").fillna(0.0)
-                return column, series
-
-        return share_col, pd.Series(0.0, index=df.index, dtype=float)
-
-
-    def calculate_summary_metrics_1(self, fund: Fund) -> ComplianceResult:
-
-        total_assets, total_net_assets, expenses, cash_value = self._get_current_totals(fund)
-
-        calculations = {
-            "cash_value": cash_value,
-            "equity_market_value": fund.data.current.total_equity_value,
-            "option_delta_adjusted_notional": fund.data.current.total_option_delta_adjusted_notional,
-            "option_market_value": fund.data.current.total_option_value,
-            "treasury": fund.data.current.total_treasury_value,
-            "total_assets": total_assets,
-            "total_net_assets": total_net_assets,
-            "expenses": expenses,
-        }
-
-        return ComplianceResult(
-            is_compliant=True,
-            details={"rule": "summary_metrics", "status": "calculated"},
-            calculations=calculations,
-        )
-
-
-    def calculate_summary_metrics_2(self, fund: Fund) -> ComplianceResult:
-        """Calculate summary metrics using Fund object properties directly."""
-
-        # Simple validation - Fund handles the null checks internally
-        if not fund.data or not fund.data.current:
-            return ComplianceResult(
-                is_compliant=False,
-                details={"rule": "summary_metrics", "status": "error"},
-                calculations={},
-                error="Fund data not available"
-            )
-
-        # Directly use the Fund properties - they already handle None values
-        calculations = {
-            "cash_value": fund.cash_value,  # or fund.data.current.cash
-            "equity_market_value": fund.total_equity_value,
-            "option_delta_adjusted_notional": fund.total_option_delta_adjusted_notional,
-            "option_market_value": fund.total_option_value,
-            "treasury": fund.total_treasury_value,
-            "total_assets": fund.total_assets,
-            "total_net_assets": fund.total_net_assets,
-        }
-
-        return ComplianceResult(
-            is_compliant=True,
-            details={"rule": "summary_metrics", "status": "calculated"},
-            calculations=calculations,
-        )
