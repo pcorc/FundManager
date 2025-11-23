@@ -12,24 +12,49 @@ class FundHoldings:
         options: Optional[pd.DataFrame] = None,
         flex_options: Optional[pd.DataFrame] = None,  # NEW
         treasury: Optional[pd.DataFrame] = None,
-        reported_cash: float = 0.0,
-        reported_nav: float = 0.0,
-        reported_tna: float = 0.0,
-        reported_ta: float = 0.0,
-        reported_expenses: float = 0.0,
-        reported_shares_outstanding: float = 0.0,
+        cash: float = 0.0,
+        nav: float = 0.0,
+        tna: float = 0.0,
+        ta: float = 0.0,
+        expenses: float = 0.0,
+        shares_outstanding: float = 0.0,
     ) -> None:
         self.equity = self._clean_holdings_dataframe(equity, holding_type='equity')
         self.options = self._clean_holdings_dataframe(options, holding_type='options')
         self.flex_options = self._clean_holdings_dataframe(flex_options, holding_type='flex_options')
         self.treasury = self._clean_holdings_dataframe(treasury, holding_type='treasury')
 
-        self.reported_cash = float(reported_cash or 0.0)
-        self.reported_nav = float(reported_nav or 0.0)
-        self.reported_tna = float(reported_tna or 0.0)
-        self.reported_ta = float(reported_ta or 0.0)
-        self.reported_expenses = float(reported_expenses or 0.0)
-        self.reported_shares_outstanding = float(reported_shares_outstanding or 0.0)
+        self.cash = float(cash or 0.0)
+        self.nav = float(nav or 0.0)
+        self.tna = float(tna or 0.0)
+        self.ta = float(ta or 0.0)
+        self.expenses = float(expenses or 0.0)
+        self.shares_outstanding = float(shares_outstanding or 0.0)
+
+    # Backward-compatible aliases
+    @property
+    def reported_cash(self) -> float:
+        return self.cash
+
+    @property
+    def reported_nav(self) -> float:
+        return self.nav
+
+    @property
+    def reported_tna(self) -> float:
+        return self.tna
+
+    @property
+    def reported_ta(self) -> float:
+        return self.ta
+
+    @property
+    def reported_expenses(self) -> float:
+        return self.expenses
+
+    @property
+    def reported_shares_outstanding(self) -> float:
+        return self.shares_outstanding
 
     def _clean_holdings_dataframe(self, df: Optional[pd.DataFrame], holding_type: str) -> pd.DataFrame:
         """Clean and standardize holdings DataFrame with proper numeric types."""
@@ -83,14 +108,13 @@ class FundHoldings:
             options=self.options.copy() if isinstance(self.options, pd.DataFrame) else pd.DataFrame(),
             flex_options=self.flex_options.copy() if isinstance(self.flex_options, pd.DataFrame) else pd.DataFrame(),  # NEW
             treasury=self.treasury.copy() if isinstance(self.treasury, pd.DataFrame) else pd.DataFrame(),
-            reported_cash=self.reported_cash,
-            reported_nav=self.reported_nav,
-            reported_tna=self.reported_tna,
-            reported_ta=self.reported_ta,
-            reported_expenses=self.reported_expenses,
-            reported_shares_outstanding=self.reported_shares_outstanding,
+            cash=self.cash,
+            nav=self.nav,
+            tna=self.tna,
+            ta=self.ta,
+            expenses=self.expenses,
+            shares_outstanding=self.shares_outstanding,
         )
-
 
 class FundMetrics:
     """Computed metrics from holdings data."""
@@ -219,12 +243,12 @@ class FundSnapshot:
         vest: Optional[FundHoldings] = None,
         custodian: Optional[FundHoldings] = None,
         index: Optional[FundHoldings] = None,
-        reported_cash: float = 0.0,
-        reported_nav: float = 0.0,  # NAV per share
-        reported_tna: float = 0.0,  # Total Net Assets
-        reported_ta: float = 0.0,  # Total Assets
-        reported_expenses: float = 0.0,  # What custodian reports for expenses
-        reported_shares_outstanding: float = 0.0,
+        cash: float = 0.0,
+        nav: float = 0.0,  # NAV per share
+        tna: float = 0.0,  # Total Net Assets
+        ta: float = 0.0,  # Total Assets
+        expenses: float = 0.0,  # What custodian reports for expenses
+        shares_outstanding: float = 0.0,
         flows: float = 0.0,
         basket: Optional[pd.DataFrame] = None,
         overlap: Optional[pd.DataFrame] = None,
@@ -237,12 +261,12 @@ class FundSnapshot:
         self.index = index if isinstance(index, FundHoldings) else FundHoldings()
 
         # Store reported values from custodian/admin
-        self._reported_cash = float(reported_cash)
-        self._reported_nav = float(reported_nav)
-        self._reported_ta = float(reported_ta)
-        self._reported_tna = float(reported_tna)
-        self._reported_expenses = float(reported_expenses)
-        self._reported_shares_outstanding = float(reported_shares_outstanding)
+        self._cash = float(cash)
+        self._nav = float(nav)
+        self._ta = float(ta)
+        self._tna = float(tna)
+        self._expenses = float(expenses)
+        self._shares_outstanding = float(shares_outstanding)
 
         # Other data
         self.flows = float(flows)
@@ -256,28 +280,28 @@ class FundSnapshot:
         self._metrics = None
 
     @property
-    def reported_cash(self) -> float:
-        return self._get_reported_value("reported_cash")
+    def cash(self) -> float:
+        return self._get_value("cash")
 
     @property
-    def reported_nav(self) -> float:
-        return self._get_reported_value("reported_nav")
+    def nav(self) -> float:
+        return self._get_value("nav")
 
     @property
-    def reported_tna(self) -> float:
-        return self._get_reported_value("reported_tna")
+    def tna(self) -> float:
+        return self._get_value("tna")
 
     @property
-    def reported_ta(self) -> float:
-        return self._get_reported_value("reported_ta")
+    def ta(self) -> float:
+        return self._get_value("ta")
 
     @property
-    def reported_expenses(self) -> float:
-        return self._get_reported_value("reported_expenses")
+    def expenses(self) -> float:
+        return self._get_value("expenses")
 
     @property
-    def reported_shares_outstanding(self) -> float:
-        return self._get_reported_value("reported_shares_outstanding")
+    def shares_outstanding(self) -> float:
+        return self._get_value("shares_outstanding")
 
     @property
     def metrics(self) -> FundMetrics:
@@ -288,82 +312,133 @@ class FundSnapshot:
 
     # Alias properties for backward compatibility
     @property
-    def cash(self) -> float:
-        """Cash value (alias for reported_cash)."""
-        return self.reported_cash
+    def reported_cash(self) -> float:
+        return self.cash
 
     @property
-    def nav(self) -> float:
-        """NAV per share (alias for reported_nav)."""
-        return self.reported_nav
+    def reported_nav(self) -> float:
+        return self.nav
 
     @property
-    def expenses(self) -> float:
-        """Expenses (alias for reported_expenses)."""
-        return self.reported_expenses
+    def reported_expenses(self) -> float:
+        return self.expenses
 
     @property
-    def total_assets(self) -> float:
-        """Total Assets (alias for reported_ta)."""
-        return self.reported_ta
+    def reported_ta(self) -> float:
+        return self.ta
 
     @property
-    def total_net_assets(self) -> float:
-        """Total Net Assets (alias for reported_tna)."""
-        return self.reported_tna
+    def reported_tna(self) -> float:
+        return self.tna
 
     @property
-    def shares_outstanding(self) -> float:
-        """Shares outstanding (alias for reported_shares_outstanding)."""
-        return self.reported_shares_outstanding
+    def reported_shares_outstanding(self) -> float:
+        return self.shares_outstanding
 
+    @property
+    def custodian_cash(self) -> float:
+        return float(getattr(self.custodian, "cash", 0.0))
+
+    @property
+    def vest_cash(self) -> float:
+        return float(getattr(self.vest, "cash", 0.0))
+
+    @property
+    def custodian_nav(self) -> float:
+        return float(getattr(self.custodian, "nav", 0.0))
+
+    @property
+    def vest_nav(self) -> float:
+        return float(getattr(self.vest, "nav", 0.0))
+
+    @property
+    def custodian_tna(self) -> float:
+        return float(getattr(self.custodian, "tna", 0.0))
+
+    @property
+    def vest_tna(self) -> float:
+        return float(getattr(self.vest, "tna", 0.0))
+
+    @property
+    def custodian_ta(self) -> float:
+        return float(getattr(self.custodian, "ta", 0.0))
+
+    @property
+    def vest_ta(self) -> float:
+        return float(getattr(self.vest, "ta", 0.0))
+
+    @property
+    def custodian_expenses(self) -> float:
+        return float(getattr(self.custodian, "expenses", 0.0))
+
+    @property
+    def vest_expenses(self) -> float:
+        return float(getattr(self.vest, "expenses", 0.0))
+
+    @property
+    def custodian_shares_outstanding(self) -> float:
+        return float(getattr(self.custodian, "shares_outstanding", 0.0))
+
+    @property
+    def vest_shares_outstanding(self) -> float:
+        return float(getattr(self.vest, "shares_outstanding", 0.0))
+
+    # Backward-compatible reported naming
     @property
     def custodian_reported_cash(self) -> float:
-        return float(getattr(self.custodian, "reported_cash", 0.0))
+        return self.custodian_cash
 
     @property
     def vest_reported_cash(self) -> float:
-        return float(getattr(self.vest, "reported_cash", 0.0))
+        return self.vest_cash
 
     @property
     def custodian_reported_nav(self) -> float:
-        return float(getattr(self.custodian, "reported_nav", 0.0))
+        return self.custodian_nav
 
     @property
     def vest_reported_nav(self) -> float:
-        return float(getattr(self.vest, "reported_nav", 0.0))
+        return self.vest_nav
 
     @property
     def custodian_reported_tna(self) -> float:
-        return float(getattr(self.custodian, "reported_tna", 0.0))
+        return self.custodian_tna
 
     @property
     def vest_reported_tna(self) -> float:
-        return float(getattr(self.vest, "reported_tna", 0.0))
+        return self.vest_tna
 
     @property
     def custodian_reported_ta(self) -> float:
-        return float(getattr(self.custodian, "reported_ta", 0.0))
+        return self.custodian_ta
 
     @property
     def vest_reported_ta(self) -> float:
-        return float(getattr(self.vest, "reported_ta", 0.0))
+        return self.vest_ta
 
     @property
     def custodian_reported_expenses(self) -> float:
-        return float(getattr(self.custodian, "reported_expenses", 0.0))
+        return self.custodian_expenses
 
     @property
     def vest_reported_expenses(self) -> float:
-        return float(getattr(self.vest, "reported_expenses", 0.0))
+        return self.vest_expenses
 
     @property
     def custodian_reported_shares_outstanding(self) -> float:
-        return float(getattr(self.custodian, "reported_shares_outstanding", 0.0))
+        return self.custodian_shares_outstanding
 
     @property
     def vest_reported_shares_outstanding(self) -> float:
-        return float(getattr(self.vest, "reported_shares_outstanding", 0.0))
+        return self.vest_shares_outstanding
+
+    @property
+    def total_assets(self) -> float:
+        return self.ta
+
+    @property
+    def total_net_assets(self) -> float:
+        return self.tna
 
     # Computed value properties (from metrics)
     @property
@@ -402,6 +477,13 @@ class FundSnapshot:
         return self.metrics.total_holdings_value
 
     def _get_reported_value(self, attribute: str) -> float:
+        for source in (self.custodian, self.vest):
+            value = getattr(source, attribute, None)
+            if value is not None:
+                return float(value)
+        return float(getattr(self, f"_{attribute}", 0.0))
+
+    def _get_value(self, attribute: str) -> float:
         for source in (self.custodian, self.vest):
             value = getattr(source, attribute, None)
             if value is not None:
