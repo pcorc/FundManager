@@ -60,8 +60,14 @@ class FundManager:
 
         tests = [test for test in compliance_tests or [] if test]
 
+        self.logger.info(
+            "Starting %s processing for %d funds",
+            self.analysis_type,
+            len(self.available_funds),
+        )
+
         for fund_name in self.available_funds:
-            self.logger.info(f"Processing {fund_name}...")
+            self.logger.info("[%s] Processing %s...", self.analysis_type, fund_name)
             fund_result = FundResult(fund_name=fund_name)
 
             try:

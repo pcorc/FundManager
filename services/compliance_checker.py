@@ -1078,7 +1078,7 @@ class ComplianceChecker:
     def twelve_d3_sec_biz(self, fund: Fund) -> ComplianceResult:
         try:
             vest_eqy_holdings = fund.data.current.vest.equity
-            vest_opt_holdings = fund.data.current.option_holdings
+            vest_opt_holdings = fund.data.current.vest.options
             total_assets, total_net_assets, _, _ = self._get_current_totals(fund)
             sec_biz_mask = vest_eqy_holdings["GICS_INDUSTRY_NAME"].isin(["Capital Markets", "Banks"])
             sec_related_businesses = vest_eqy_holdings[sec_biz_mask].copy()
