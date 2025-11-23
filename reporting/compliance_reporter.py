@@ -109,6 +109,7 @@ def build_compliance_reports_for_range(
     | Sequence[Tuple[date | datetime | str, ProcessingResults]],
     output_dir: str,
     *,
+    output_tag: str | None = None,
     test_functions: Optional[Iterable[str]] = None,
     gics_mapping: Optional[pd.DataFrame] = None,
     create_pdf: bool = True,
