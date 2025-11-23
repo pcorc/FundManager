@@ -134,6 +134,7 @@ def run_eod_mode(
             results,
             report_date=params.trade_date,
             output_dir=str(output_dir),
+            file_name_prefix=_build_prefix("compliance_results"),
             test_functions=params.compliance_tests or None,
             gics_mapping=gics_mapping,
             create_pdf=params.create_pdf,
@@ -148,6 +149,7 @@ def run_eod_mode(
             nav_results=nav_payload if "nav_reconciliation" in params.operations else None,
             report_date=params.trade_date,
             output_dir=str(output_dir),
+            file_name_prefix=_build_prefix("reconciliation_summary"),
             create_pdf=params.create_pdf
         )
 
@@ -161,8 +163,12 @@ def run_trading_mode(
     ex_post_store: BulkDataStore,
     params,
     output_dir: Path,
+    output_tag: str | None = None,
 ):
     """Execute the trading compliance comparison."""
+
+    def _build_prefix(base: str) -> str:
+        return f"{base}_{output_tag}" if output_tag else base
 
     results_ex_ante = _run_operations(
         registry,
@@ -260,12 +266,8 @@ def run_eod_range_mode(
     create_pdf: bool = True,
     generate_daily_reports: bool = True,
     output_tag: str | None = None,
-
 ) -> RangeRunResults:
     """Execute the EOD workflow for each business day in ``[start_date, end_date]``."""
-
-    def _build_prefix(base: str) -> str:
-        return f"{base}_{output_tag}" if output_tag else base
 
     if start_date > end_date:
         raise ValueError("start_date must be on or before end_date")
@@ -275,6 +277,9 @@ def run_eod_range_mode(
     daily_artefacts: "OrderedDict[str, Mapping[str, object]]" = OrderedDict()
 
     latest_gics_mapping = None
+
+    def _build_prefix(base: str) -> str:
+        return f"{base}_{output_tag}" if output_tag else base
 
     for trade_date in _iter_business_days(start_date, end_date):
         previous_date = _previous_business_day(trade_date)
@@ -310,7 +315,6 @@ def run_eod_range_mode(
                 report_date=trade_date,
                 output_dir=str(output_dir),
                 file_name_prefix=_build_prefix("compliance_results"),
-
                 test_functions=compliance_tests or None,
                 gics_mapping=latest_gics_mapping,
                 create_pdf=create_pdf,
@@ -330,15 +334,16 @@ def run_eod_range_mode(
 
         daily_artefacts[trade_date.isoformat()] = artefacts
 
-    stacked_report = None
-    if "compliance" in operations and results_by_date:
-        stacked_report = build_compliance_reports_for_range(
-            results_by_date.items(),
-            output_dir=str(output_dir),
-            test_functions=compliance_tests or None,
-            gics_mapping=latest_gics_mapping,
-            create_pdf=create_pdf,
-        )
+        stacked_report = None
+        if "compliance" in operations and results_by_date:
+            stacked_report = build_compliance_reports_for_range(
+                results_by_date.items(),
+                output_dir=str(output_dir),
+                output_tag=output_tag,
+                test_functions=compliance_tests or None,
+                gics_mapping=latest_gics_mapping,
+                create_pdf=create_pdf,
+            )
 
     return RangeRunResults(
         results_by_date=results_by_date,
