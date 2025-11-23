@@ -1027,7 +1027,7 @@ class Reconciliator:
                     price_discrepancies['option_weight'] = 0.0
 
                 # Filter standard options for private/closed-end funds
-                if self.vehicle_wrapper in {"private_fund", "closed_end_fund"}:
+                if self.vehicle in {"private_fund", "closed_end_fund"}:
                     standard_price = price_discrepancies[~price_discrepancies['is_flex']].copy()
                     flex_price = price_discrepancies[price_discrepancies['is_flex']].copy()
 
