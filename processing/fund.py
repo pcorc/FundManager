@@ -657,7 +657,7 @@ class Fund:
         Example:
             flex_opts = fund.get_flex_options('current')
         """
-        if not self.properties.has_flex_option:
+        if not self.config.get("has_flex_option"):
             return pd.DataFrame()
 
         # Get the snapshot
@@ -676,7 +676,7 @@ class Fund:
             if 'optticker' not in options_df.columns:
                 continue
 
-            pattern = self.properties.flex_option_pattern or "SPX|XSP"
+            pattern = self.config.get("flex_option_pattern") or "SPX|XSP"
             mask = options_df['optticker'].str.contains(pattern, na=False, regex=True)
             flex_opts = options_df[mask]
 
@@ -715,11 +715,11 @@ class Fund:
                 continue
 
             # If no flex options, return all
-            if not self.properties.has_flex_option:
+            if not self.config.get("has_flex_option"):
                 return options_df
 
             # Filter out flex pattern
-            pattern = self.properties.flex_option_pattern or "SPX|XSP"
+            pattern = self.config.get("flex_option_pattern") or "SPX|XSP"
             mask = ~options_df['optticker'].str.contains(pattern, na=False, regex=True)
             regular_opts = options_df[mask]
 
@@ -813,14 +813,13 @@ class Fund:
         all_tickers: Set[str] = set()
 
         # If no flex options, handle accordingly
-        if not self.properties.has_flex_option:
+        if not self.has_flex_option:  # Changed from self.properties.has_flex_option
             if include_flex:
                 return all_tickers  # No flex options exist
             else:
                 return self.gather_all_tickers('options', include_prior)
 
-        pattern = self.properties.flex_option_pattern or "SPX|XSP"
-
+        pattern = self.config.get("flex_option_pattern") or "SPX|XSP"
         snapshots = [self.data.current]
         if include_prior and self.data.prior:
             snapshots.append(self.data.prior)
@@ -924,8 +923,8 @@ class Fund:
 
         # Get tenor from properties or config
         tenor = ""
-        if hasattr(self.properties, 'option_roll_tenor'):
-            tenor = str(self.properties.option_roll_tenor or "").lower()
+        if hasattr(self.data, 'option_roll_tenor'):
+            tenor = str(self.data.option_roll_tenor or "").lower()
         elif hasattr(self.data, 'config') and isinstance(self.data.config, dict):
             tenor = str(self.data.config.get('option_roll_tenor', '')).lower()
 

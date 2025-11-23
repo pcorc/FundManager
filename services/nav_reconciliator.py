@@ -60,6 +60,18 @@ class NAVReconciliator:
         self.results: Dict[str, object] = {}
         self.summary: Dict[str, float] = {}
 
+        self.DETAIL_COLUMNS = [
+            "ticker",
+            "quantity_t1",
+            "quantity_t",
+            "price_t1_raw",  # Vest price at T-1
+            "price_t_raw",  # Vest price at T
+            "price_t1_adj",  # Custodian/adjusted price at T-1
+            "price_t_adj",  # Custodian/adjusted price at T
+            "gl_raw",  # Raw gain/loss
+            "gl_adjusted"  # Adjusted gain/loss
+        ]
+
         # Detail containers
         self.equity_details = pd.DataFrame(columns=self.DETAIL_COLUMNS)
         self.option_details = pd.DataFrame(columns=self.DETAIL_COLUMNS)
@@ -450,7 +462,7 @@ class NAVReconciliator:
         On assignment days, option G/L is just the current value.
         Options were closed/rolled, so we don't compare to prior.
         """
-        current_value = self.fund.data.current.values.option_value
+        current_value = self.fund.data.current.vest.option_value
 
         return AssetClassGainLoss(
             asset_class='options',
