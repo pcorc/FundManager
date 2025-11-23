@@ -260,31 +260,31 @@ class FundManager:
 
         # Populate current holdings with Vest (OMS) data when available
         fund_data.current = FundSnapshot(
-            vest=FundHoldings(
-                equity=fund_data_dict.get('vest_equity', pd.DataFrame()),
-                options=vest_options,  # Regular options only
-                flex_options=vest_flex,
-                treasury=fund_data_dict.get('vest_treasury', pd.DataFrame()),
-            ),
-            custodian=FundHoldings(
-                equity = fund_data_dict.get('custodian_equity', pd.DataFrame()),
-                options = cust_options,  # Regular options only
-                flex_options = cust_flex,
-                treasury = fund_data_dict.get('custodian_treasury', pd.DataFrame()),
-                cash = self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
-                nav = self._extract_nav_per_share(df_nav_t),
-                total_assetsa = self._extract_total_assets(df_nav_t),
-                total_net_assets = self._extract_total_net_assets(df_nav_t),
-                expenses = self._extract_expense_value(df_nav_t),
-                shares_outstanding = self._extract_shares_outstanding(df_nav_t),
-        ),
+        vest = FundHoldings(
+        equity = fund_data_dict.get('vest_equity', pd.DataFrame()),
+        options = vest_options,  # Regular options only
+        flex_options = vest_flex,
+        treasury = fund_data_dict.get('vest_treasury', pd.DataFrame()),
+        ), 
+        custodian = FundHoldings(
+        equity = fund_data_dict.get('custodian_equity', pd.DataFrame()),
+        options = cust_options,
+        flex_options = cust_flex,
+        treasury = fund_data_dict.get('custodian_treasury', pd.DataFrame()),
+        cash = self._extract_cash_value(fund_data_dict.get('cash', pd.DataFrame())),
+        nav = self._extract_nav_per_share(df_nav_t),
+        ta = self._extract_total_assets(df_nav_t),
+        tna = self._extract_total_net_assets(df_nav_t),
+        expenses = self._extract_expense_value(df_nav_t),
+        shares_outstanding = self._extract_shares_outstanding(df_nav_t),
+        ), 
         index = FundHoldings(
             equity=fund_data_dict.get('index', pd.DataFrame()),
             options=pd.DataFrame(),
             flex_options=pd.DataFrame(),
             treasury=pd.DataFrame(),
         ),
-
+        
         # Add other values for T
         equity_trades = fund_data_dict.get('equity_trades', pd.DataFrame()),
         cr_rd_data = fund_data_dict.get('cr_rd', pd.DataFrame()),
@@ -302,7 +302,7 @@ class FundManager:
             ),
             custodian=FundHoldings(
                 equity=fund_data_dict.get('custodian_equity_t1', pd.DataFrame()),
-                options=cust_options_t1,  # Regular options only
+                options=cust_options_t1,
                 flex_options=cust_flex_t1,
                 treasury=fund_data_dict.get('custodian_treasury_t1', pd.DataFrame()),
                 cash=self._extract_cash_value(fund_data_dict.get('cash_t1', pd.DataFrame())),
