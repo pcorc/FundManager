@@ -295,11 +295,11 @@ class ComplianceChecker:
 
     def diversification_IRS_check(self, fund: Fund) -> ComplianceResult:
         try:
-            vest_eqy_holdings = fund.data.current.equity_holdings
-            vest_opt_holdings = fund.data.current.options_holdings
+            vest_eqy_holdings = fund.data.current.vest.equity
+            vest_opt_holdings = fund.data.current.vest.options
 
             total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
-            overlap_df = fund.data.current.overlap_holdings
+            overlap_df = fund.data.current.overlap
 
             vest_eqy_holdings = self._consolidate_holdings_by_issuer(fund, vest_eqy_holdings)
 
@@ -318,7 +318,12 @@ class ComplianceChecker:
             overlap_details_df = pd.DataFrame(
                 columns=["security_ticker", "security_weight", "overlap_market_value", "overlap_weight"]
             )
-            if not overlap_df.empty:
+
+            has_index_flex = fund.has_flex_option and (
+                (fund.flex_option_type or "").lower() == "index"
+            )
+
+            if has_index_flex and not overlap_df.empty:
                 holdings_df, overlap_details_df = self._calculate_index_overlap_adjustments(
                     fund,
                     holdings_df,
@@ -476,10 +481,10 @@ class ComplianceChecker:
             )
 
         try:
-            vest_opt_holdings = fund.data.current.options_holdings
-            vest_flex_options = fund.data.current.flex_options_holdings
-            vest_eqy_holdings = fund.data.current.equity_holdings
-            vest_treasury_holdings = fund.data.current.treasury_holdings
+            vest_opt_holdings = fund.data.current.vest.options
+            vest_eqy_holdings = fund.data.current.vest.equity
+            vest_treasury_holdings = fund.data.current.vest.treasury
+
             total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
             vest_eqy_holdings = self._consolidate_holdings_by_issuer(fund, vest_eqy_holdings)
 
@@ -514,6 +519,7 @@ class ComplianceChecker:
             cumulative_sum = sorted_df["net_market_value"].cumsum()
             threshold = 0.25 * total_assets if total_assets > 0 else 0.0
             within_25_percent = sorted_df[cumulative_sum <= threshold].copy()
+
             if within_25_percent.empty and not sorted_df.empty:
                 within_25_percent = sorted_df.head(1).copy()
 
@@ -712,8 +718,8 @@ class ComplianceChecker:
             )
 
         try:
-            regular_options = fund.data.current.options_holdings
-            vest_eqy_holdings = fund.data.current.equity_holdings
+            regular_options = fund.data.current.vest.options
+            vest_eqy_holdings = fund.data.current.vest.equity
             total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
             vest_eqy_holdings = self._consolidate_holdings_by_issuer(fund, vest_eqy_holdings)
 
@@ -798,7 +804,7 @@ class ComplianceChecker:
         """Check if fund has any real estate exposure"""
         try:
 
-            vest_eqy_holdings = fund.data.current.equity_holdings
+            vest_eqy_holdings = fund.data.current.vest.equity
 
             if vest_eqy_holdings.empty:
                 # No holdings means no real estate exposure - PASS
@@ -857,7 +863,7 @@ class ComplianceChecker:
     def commodities_check(self, fund: Fund) -> ComplianceResult:
         """Check if fund has any commodities exposure"""
         try:
-            vest_eqy_holdings = fund.data.current.equity_holdings
+            vest_eqy_holdings = fund.data.current.vest.equity
 
             if vest_eqy_holdings.empty:
                 # No holdings means no commodities exposure - PASS
@@ -915,7 +921,7 @@ class ComplianceChecker:
     def twelve_d1a_other_inv_cos(self, fund: Fund) -> ComplianceResult:
         try:
 
-            vest_eqy_holdings = fund.data.current.equity_holdings
+            vest_eqy_holdings = fund.data.current.vest.equity
             total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
 
             if total_assets == 0 or vest_eqy_holdings.empty:
@@ -1001,7 +1007,7 @@ class ComplianceChecker:
 
     def twelve_d2_insurance_cos(self, fund: Fund) -> ComplianceResult:
         try:
-            vest_eqy_holdings = fund.data.current.equity_holdings
+            vest_eqy_holdings = fund.data.current.vest.equity
             total_assets, total_net_assets, _, _ = self._get_current_totals(fund)
             insurance_mask = (
                 vest_eqy_holdings["GICS_INDUSTRY_GROUP_NAME"].eq("Insurance")
@@ -1071,7 +1077,7 @@ class ComplianceChecker:
 
     def twelve_d3_sec_biz(self, fund: Fund) -> ComplianceResult:
         try:
-            vest_eqy_holdings = fund.data.current.equity_holdings
+            vest_eqy_holdings = fund.data.current.vest.equity
             vest_opt_holdings = fund.data.current.option_holdings
             total_assets, total_net_assets, _, _ = self._get_current_totals(fund)
             sec_biz_mask = vest_eqy_holdings["GICS_INDUSTRY_NAME"].isin(["Capital Markets", "Banks"])
@@ -1187,8 +1193,8 @@ class ComplianceChecker:
     def max_15pct_illiquid_sai(self, fund: Fund) -> ComplianceResult:
         """Check 15% illiquid assets compliance"""
         try:
-            vest_opt_holdings = fund.data.current.options_holdings
-            vest_eqy_holdings = fund.data.current.equity_holdings
+            vest_opt_holdings = fund.data.current.vest.options
+            vest_eqy_holdings = fund.data.current.vest.equity
             total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
 
             if total_assets == 0 or vest_eqy_holdings.empty:
@@ -1267,7 +1273,7 @@ class ComplianceChecker:
                     error="Fund data is not available"
                 )
 
-            vest_eqy_holdings = fund.data.current.equity_holdings
+            vest_eqy_holdings = fund.data.current.vest.equity
 
             if vest_eqy_holdings.empty:
                 return ComplianceResult(
@@ -1629,17 +1635,30 @@ class ComplianceChecker:
         ]
         empty = pd.DataFrame(columns=overlap_columns)
 
+        def _base_result(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+            df = df.copy()
+            df["net_market_value"] = pd.to_numeric(
+                df.get("equity_market_value", 0.0), errors="coerce"
+            ).fillna(0.0) + pd.to_numeric(
+                df.get("option_market_value", 0.0), errors="coerce"
+            ).fillna(0.0)
+            return df, empty
+
         if holdings_df.empty:
             return holdings_df.copy(), empty
 
-        if not (
-            bool(getattr(fund, "has_flex_option", False))
-            and str(getattr(fund, "flex_option_type", "")).lower() == "index"
-        ):
-            return holdings_df.copy(), empty
-
         if overlap_df is None or overlap_df.empty:
-            return holdings_df.copy(), empty
+            return _base_result(holdings_df)
+
+        if not (
+            fund.has_flex_option
+            and (fund.flex_option_type or "").lower() == "index"
+        ):
+            return _base_result(holdings_df)
+
+        flex_options = getattr(getattr(fund.data.current, "vest", None), "flex_options", pd.DataFrame())
+        if flex_options is None or flex_options.empty:
+            return _base_result(holdings_df)
 
         overlap = overlap_df.copy()
 
@@ -1648,23 +1667,26 @@ class ComplianceChecker:
         ).fillna(0.0)
         overlap = overlap.drop_duplicates(subset="security_ticker")
 
-        df = holdings_df.copy()
-        if "eqyticker" in df.columns:
-            flex_mask = df["ticker_option"].astype(str).str.upper().isin(["SPX", "XSP"])
+        flex_df = flex_options.copy()
+        if "optticker" in flex_df.columns:
+            flex_mask = flex_df["optticker"].astype(str).str.upper().str.startswith(
+                ("4SPX", "4XSP", "SPX", "XSP", "2SPX", "2XSP")
+            )
+        elif "ticker_option" in flex_df.columns:
+            flex_mask = flex_df["ticker_option"].astype(str).str.upper().isin(["SPX", "XSP"])
         else:
-            flex_mask = pd.Series(False, index=df.index)
-        if "optticker" in df.columns:
-            flex_mask = flex_mask | df["optticker"].astype(str).str.upper().str.startswith(("4SPX", "4XSP", "SPX", "XSP", "2SPX", "2XSP"))
+            flex_mask = pd.Series(False, index=flex_df.index)
 
-        if not flex_mask.any():
-            return df, empty
+        flex_positions = flex_df.loc[flex_mask].copy()
+        if flex_positions.empty:
+            return _base_result(holdings_df)
 
-        flex_positions = df.loc[flex_mask].copy()
+        quantities = pd.to_numeric(
+            flex_positions.get("nav_shares_option", 0.0), errors="coerce"
+        ).fillna(0.0)
+        long_flex = flex_positions.loc[quantities > 0].copy()
 
-        if not flex_positions.empty:
-            quantities = pd.to_numeric(flex_positions["nav_shares_option"], errors="coerce").fillna(0.0)
-            long_flex = flex_positions.loc[quantities > 0].copy()
-        else:
+        if long_flex.empty:
             long_flex = flex_positions.loc[
                 pd.to_numeric(
                     flex_positions.get("option_market_value", 0.0), errors="coerce"
@@ -1679,9 +1701,9 @@ class ComplianceChecker:
         )
 
         if total_flex_mv <= 0:
-            return df.loc[~flex_mask].reset_index(drop=True), empty
+            return _base_result(holdings_df)
 
-        result = df.loc[~flex_mask].copy().reset_index(drop=True)
+        result = holdings_df.copy().reset_index(drop=True)
         if "long_box_market_value_overlap" not in result.columns:
             result["long_box_market_value_overlap"] = 0.0
 
@@ -1704,7 +1726,12 @@ class ComplianceChecker:
         merged = merged.drop(columns=["security_ticker"], errors="ignore")
 
         merged["net_market_value"] = (
-            pd.to_numeric(merged.get("equity_market_value", 0.0), errors="coerce").fillna(0.0)
+            pd.to_numeric(
+                merged.get("equity_market_value", 0.0), errors="coerce"
+            ).fillna(0.0)
+            + pd.to_numeric(
+                merged.get("option_market_value", 0.0), errors="coerce"
+            ).fillna(0.0)
             + merged["long_box_market_value_overlap"]
         )
 
