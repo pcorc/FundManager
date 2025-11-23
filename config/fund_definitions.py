@@ -3,9 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-# The metadata below replaces the legacy SQL-backed registry. Each entry mirrors the
-# columns that previously lived in ``fund_recon_mappings`` while surfacing additional
-# descriptive properties that downstream services can query directly.
+
 FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "DOGG": {
         "custodian_equity_holdings": "bny_us_holdings_v2",
@@ -784,6 +782,8 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "diversification_status": "diversified",
     },
 }
+
+ALL_FUNDS = set(FUND_DEFINITIONS.keys())
 
 CLOSED_END_FUNDS = {
     fund

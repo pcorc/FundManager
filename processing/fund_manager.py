@@ -23,6 +23,7 @@ class FundResult:
     reconciliation_results: Dict[str, Any] = None
     nav_results: Dict[str, Any] = None
     errors: List[str] = None
+    fund: Optional[Fund] = None  # NEW: Add Fund object for property-based reporting
 
     def __post_init__(self):
         if self.errors is None:
@@ -79,6 +80,7 @@ class FundManager:
 
                 # Create Fund instance with bulk data
                 fund = self._create_fund_from_bulk_data(fund_name, fund_config)
+                fund_result.fund = fund  # NEW: Assign Fund object to result
 
                 # Run requested operations
                 if 'compliance' in operations:
@@ -129,31 +131,42 @@ class FundManager:
             return {'errors': [str(e)], 'violations': []}
 
     def _run_nav_reconciliation(self, fund: Fund, fund_name: str) -> Dict[str, Any]:
-        """Run NAV reconciliation using your existing NAVReconciliator"""
+        """
+        Run NAV reconciliation using Fund object.
+
+        Args:
+            fund: Fund object with loaded current and prior snapshots
+            fund_name: Fund name
+
+        Returns:
+            NAV reconciliation results dictionary
+        """
         try:
             # Determine prior date
             prior_date = self._get_prior_date(self.data_store.date)
 
-            # Get fund data from data store
-            fund_data_dict = self.data_store.fund_data.get(fund_name, {})
+            # Validate that Fund has necessary data
+            if fund.data.current is None:
+                raise ValueError(f"Fund {fund_name} missing current snapshot data")
 
-            # NAVReconciliator expects positional arguments: session, fund_name, fund_data, analysis_date, prior_date
+            if fund.data.prior is None:
+                raise ValueError(f"Fund {fund_name} missing prior snapshot data")
+
+            # Create NAV reconciliator with Fund object
             nav_reconciliator = NAVReconciliator(
-                self.data_store.session,  # session
-                fund_name,  # fund_name
-                fund_data_dict,  # fund_data dictionary
-                self.data_store.date,  # analysis_date
-                prior_date,  # prior_date
-                analysis_type=self.analysis_type,  # optional kwargs
-                fund=fund,  # optional kwargs
-                socgen_custodian=getattr(self.data_store, 'socgen_custodian', None)  # optional kwargs
+                fund=fund,
+                analysis_date=self.data_store.date,
+                prior_date=prior_date,
             )
 
             return nav_reconciliator.run_nav_reconciliation()
 
         except Exception as e:
-            self.logger.error(f"NAV reconciliation error for {fund_name}: {e}")
-            return {'errors': [str(e)], 'differences': []}
+            self.logger.error(
+                f"NAV reconciliation error for {fund_name}: {e}",
+                exc_info=True
+            )
+            return {'errors': [str(e)]}
 
     def _run_reconciliation(self, fund: Fund, fund_name: str) -> Dict[str, Any]:
         """Run reconciliation"""
@@ -161,13 +174,7 @@ class FundManager:
             # Get fund data from data store
             fund_data_dict = self.data_store.fund_data.get(fund_name, {})
 
-            # Reconciliator expects positional arguments: fund_name, fund_data, analysis_type
-            reconciliator = Reconciliator(
-                fund_name,  # fund_name
-                fund_data_dict,  # fund_data
-                self.analysis_type,  # analysis_type (optional)
-                fund = fund
-            )
+            reconciliator = Reconciliator(fund, self.analysis_type)
 
             reconciliator.run_all_reconciliations()
             summary = reconciliator.get_summary()
@@ -339,6 +346,23 @@ class FundManager:
             base_cls=getattr(self.data_store, 'base_cls', None)
         )
         fund.data = fund_data
+
+        # INSERT THE NEW NAV DATA LOADING CODE HERE (from artifact above)
+        fund.data.price_breaks = fund_data_dict.get('holdings_price_breaks', {})
+        fund.data.assignments = (
+                fund_data_dict.get('option_assignments') or
+                fund_data_dict.get('assignments')
+        )
+        fund.data.distributions = fund_data_dict.get('distributions')
+        fund.data.flows = (
+                fund_data_dict.get('t1_flows') or
+                fund_data_dict.get('flows_t1')
+        )
+        fund.data.config = {
+            'expense_ratio': fund_config.config.get('expense_ratio'),
+            'option_roll_tenor': fund_config.config.get('option_roll_tenor'),
+        }
+        fund.data.other = fund_data_dict.get('other', 0.0)
 
         return fund
 

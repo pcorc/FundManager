@@ -1,5 +1,9 @@
-from typing import Dict, Optional, Sequence
+from typing import Dict, Optional, Sequence, Set
 import pandas as pd
+import re
+from typing import Any  # Add to existing typing imports
+
+from datetime import date
 
 
 class FundHoldings:
@@ -460,10 +464,15 @@ class FundData:
     ) -> None:
         self.current = current if isinstance(current, FundSnapshot) else FundSnapshot()
         self.previous = previous if isinstance(previous, FundSnapshot) else FundSnapshot()
-        # self.index = index if isinstance(index, FundHoldings) else FundHoldings()
-        # self.previous_index = previous_index if isinstance(previous_index, FundHoldings) else FundHoldings()
-        # self.equity_trades = equity_trades if isinstance(equity_trades, pd.DataFrame) else pd.DataFrame()
-        # self.cr_rd_data = cr_rd_data if isinstance(cr_rd_data, pd.DataFrame) else pd.DataFrame()
+        self.prior = self.previous  # Alias
+
+        # NAV reconciliation data - ADD THESE LINES
+        self.price_breaks: Dict[str, pd.DataFrame] = {}
+        self.assignments: Optional[pd.DataFrame] = None
+        self.distributions: Optional[pd.DataFrame] = None
+        self.flows: Optional[pd.DataFrame] = None
+        self.config: Dict[str, Any] = {}
+        self.other: float = 0.0
 
 
 class Fund:
@@ -528,6 +537,44 @@ class Fund:
         return vehicle.lower() == "closed_end_fund"
 
     @property
+    def is_etf(self) -> bool:
+        """Check if fund is closed-end."""
+        vehicle = self.vehicle
+        if vehicle is None:
+            return False
+        return vehicle.lower() == "etf"
+
+    @property
+    def is_diversified(self) -> bool:
+        """Check if fund is closed-end."""
+        vehicle = self.vehicle
+        if vehicle is None:
+            return False
+        return vehicle.lower() == "diversification_status"
+
+    @property
+    def is_non_diversified(self) -> bool:
+        """Check if fund is non-diversified."""
+        status = self.diversification_status
+        if status is None:
+            return False
+        return status.lower() == "non_diversified"
+
+    @property
+    def index_flex_usage(self) -> Optional[str]:
+        """Fund index flex usage from config."""
+        value = self.config.get("index_flex_usage")
+        return value if isinstance(value, str) else None
+
+    @property
+    def uses_index_flex(self) -> bool:
+        """Check if fund uses index FLEX options."""
+        usage = self.index_flex_usage
+        if usage is None:
+            return False
+        return usage.lower() in ("true", "yes", "enabled", "1")
+
+    @property
     def has_listed_option(self) -> bool:
         """Check if fund has listed options."""
         return bool(self.config.get("has_listed_option", False))
@@ -539,6 +586,33 @@ class Fund:
         if isinstance(value, str):
             value = value.strip()
         return value or None
+
+    @property
+    def flex_option_pattern(self) -> str:
+        """
+        Regex pattern to identify flex options.
+
+        Returns pattern based on flex_option_type:
+        - 'index': "SPX|XSP" (index flex options)
+        - 'single_stock': "^2" (options starting with "2")
+        - default: "SPX|XSP"
+        """
+        if not self.has_flex_option:
+            return "SPX|XSP"
+
+        flex_type = self.flex_option_type
+
+        if flex_type == "index":
+            return "SPX|XSP"
+        elif flex_type == "single_stock":
+            return "^2"
+        else:
+            return "SPX|XSP"
+
+    @property
+    def option_roll_tenor(self) -> Optional[str]:
+        """Option roll tenor ('weekly', 'monthly', 'quarterly')."""
+        return self.config.get("option_roll_tenor")
 
     @property
     def has_flex_option(self) -> bool:
@@ -568,3 +642,496 @@ class Fund:
         if isinstance(value, str):
             value = value.strip()
         return value or None
+
+    def get_flex_options(self, snapshot: str = 'current') -> pd.DataFrame:
+        """
+        Get flex options matching the fund's flex_option_pattern.
+
+        Args:
+            snapshot: 'current' or 'prior' to select which snapshot
+
+        Returns:
+            DataFrame with flex options from vest source (preferred)
+            Falls back to custodian if vest is empty
+
+        Example:
+            flex_opts = fund.get_flex_options('current')
+        """
+        if not self.properties.has_flex_option:
+            return pd.DataFrame()
+
+        # Get the snapshot
+        snap = self.data.current if snapshot == 'current' else self.data.prior
+        if snap is None:
+            return pd.DataFrame()
+
+        # Try vest first, then custodian
+        for source in (snap.vest, snap.custodian):
+            if source is None or source.options.empty:
+                continue
+
+            options_df = source.options.copy()
+
+            # Filter by pattern
+            if 'optticker' not in options_df.columns:
+                continue
+
+            pattern = self.properties.flex_option_pattern or "SPX|XSP"
+            mask = options_df['optticker'].str.contains(pattern, na=False, regex=True)
+            flex_opts = options_df[mask]
+
+            if not flex_opts.empty:
+                return flex_opts
+
+        return pd.DataFrame()
+
+    def get_regular_options(self, snapshot: str = 'current') -> pd.DataFrame:
+        """
+        Get regular (non-flex) options.
+
+        Args:
+            snapshot: 'current' or 'prior' to select which snapshot
+
+        Returns:
+            DataFrame with non-flex options from vest source (preferred)
+            Falls back to custodian if vest is empty
+
+        Example:
+            regular_opts = fund.get_regular_options('current')
+        """
+        # Get the snapshot
+        snap = self.data.current if snapshot == 'current' else self.data.prior
+        if snap is None:
+            return pd.DataFrame()
+
+        # Try vest first, then custodian
+        for source in (snap.vest, snap.custodian):
+            if source is None or source.options.empty:
+                continue
+
+            options_df = source.options.copy()
+
+            if 'optticker' not in options_df.columns:
+                continue
+
+            # If no flex options, return all
+            if not self.properties.has_flex_option:
+                return options_df
+
+            # Filter out flex pattern
+            pattern = self.properties.flex_option_pattern or "SPX|XSP"
+            mask = ~options_df['optticker'].str.contains(pattern, na=False, regex=True)
+            regular_opts = options_df[mask]
+
+            if not regular_opts.empty:
+                return regular_opts
+
+        return pd.DataFrame()
+
+    # ========================================================================
+    # TICKER GATHERING METHODS
+    # ========================================================================
+
+    def gather_all_tickers(
+            self,
+            asset_class: str,
+            include_prior: bool = True,
+    ) -> Set[str]:
+        """
+        Gather unique tickers from current and optionally prior snapshots.
+
+        Args:
+            asset_class: 'equity', 'options', 'flex_options', 'treasury'
+            include_prior: Whether to include prior snapshot tickers
+
+        Returns:
+            Set of unique ticker symbols from both vest and custodian sources
+            across current and (optionally) prior snapshots
+
+        Example:
+            all_tickers = fund.gather_all_tickers('equity', include_prior=True)
+        """
+        all_tickers: Set[str] = set()
+
+        # Map asset class to ticker column name
+        ticker_col_map = {
+            'equity': 'eqyticker',
+            'options': 'optticker',
+            'flex_options': 'optticker',
+            'treasury': 'ticker',
+        }
+
+        ticker_col = ticker_col_map.get(asset_class)
+        if not ticker_col:
+            return all_tickers
+
+        # Gather from current snapshot
+        if self.data.current:
+            for source in (self.data.current.vest, self.data.current.custodian):
+                if source is None:
+                    continue
+
+                df = self._get_asset_class_df(source, asset_class)
+                if not df.empty and ticker_col in df.columns:
+                    all_tickers.update(df[ticker_col].dropna().unique())
+
+        # Gather from prior snapshot if requested
+        if include_prior and self.data.prior:
+            for source in (self.data.prior.vest, self.data.prior.custodian):
+                if source is None:
+                    continue
+
+                df = self._get_asset_class_df(source, asset_class)
+                if not df.empty and ticker_col in df.columns:
+                    all_tickers.update(df[ticker_col].dropna().unique())
+
+        return all_tickers
+
+    def gather_option_tickers(
+            self,
+            include_flex: bool,
+            include_prior: bool = True,
+    ) -> Set[str]:
+        """
+        Gather option tickers with flex filtering.
+
+        Args:
+            include_flex: If True, include only flex options;
+                         if False, exclude flex options
+            include_prior: Whether to include prior snapshot tickers
+
+        Returns:
+            Set of option ticker symbols filtered by flex pattern
+
+        Example:
+            # Get only regular options
+            regular = fund.gather_option_tickers(include_flex=False)
+
+            # Get only flex options
+            flex = fund.gather_option_tickers(include_flex=True)
+        """
+        all_tickers: Set[str] = set()
+
+        # If no flex options, handle accordingly
+        if not self.properties.has_flex_option:
+            if include_flex:
+                return all_tickers  # No flex options exist
+            else:
+                return self.gather_all_tickers('options', include_prior)
+
+        pattern = self.properties.flex_option_pattern or "SPX|XSP"
+
+        snapshots = [self.data.current]
+        if include_prior and self.data.prior:
+            snapshots.append(self.data.prior)
+
+        for snapshot in snapshots:
+            if not snapshot:
+                continue
+
+            for source in (snapshot.vest, snapshot.custodian):
+                if source is None or source.options.empty:
+                    continue
+
+                df = source.options
+                if 'optticker' not in df.columns:
+                    continue
+
+                # Apply pattern filter
+                mask = df['optticker'].str.contains(pattern, na=False, regex=True)
+
+                # Include or exclude based on flag
+                filtered = df[mask if include_flex else ~mask]
+
+                all_tickers.update(filtered['optticker'].dropna().unique())
+
+        return all_tickers
+
+    def _get_asset_class_df(self, source, asset_class: str) -> pd.DataFrame:
+        """Helper to get DataFrame for an asset class from a source."""
+        if asset_class == 'equity':
+            return source.equity
+        elif asset_class == 'options':
+            return source.options
+        elif asset_class == 'flex_options':
+            return source.flex_options
+        elif asset_class == 'treasury':
+            return source.treasury
+        return pd.DataFrame()
+
+    # ========================================================================
+    # PRICE BREAK ACCESS
+    # ========================================================================
+
+    def get_price_breaks(self, asset_class: str) -> pd.DataFrame:
+        """
+        Get price breaks for an asset class.
+
+        Args:
+            asset_class: 'equity', 'option', 'treasury'
+
+        Returns:
+            DataFrame with price breaks indexed by ticker
+
+        Note: Price breaks should be stored in fund.data.price_breaks
+        as a dict with keys matching asset class names.
+
+        Example:
+            equity_breaks = fund.get_price_breaks('equity')
+            if 'AAPL' in equity_breaks.index:
+                cust_price = equity_breaks.loc['AAPL', 'price_cust']
+        """
+        if not hasattr(self.data, 'price_breaks'):
+            return pd.DataFrame()
+
+        price_breaks = self.data.price_breaks
+        if not isinstance(price_breaks, dict):
+            return pd.DataFrame()
+
+        breaks = price_breaks.get(asset_class, pd.DataFrame())
+        if isinstance(breaks, pd.DataFrame):
+            return breaks
+
+        return pd.DataFrame()
+
+    # ========================================================================
+    # SETTLEMENT DATE CHECKING
+    # ========================================================================
+
+    def is_option_settlement_date(self, check_date: date | str) -> bool:
+        """
+        Determine if a given date is an option settlement date.
+
+        Args:
+            check_date: Date to check (date object or string)
+
+        Returns:
+            True if the date is a settlement date based on:
+            - Fund's option_roll_tenor configuration (weekly/monthly/quarterly)
+            - Third Friday rules for monthly/quarterly
+            - Assignment data if available
+
+        Example:
+            if fund.is_option_settlement_date('2024-01-19'):
+                # Process assignment G/L
+                pass
+        """
+        if check_date is None:
+            return False
+
+        # Convert to pandas Timestamp for easier date math
+        timestamp = pd.Timestamp(check_date)
+
+        # Get tenor from properties or config
+        tenor = ""
+        if hasattr(self.properties, 'option_roll_tenor'):
+            tenor = str(self.properties.option_roll_tenor or "").lower()
+        elif hasattr(self.data, 'config') and isinstance(self.data.config, dict):
+            tenor = str(self.data.config.get('option_roll_tenor', '')).lower()
+
+        # Check based on tenor
+        if tenor == 'weekly':
+            # Every Friday
+            return timestamp.weekday() == 4
+
+        elif tenor == 'monthly':
+            # Third Friday of the month OR last business day
+            month_start = timestamp.replace(day=1)
+            month_end = timestamp + pd.tseries.offsets.MonthEnd(0)
+
+            # Check for third Friday
+            third_fridays = pd.date_range(
+                month_start,
+                month_end,
+                freq='WOM-3FRI',
+            )
+            if not third_fridays.empty and timestamp.normalize() == third_fridays[0].normalize():
+                return True
+
+            # Check for last business day
+            last_bday = month_end - pd.tseries.offsets.BDay(0)
+            return timestamp.normalize() == last_bday.normalize()
+
+        elif tenor == 'quarterly':
+            # Only in March, June, September, December
+            if timestamp.month not in (3, 6, 9, 12):
+                return False
+
+            # Third Friday of the quarter-end month
+            month_start = timestamp.replace(day=1)
+            month_end = timestamp + pd.tseries.offsets.MonthEnd(0)
+
+            third_fridays = pd.date_range(
+                month_start,
+                month_end,
+                freq='WOM-3FRI',
+            )
+            return any(timestamp.normalize() == tf.normalize() for tf in third_fridays)
+
+        # Default: check if it's a third Friday
+        month_start = timestamp.replace(day=1)
+        month_end = timestamp + pd.tseries.offsets.MonthEnd(0)
+        third_fridays = pd.date_range(month_start, month_end, freq='WOM-3FRI')
+        if any(timestamp.normalize() == tf.normalize() for tf in third_fridays):
+            return True
+
+        # Check assignments data if available
+        if hasattr(self.data, 'assignments'):
+            assignments = self.data.assignments
+            if isinstance(assignments, pd.DataFrame) and not assignments.empty:
+                date_cols = [
+                    col for col in assignments.columns
+                    if 'date' in str(col).lower()
+                ]
+                if date_cols:
+                    try:
+                        dates = pd.to_datetime(
+                            assignments[date_cols[0]], errors='coerce'
+                        ).dt.normalize()
+                        return timestamp.normalize() in dates.values
+                    except Exception:
+                        pass
+
+        return False
+
+    # ========================================================================
+    # NAV DATA ACCESS
+    # ========================================================================
+
+    def get_nav_metric(
+            self,
+            metric: str,
+            snapshot: str = 'current',
+    ) -> float:
+        """
+        Get NAV-related metrics from fund data.
+
+        Args:
+            metric: One of 'total_net_assets', 'shares_outstanding', 'nav', etc.
+            snapshot: 'current' or 'prior'
+
+        Returns:
+            Float value of the metric, 0.0 if not found
+
+        Looks in:
+            - fund.data.{snapshot}.nav DataFrame
+            - fund.data.{snapshot}.custodian NAV fields
+
+        Example:
+            tna = fund.get_nav_metric('total_net_assets', 'current')
+            shares = fund.get_nav_metric('shares_outstanding', 'current')
+        """
+        snap = self.data.current if snapshot == 'current' else self.data.prior
+        if snap is None:
+            return 0.0
+
+        # Check if there's a nav DataFrame
+        if hasattr(snap, 'nav') and isinstance(snap.nav, pd.DataFrame):
+            nav_df = snap.nav
+            if not nav_df.empty and metric in nav_df.columns:
+                series = pd.to_numeric(nav_df[metric], errors='coerce').dropna()
+                if not series.empty:
+                    return float(series.iloc[0])
+
+        # Check custodian source
+        if snap.custodian and hasattr(snap.custodian, metric):
+            value = getattr(snap.custodian, metric)
+            if isinstance(value, (int, float)):
+                return float(value)
+
+        return 0.0
+
+    # ========================================================================
+    # ASSIGNMENT DATA ACCESS
+    # ========================================================================
+
+    def get_assignments(
+            self,
+            filter_date: Optional[date | str] = None,
+    ) -> pd.DataFrame:
+        """
+        Get option assignment data, optionally filtered by date.
+
+        Args:
+            filter_date: If provided, filter assignments to this date
+
+        Returns:
+            DataFrame with assignment records
+
+        Example:
+            assignments = fund.get_assignments(filter_date=analysis_date)
+            if not assignments.empty:
+                total_gl = assignments['pnl'].sum()
+        """
+        # Check for assignments in data
+        assignments = None
+        if hasattr(self.data, 'assignments'):
+            assignments = self.data.assignments
+        elif hasattr(self.data, 'option_assignments'):
+            assignments = self.data.option_assignments
+
+        if not isinstance(assignments, pd.DataFrame) or assignments.empty:
+            return pd.DataFrame()
+
+        # If no date filter, return all
+        if filter_date is None:
+            return assignments.copy()
+
+        # Filter by date
+        date_cols = [
+            col for col in assignments.columns
+            if 'date' in str(col).lower()
+        ]
+
+        if not date_cols:
+            return assignments.copy()
+
+        try:
+            df = assignments.copy()
+            df[date_cols[0]] = pd.to_datetime(df[date_cols[0]])
+            target = pd.Timestamp(filter_date).normalize()
+            filtered = df[df[date_cols[0]].dt.normalize() == target]
+            return filtered
+        except Exception:
+            return assignments.copy()
+
+    # ========================================================================
+    # DIVIDEND DATA ACCESS
+    # ========================================================================
+
+    def get_equity_dividends(self) -> float:
+        """
+        Calculate total dividend income from current equity holdings.
+
+        Returns:
+            Total dividends from dividend * quantity
+
+        Example:
+            div_income = fund.get_equity_dividends()
+        """
+        if not self.data.current or not self.data.current.vest:
+            return 0.0
+
+        equity = self.data.current.vest.equity
+        if equity.empty:
+            return 0.0
+
+        # Check for dividend columns
+        if 'dividend' not in equity.columns or 'quantity' not in equity.columns:
+            # Try alternate column names
+            div_col = None
+            qty_col = None
+
+            for col in equity.columns:
+                col_lower = str(col).lower()
+                if 'dividend' in col_lower or 'div' in col_lower:
+                    div_col = col
+                if 'quantity' in col_lower or 'shares' in col_lower:
+                    qty_col = col
+
+            if div_col and qty_col:
+                return float((equity[div_col] * equity[qty_col]).sum())
+
+            return 0.0
+
+        return float((equity['dividend'] * equity['quantity']).sum())

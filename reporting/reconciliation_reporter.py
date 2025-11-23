@@ -1,5 +1,3 @@
-"""High level orchestration for reconciliation report generation."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass

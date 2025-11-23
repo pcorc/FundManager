@@ -62,6 +62,99 @@ def get_fund_group(group_name: str) -> Set[str]:
     return groups[group_name]
 
 
+def build_fund_list(*items) -> List[str]:
+    """
+    Build a fund list by combining fund groups and individual tickers.
+
+    Args:
+        *items: Variable number of arguments that can be:
+            - Set[str]: A fund group (e.g., ETF_FUNDS, CLOSED_END_FUNDS)
+            - str: An individual fund ticker (e.g., "RDVI", "KNG")
+            - List[str]: A list of fund tickers
+
+    Returns:
+        Sorted list of unique fund tickers
+
+    Examples:
+        # Combine ETFs with a single fund
+        build_fund_list(ETF_FUNDS, "P20127")
+
+        # Combine multiple groups
+        build_fund_list(ETF_FUNDS, CLOSED_END_FUNDS, PRIVATE_FUNDS)
+
+        # Mix groups and individual tickers
+        build_fund_list(ETF_FUNDS, "P20127", "HE3B1")
+
+        # Combine groups with a list of tickers
+        build_fund_list(CLOSED_END_FUNDS, ["RDVI", "KNG"])
+    """
+    combined = set()
+
+    for item in items:
+        if isinstance(item, set):
+            # It's a fund group
+            combined.update(item)
+        elif isinstance(item, str):
+            # It's a single ticker
+            combined.add(item)
+        elif isinstance(item, list):
+            # It's a list of tickers
+            combined.update(item)
+        else:
+            raise TypeError(f"Unsupported type in build_fund_list: {type(item)}")
+
+    return sorted(combined)
+
+
+def exclude_funds(base_funds, *exclude_items) -> List[str]:
+    """
+    Remove specific funds from a fund group or list.
+
+    Args:
+        base_funds: Starting fund group (Set) or list (List[str])
+        *exclude_items: Funds to exclude - can be:
+            - Set[str]: A fund group to exclude
+            - str: An individual fund ticker to exclude
+            - List[str]: A list of fund tickers to exclude
+
+    Returns:
+        Sorted list of fund tickers with exclusions removed
+
+    Examples:
+        # All funds except a few specific ones
+        exclude_funds(ALL_FUNDS, "RDVI", "KNG", "FTMIX")
+
+        # All funds except private funds
+        exclude_funds(ALL_FUNDS, PRIVATE_FUNDS)
+
+        # ETFs except specific ones
+        exclude_funds(ETF_FUNDS, ["RDVI", "KNG"])
+
+        # Complex: All funds except private and a few specific ETFs
+        exclude_funds(ALL_FUNDS, PRIVATE_FUNDS, "RDVI", "KNG")
+    """
+    # Convert base to set
+    if isinstance(base_funds, set):
+        result = base_funds.copy()
+    elif isinstance(base_funds, list):
+        result = set(base_funds)
+    else:
+        raise TypeError(f"base_funds must be a set or list, got {type(base_funds)}")
+
+    # Remove excluded items
+    for item in exclude_items:
+        if isinstance(item, set):
+            result -= item
+        elif isinstance(item, str):
+            result.discard(item)
+        elif isinstance(item, list):
+            result -= set(item)
+        else:
+            raise TypeError(f"Unsupported type in exclude_funds: {type(item)}")
+
+    return sorted(result)
+
+
 # ============================================================================
 # DATE CALCULATION UTILITIES
 # ============================================================================
@@ -178,6 +271,7 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "compliance_tests": FULL_COMPLIANCE_TESTS,
         "create_pdf": True,
         "output_dir": "./outputs",
+        "output_tag": "etfs",  # Tag for output file names
         "description": "Trading compliance for all ETF funds",
     },
 
@@ -188,6 +282,7 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "compliance_tests": FULL_COMPLIANCE_TESTS,
         "create_pdf": True,
         "output_dir": "./outputs",
+        "output_tag": "cefs_pfs",  # Tag for output file names
         "description": "Trading compliance for closed-end and private funds",
     },
 
@@ -198,6 +293,7 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "compliance_tests": FULL_COMPLIANCE_TESTS,
         "create_pdf": True,
         "output_dir": "./outputs",
+        "output_tag": "all_funds",  # Tag for output file names
         "description": "Trading compliance for all funds",
     },
 
@@ -208,7 +304,19 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "compliance_tests": FULL_COMPLIANCE_TESTS,
         "create_pdf": True,
         "output_dir": "./outputs",
+        "output_tag": "custom",  # Tag for output file names (override if needed)
         "description": "Trading compliance for custom fund list (must override 'funds')",
+    },
+
+    "trading_compliance_all_except": {
+        "analysis_type": "trading_compliance",
+        "date_mode": "single",
+        "funds": [],  # Override with exclude_funds(ALL_FUNDS, ...)
+        "compliance_tests": FULL_COMPLIANCE_TESTS,
+        "create_pdf": True,
+        "output_dir": "./outputs",
+        "output_tag": "all_except",  # Tag for output file names (override if needed)
+        "description": "Trading compliance for all funds except specified ones (must override 'funds')",
     },
 
     # ========================================================================
@@ -223,6 +331,7 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "compliance_tests": FULL_COMPLIANCE_TESTS,
         "create_pdf": True,
         "output_dir": "./outputs",
+        "output_tag": "etfs",  # Tag for output file names
         "description": "EOD compliance checks for all ETF funds",
     },
 
@@ -234,6 +343,7 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "compliance_tests": FULL_COMPLIANCE_TESTS,
         "create_pdf": True,
         "output_dir": "./outputs",
+        "output_tag": "cefs_pfs",  # Tag for output file names
         "description": "EOD compliance checks for closed-end and private funds",
     },
 
@@ -245,6 +355,7 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "compliance_tests": FULL_COMPLIANCE_TESTS,
         "create_pdf": True,
         "output_dir": "./outputs",
+        "output_tag": "all_funds",  # Tag for output file names
         "description": "EOD compliance checks for all funds",
     },
 
@@ -256,7 +367,20 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "compliance_tests": FULL_COMPLIANCE_TESTS,
         "create_pdf": True,
         "output_dir": "./outputs",
+        "output_tag": "custom",  # Tag for output file names (override if needed)
         "description": "EOD compliance checks for custom fund list (must override 'funds')",
+    },
+
+    "eod_compliance_all_except": {
+        "analysis_type": "eod",
+        "date_mode": "single",
+        "funds": [],  # Override with exclude_funds(ALL_FUNDS, ...)
+        "eod_reports": ["compliance"],
+        "compliance_tests": FULL_COMPLIANCE_TESTS,
+        "create_pdf": True,
+        "output_dir": "./outputs",
+        "output_tag": "all_except",  # Tag for output file names (override if needed)
+        "description": "EOD compliance checks for all funds except specified ones (must override 'funds')",
     },
 
     # ========================================================================
@@ -270,6 +394,7 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "eod_reports": ["reconciliation", "nav"],
         "create_pdf": True,
         "output_dir": "./outputs",
+        "output_tag": "etfs",  # Tag for output file names
         "description": "Holdings and NAV reconciliation for all ETF funds",
     },
 
@@ -280,6 +405,7 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "eod_reports": ["reconciliation", "nav"],
         "create_pdf": True,
         "output_dir": "./outputs",
+        "output_tag": "cefs_pfs",  # Tag for output file names
         "description": "Holdings and NAV reconciliation for closed-end and private funds",
     },
 
@@ -290,6 +416,7 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "eod_reports": ["reconciliation", "nav"],
         "create_pdf": True,
         "output_dir": "./outputs",
+        "output_tag": "all_funds",  # Tag for output file names
         "description": "Holdings and NAV reconciliation for all funds",
     },
 
@@ -300,7 +427,19 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "eod_reports": ["reconciliation", "nav"],
         "create_pdf": True,
         "output_dir": "./outputs",
+        "output_tag": "custom",  # Tag for output file names (override if needed)
         "description": "Holdings and NAV reconciliation for custom fund list (must override 'funds')",
+    },
+
+    "eod_recon_all_except": {
+        "analysis_type": "eod",
+        "date_mode": "single",
+        "funds": [],  # Override with exclude_funds(ALL_FUNDS, ...)
+        "eod_reports": ["reconciliation", "nav"],
+        "create_pdf": True,
+        "output_dir": "./outputs",
+        "output_tag": "all_except",  # Tag for output file names (override if needed)
+        "description": "Holdings and NAV reconciliation for all funds except specified ones (must override 'funds')",
     },
 
     # ========================================================================
@@ -319,6 +458,7 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "create_pdf": False,
         "output_dir": "./outputs",
         "generate_daily_reports": False,
+        "output_tag": "diversification",  # Tag for output file names
         "description": "Time series diversification testing for private funds",
     },
 
@@ -331,6 +471,7 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "create_pdf": False,
         "output_dir": "./outputs",
         "generate_daily_reports": False,
+        "output_tag": "full_compliance",  # Tag for output file names
         "description": "Time series full compliance for closed-end funds",
     },
 }

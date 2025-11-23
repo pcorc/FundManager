@@ -14,6 +14,7 @@ from reporting.report_utils import normalize_reconciliation_payload, normalize_r
 from utilities.reconciliation_utils import split_flex_price_frames
 
 
+
 @dataclass
 class GeneratedReconciliationReport:
     """Container for holdings reconciliation artefact locations."""
@@ -67,18 +68,19 @@ RECON_DESCRIPTOR_REGISTRY: Dict[str, ReconDescriptor] = {
         price_ticker="eqyticker",
         price_cust_col="price_index",
     ),
-    # "sg_option": ReconDescriptor(
-    #     holdings_key="final_recon",
-    #     holdings_ticker="optticker",
-    #     price_keys=("price_discrepancies", None),
-    #     price_ticker="optticker",
-    # ),
-    # "sg_equity": ReconDescriptor(
-    #     holdings_key="final_recon",
-    #     holdings_ticker="equity_ticker",
-    #     price_keys=("price_discrepancies", None),
-    #     price_ticker="equity_ticker",
-    # ),
+    "custodian_flex_option": ReconDescriptor(
+        holdings_key="final_recon",
+        holdings_ticker="optticker",
+        price_ticker="optticker",
+        price_transform=None,  # Don't filter FLEX price breaks
+        extra_callbacks=("_append_holdings_breakdowns",),
+    ),
+    "custodian_flex_option_t1": ReconDescriptor(
+        holdings_key="final_recon",
+        holdings_ticker="optticker",
+        price_keys=(None, None),
+        extra_callbacks=("_append_holdings_breakdowns",),
+    ),
     "custodian_treasury": ReconDescriptor(
         holdings_key="final_recon",
         holdings_ticker="cusip",
@@ -95,6 +97,19 @@ RECON_DESCRIPTOR_REGISTRY: Dict[str, ReconDescriptor] = {
         require_holdings=False,
         extra_callbacks=("_append_holdings_breakdowns",),
     ),
+    # "sg_option": ReconDescriptor(
+    #     holdings_key="final_recon",
+    #     holdings_ticker="optticker",
+    #     price_keys=("price_discrepancies", None),
+    #     price_ticker="optticker",
+    # ),
+    # "sg_equity": ReconDescriptor(
+    #     holdings_key="final_recon",
+    #     holdings_ticker="equity_ticker",
+    #     price_keys=("price_discrepancies", None),
+    #     price_ticker="equity_ticker",
+    # ),
+
 }
 
 
@@ -144,6 +159,8 @@ class ReconciliationReport:
         "custodian_equity_price_T": "custodian_equity_price_breaks_T",
         "custodian_option": "custodian_option_holdings_breaks_T",
         "custodian_option_price_T": "custodian_option_price_breaks_T",
+        "custodian_flex_option": "custodian_flex_option_holdings_breaks_T",  # NEW
+        "custodian_flex_option_price_T": "custodian_flex_option_price_breaks_T",  # NEW
         "custodian_treasury": "custodian_treasury_holdings_breaks_T",
         "custodian_treasury_price_T": "custodian_treasury_price_breaks_T",
         "index_equity": "index_equity_holdings_breaks",
@@ -775,8 +792,10 @@ class ReconciliationReport:
                     row["% Difference"] = f"{pct:.1f}%"
 
     def _create_system_specific_tabs(self, writer: pd.ExcelWriter) -> None:
+        """Create system-specific reconciliation tabs."""
         system_tabs = {
             "INDEX_RECONCILIATION": ["index_equity"],
+            "FLEX_OPTION_RECONCILIATION": ["custodian_flex_option"],  # NEW
             "SG_RECONCILIATION": ["sg_equity", "sg_option"],
         }
         for tab_name, recon_types in system_tabs.items():
@@ -786,6 +805,7 @@ class ReconciliationReport:
             tab_df = pd.concat(filtered, ignore_index=True)
             tab_df = self._standardize_ticker_column(tab_df)
             tab_df.to_excel(writer, sheet_name=tab_name, index=False)
+
 
     def _get_unique_funds(self) -> set[str]:
         return {fund for (fund, _date, _recon) in self.flattened_results.keys()}

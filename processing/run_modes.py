@@ -13,6 +13,7 @@ from typing import Dict, Mapping, MutableMapping, Optional, Sequence, Tuple
 from config.fund_registry import FundRegistry
 from processing.bulk_data_loader import BulkDataLoader, BulkDataStore
 from processing.fund_manager import FundManager, ProcessingResults
+from processing.fund import Fund
 from reporting.compliance_reporter import (
     build_compliance_reports,
     build_compliance_reports_for_range,
@@ -33,7 +34,6 @@ class DataLoadRequest:
     analysis_type: Optional[str] = None
 
 
-
 @dataclass(frozen=True)
 class RangeRunResults:
     """Aggregated artefacts for a multi-day EOD run."""
@@ -41,7 +41,6 @@ class RangeRunResults:
     results_by_date: "OrderedDict[date, ProcessingResults]"
     daily_artefacts: "OrderedDict[str, Mapping[str, object]]"
     stacked_compliance: Optional["GeneratedComplianceReport"]
-
 
 
 def plan_eod_requests(params) -> Sequence[DataLoadRequest]:
@@ -136,6 +135,9 @@ def run_eod_mode(
         )
 
     if any(name in params.operations for name in ("reconciliation", "nav_reconciliation")):
+        # Extract fund registry for property-based reconciliation reporting
+        fund_registry = _extract_fund_registry(results)
+
         artefacts["reconciliation"] = build_nav_reconciliation_reports(
             holdings_results=reconciliation_payload if "reconciliation" in params.operations else None,
             nav_results=nav_payload if "nav_reconciliation" in params.operations else None,
@@ -178,6 +180,9 @@ def run_trading_mode(
     if not ante_payload and not post_payload:
         raise RuntimeError("Trading compliance run produced no compliance results to compare")
 
+    # Extract fund registry from ex_post results for property-based reporting
+    fund_registry_ex_post = _extract_fund_registry(results_ex_post)
+
     # Extract traded funds information from the ex_post results
     # This should include the holdings data with trade_rebal information
     traded_funds_info = {}
@@ -210,6 +215,7 @@ def run_trading_mode(
         report_date=params.ex_post_date,
         output_dir=str(output_dir),
         traded_funds_info=traded_funds_info,  # Pass the populated traded_funds_info
+        fund_registry=fund_registry_ex_post,  # NEW: Pass fund registry for property-based reporting
         create_pdf=params.create_pdf,
     )
 
@@ -233,6 +239,7 @@ def run_trading_mode(
     )
 
     return results_ex_ante, results_ex_post, combined_artefacts
+
 
 def run_eod_range_mode(
     session,
@@ -267,7 +274,6 @@ def run_eod_range_mode(
         )
         latest_gics_mapping = getattr(data_store, "gics_mapping", None)
 
-
         day_results = _run_operations(
             registry,
             data_store,
@@ -298,12 +304,15 @@ def run_eod_range_mode(
             )
 
         if any(name in operations for name in ("reconciliation", "nav_reconciliation")):
+            # Extract fund registry for property-based reconciliation reporting
+            fund_registry = _extract_fund_registry(day_results)
+
             artefacts["reconciliation"] = build_nav_reconciliation_reports(
                 holdings_results=reconciliation_payload if "reconciliation" in operations else None,
                 nav_results=nav_payload if "nav_reconciliation" in operations else None,
                 report_date=trade_date,
                 output_dir=str(output_dir),
-                create_pdf=create_pdf
+                create_pdf=create_pdf,
             )
 
         daily_artefacts[trade_date.isoformat()] = artefacts
@@ -323,6 +332,7 @@ def run_eod_range_mode(
         daily_artefacts=daily_artefacts,
         stacked_compliance=stacked_report,
     )
+
 
 def flatten_eod_paths(artefacts: Mapping[str, object]) -> Dict[str, str]:
     paths: Dict[str, str] = {}
@@ -393,12 +403,35 @@ def _run_operations(
     analysis_type: str,
     compliance_tests: Sequence[str],
 ) -> ProcessingResults:
+    """Execute operations on all funds using FundManager."""
     manager = FundManager(registry, data_store, analysis_type=analysis_type)
     return manager.run_daily_operations(
         list(operations), compliance_tests=list(compliance_tests)
     )
 
+
+def _extract_fund_registry(results: ProcessingResults) -> Dict[str, Fund]:
+    """Extract Fund objects from ProcessingResults to create registry for reporting.
+
+    This enables property-based logic throughout the reporting pipeline,
+    allowing reports to leverage fund properties like is_private_fund,
+    uses_index_flex, etc.
+
+    Args:
+        results: ProcessingResults containing fund_results with Fund objects
+
+    Returns:
+        Dictionary mapping fund names to Fund objects
+    """
+    fund_registry: Dict[str, Fund] = {}
+    for fund_name, fund_result in results.fund_results.items():
+        if fund_result.fund:
+            fund_registry[fund_name] = fund_result.fund
+    return fund_registry
+
+
 def _iter_business_days(start: date, end: date):
+    """Iterate over business days (Monday-Friday) in date range."""
     current = start
     while current <= end:
         if current.weekday() < 5:
@@ -407,19 +440,29 @@ def _iter_business_days(start: date, end: date):
 
 
 def _previous_business_day(anchor: date) -> date:
+    """Return the previous business day before anchor date."""
     current = anchor - timedelta(days=1)
     while current.weekday() >= 5:
         current -= timedelta(days=1)
     return current
 
+
 def _extract_payload(results: ProcessingResults, attribute: str) -> Dict[str, Mapping[str, object]]:
+    """Extract a specific attribute from all fund results into a payload dictionary.
+
+    Args:
+        results: ProcessingResults containing fund_results
+        attribute: Attribute name to extract (e.g., 'compliance_results', 'reconciliation_results')
+
+    Returns:
+        Dictionary mapping fund names to their extracted attribute values
+    """
     payload: Dict[str, Mapping[str, object]] = {}
     for fund_name, fund_result in results.fund_results.items():
         value = getattr(fund_result, attribute, None)
         if value:
             payload[fund_name] = value
     return payload
-
 
 
 __all__ = [
