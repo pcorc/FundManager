@@ -12,11 +12,24 @@ class FundHoldings:
         options: Optional[pd.DataFrame] = None,
         flex_options: Optional[pd.DataFrame] = None,  # NEW
         treasury: Optional[pd.DataFrame] = None,
+        reported_cash: float = 0.0,
+        reported_nav: float = 0.0,
+        reported_tna: float = 0.0,
+        reported_ta: float = 0.0,
+        reported_expenses: float = 0.0,
+        reported_shares_outstanding: float = 0.0,
     ) -> None:
         self.equity = self._clean_holdings_dataframe(equity, holding_type='equity')
         self.options = self._clean_holdings_dataframe(options, holding_type='options')
         self.flex_options = self._clean_holdings_dataframe(flex_options, holding_type='flex_options')
         self.treasury = self._clean_holdings_dataframe(treasury, holding_type='treasury')
+
+        self.reported_cash = float(reported_cash or 0.0)
+        self.reported_nav = float(reported_nav or 0.0)
+        self.reported_tna = float(reported_tna or 0.0)
+        self.reported_ta = float(reported_ta or 0.0)
+        self.reported_expenses = float(reported_expenses or 0.0)
+        self.reported_shares_outstanding = float(reported_shares_outstanding or 0.0)
 
     def _clean_holdings_dataframe(self, df: Optional[pd.DataFrame], holding_type: str) -> pd.DataFrame:
         """Clean and standardize holdings DataFrame with proper numeric types."""
@@ -70,6 +83,12 @@ class FundHoldings:
             options=self.options.copy() if isinstance(self.options, pd.DataFrame) else pd.DataFrame(),
             flex_options=self.flex_options.copy() if isinstance(self.flex_options, pd.DataFrame) else pd.DataFrame(),  # NEW
             treasury=self.treasury.copy() if isinstance(self.treasury, pd.DataFrame) else pd.DataFrame(),
+            reported_cash=self.reported_cash,
+            reported_nav=self.reported_nav,
+            reported_tna=self.reported_tna,
+            reported_ta=self.reported_ta,
+            reported_expenses=self.reported_expenses,
+            reported_shares_outstanding=self.reported_shares_outstanding,
         )
 
 
@@ -218,12 +237,12 @@ class FundSnapshot:
         self.index = index if isinstance(index, FundHoldings) else FundHoldings()
 
         # Store reported values from custodian/admin
-        self.reported_cash = float(reported_cash)
-        self.reported_nav = float(reported_nav)
-        self.reported_ta = float(reported_ta)
-        self.reported_tna = float(reported_tna)
-        self.reported_expenses = float(reported_expenses)
-        self.reported_shares_outstanding = float(reported_shares_outstanding)
+        self._reported_cash = float(reported_cash)
+        self._reported_nav = float(reported_nav)
+        self._reported_ta = float(reported_ta)
+        self._reported_tna = float(reported_tna)
+        self._reported_expenses = float(reported_expenses)
+        self._reported_shares_outstanding = float(reported_shares_outstanding)
 
         # Other data
         self.flows = float(flows)
@@ -235,6 +254,30 @@ class FundSnapshot:
 
         # Initialize metrics (computed from holdings)
         self._metrics = None
+
+    @property
+    def reported_cash(self) -> float:
+        return self._get_reported_value("reported_cash")
+
+    @property
+    def reported_nav(self) -> float:
+        return self._get_reported_value("reported_nav")
+
+    @property
+    def reported_tna(self) -> float:
+        return self._get_reported_value("reported_tna")
+
+    @property
+    def reported_ta(self) -> float:
+        return self._get_reported_value("reported_ta")
+
+    @property
+    def reported_expenses(self) -> float:
+        return self._get_reported_value("reported_expenses")
+
+    @property
+    def reported_shares_outstanding(self) -> float:
+        return self._get_reported_value("reported_shares_outstanding")
 
     @property
     def metrics(self) -> FundMetrics:
@@ -274,6 +317,54 @@ class FundSnapshot:
         """Shares outstanding (alias for reported_shares_outstanding)."""
         return self.reported_shares_outstanding
 
+    @property
+    def custodian_reported_cash(self) -> float:
+        return float(getattr(self.custodian, "reported_cash", 0.0))
+
+    @property
+    def vest_reported_cash(self) -> float:
+        return float(getattr(self.vest, "reported_cash", 0.0))
+
+    @property
+    def custodian_reported_nav(self) -> float:
+        return float(getattr(self.custodian, "reported_nav", 0.0))
+
+    @property
+    def vest_reported_nav(self) -> float:
+        return float(getattr(self.vest, "reported_nav", 0.0))
+
+    @property
+    def custodian_reported_tna(self) -> float:
+        return float(getattr(self.custodian, "reported_tna", 0.0))
+
+    @property
+    def vest_reported_tna(self) -> float:
+        return float(getattr(self.vest, "reported_tna", 0.0))
+
+    @property
+    def custodian_reported_ta(self) -> float:
+        return float(getattr(self.custodian, "reported_ta", 0.0))
+
+    @property
+    def vest_reported_ta(self) -> float:
+        return float(getattr(self.vest, "reported_ta", 0.0))
+
+    @property
+    def custodian_reported_expenses(self) -> float:
+        return float(getattr(self.custodian, "reported_expenses", 0.0))
+
+    @property
+    def vest_reported_expenses(self) -> float:
+        return float(getattr(self.vest, "reported_expenses", 0.0))
+
+    @property
+    def custodian_reported_shares_outstanding(self) -> float:
+        return float(getattr(self.custodian, "reported_shares_outstanding", 0.0))
+
+    @property
+    def vest_reported_shares_outstanding(self) -> float:
+        return float(getattr(self.vest, "reported_shares_outstanding", 0.0))
+
     # Computed value properties (from metrics)
     @property
     def total_equity_value(self) -> float:
@@ -308,7 +399,14 @@ class FundSnapshot:
     @property
     def calculated_tna(self) -> float:
         """Calculate TNA from holdings + cash."""
-        return self.metrics.total_holdings_value + self.reported_cash
+        return self.metrics.total_holdings_value
+
+    def _get_reported_value(self, attribute: str) -> float:
+        for source in (self.custodian, self.vest):
+            value = getattr(source, attribute, None)
+            if value is not None:
+                return float(value)
+        return float(getattr(self, f"_{attribute}", 0.0))
 
     def _filter_frame_by_fund(self, frame: pd.DataFrame) -> pd.DataFrame:
         """Filter DataFrame to only include rows for this fund."""
