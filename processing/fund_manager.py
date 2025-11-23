@@ -11,7 +11,7 @@ from services.nav_reconciliator import NAVReconciliator
 from services.reconciliator import Reconciliator
 
 # Import your domain classes
-from domain.fund import Fund, FundData, FundSnapshot, FundHoldings
+from processing.fund import Fund, FundData, FundSnapshot, FundHoldings
 from processing.bulk_data_loader import BulkDataStore
 
 

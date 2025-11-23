@@ -8,7 +8,7 @@ import logging
 import pandas as pd
 from pandas.tseries.offsets import BDay, MonthEnd
 
-from domain.fund import Fund
+from processing.fund import Fund
 from config.fund_definitions import FUND_DEFINITIONS, INDEX_FLEX_FUNDS
 
 

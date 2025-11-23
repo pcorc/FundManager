@@ -1,4 +1,4 @@
-# utilities/index_manager.py - IMPROVED
+
 import pandas as pd
 from sqlalchemy import literal
 import logging

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Callable, Dict, Mapping, Optional, Tuple
 
 import logging
 import numpy as np
@@ -29,11 +29,10 @@ from config.constants import (
     RULE_12D3_ASSET_LIMIT,
     RULE_12D3_DEBT_LIMIT,
     RULE_12D3_EQUITY_LIMIT,
-    VEHICLE_CLOSED_END,
     VEHICLE_PRIVATE,
     VEHICLE_VIT,
 )
-from domain.fund import Fund
+from processing.fund import Fund
 
 GICS_CONCENTRATION_THRESHOLD = 0.25
 GICS_CLASS_COLUMNS: Tuple[str, ...] = (

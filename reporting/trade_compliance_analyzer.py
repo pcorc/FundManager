@@ -5,9 +5,8 @@ from collections import defaultdict
 
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
-import re
 import pandas as pd
-from domain.fund import Fund
+from processing.fund import Fund
 
 
 @dataclass

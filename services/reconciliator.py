@@ -3,7 +3,7 @@ import numpy as np
 import logging
 from dataclasses import dataclass
 from typing import Dict, Optional
-from domain.fund import Fund, FundSnapshot, FundHoldings
+from processing.fund import Fund
 from config.fund_definitions import (
     FUND_DEFINITIONS,
     CLOSED_END_FUNDS,
