@@ -106,8 +106,13 @@ def run_eod_mode(
     data_store: BulkDataStore,
     params,
     output_dir: Path,
+    *,
+    output_tag: str | None = None,
 ) -> Tuple[ProcessingResults, Mapping[str, object]]:
     """Execute the full EOD workflow for the provided data."""
+
+    def _build_prefix(base: str) -> str:
+        return f"{base}_{output_tag}" if output_tag else base
 
     results = _run_operations(
         registry,
@@ -216,6 +221,7 @@ def run_trading_mode(
         output_dir=str(output_dir),
         traded_funds_info=traded_funds_info,  # Pass the populated traded_funds_info
         fund_registry=fund_registry_ex_post,  # NEW: Pass fund registry for property-based reporting
+        file_name_prefix=_build_prefix("trading_compliance_results"),
         create_pdf=params.create_pdf,
     )
 
@@ -227,7 +233,7 @@ def run_trading_mode(
             results_ex_post,
             report_date=params.ex_post_date,
             output_dir=str(output_dir),
-            file_name_prefix="compliance_results_expost",
+            file_name_prefix=_build_prefix("compliance_results_expost"),
             test_functions=params.compliance_tests or None,
             gics_mapping=gics_mapping_ex_post,
             create_pdf=params.create_pdf,
@@ -253,8 +259,13 @@ def run_eod_range_mode(
     output_dir: Path,
     create_pdf: bool = True,
     generate_daily_reports: bool = True,
+    output_tag: str | None = None,
+
 ) -> RangeRunResults:
     """Execute the EOD workflow for each business day in ``[start_date, end_date]``."""
+
+    def _build_prefix(base: str) -> str:
+        return f"{base}_{output_tag}" if output_tag else base
 
     if start_date > end_date:
         raise ValueError("start_date must be on or before end_date")
@@ -298,6 +309,8 @@ def run_eod_range_mode(
                 day_results,
                 report_date=trade_date,
                 output_dir=str(output_dir),
+                file_name_prefix=_build_prefix("compliance_results"),
+
                 test_functions=compliance_tests or None,
                 gics_mapping=latest_gics_mapping,
                 create_pdf=create_pdf,

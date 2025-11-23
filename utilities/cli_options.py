@@ -22,6 +22,7 @@ class CLIOptions:
     compliance_tests: List[str]
     output_dir: str
     create_pdf: bool
+    output_tag: str | None
     ex_ante_date: Optional[date]
     ex_post_date: Optional[date]
     custodian_date: Optional[date]
@@ -36,6 +37,7 @@ class EODRunParameters:
     previous_trade_date: date
     operations: List[str]
     compliance_tests: List[str]
+    output_tag: str | None
     create_pdf: bool
 
 
@@ -99,6 +101,11 @@ def parse_arguments(argv: Optional[Sequence[str]] = None) -> CLIOptions:
         help="Directory to write generated artefacts (default honours EXPORT_PATH)",
     )
     parser.add_argument(
+        "--output-tag",
+        default=None,
+        help="Optional tag appended to generated report file names",
+    )
+    parser.add_argument(
         "--no-pdf",
         action="store_true",
         help="Skip PDF generation even when PDF helpers are installed",
@@ -153,6 +160,7 @@ def parse_arguments(argv: Optional[Sequence[str]] = None) -> CLIOptions:
         eod_reports=list(raw_args.reports),
         compliance_tests=compliance_tests,
         output_dir=raw_args.output_dir,
+        output_tag=raw_args.output_tag,
         create_pdf=not raw_args.no_pdf,
         ex_ante_date=raw_args.ex_ante_date,
         ex_post_date=raw_args.ex_post_date,
@@ -172,6 +180,7 @@ def resolve_eod_parameters(options: CLIOptions) -> EODRunParameters:
         previous_trade_date=previous_date,
         operations=operations,
         compliance_tests=list(options.compliance_tests),
+        output_tag=options.output_tag,
         create_pdf=options.create_pdf,
     )
 
@@ -220,6 +229,8 @@ def apply_overrides(options: CLIOptions, overrides: Optional[Mapping[str, object
             data[key] = _normalise_override_sequence(key, value)
         elif key in {"create_pdf"}:
             data[key] = bool(value)
+        elif key == "output_tag":
+            data[key] = None if value is None else str(value)
         elif key == "output_dir":
             data[key] = str(value)
         else:

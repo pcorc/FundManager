@@ -474,47 +474,62 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------------
     # Example 1: Run predefined configurations
     # ------------------------------------------------------------------------
-    ACTIVE_RUNS = [
-        # "trading_compliance_etfs",
-        # "eod_compliance_etfs",
-        "eod_recon_etfs",
-    ]
+    # ACTIVE_RUNS = [
+    #     # "trading_compliance_etfs",
+    #     # "eod_compliance_etfs",
+    #     "eod_recon_etfs",
+    # ]
+    #
+    # exit_code = run_configuration_batch(
+    #     config_names=ACTIVE_RUNS,
+    #     base_date=BASE_DATE,
+    # )
+    # raise SystemExit(exit_code)
 
-    exit_code = run_configuration_batch(
-        config_names=ACTIVE_RUNS,
-        base_date=BASE_DATE,
-    )
-    raise SystemExit(exit_code)
 
     # ------------------------------------------------------------------------
-    # Example 2: Combine multiple fund groups + individual tickers
+    # Example 1: Run predefined configurations
     # ------------------------------------------------------------------------
     # ACTIVE_RUNS = [
-    #     "trading_compliance_custom",
-    #     "eod_compliance_custom",
-    #     "eod_recon_custom",
+    #     "trading_compliance_closed_end_private",
+    #     # "eod_compliance_closed_end_private",
+    #     # "eod_recon_closed_end_private",
     # ]
     #
     # RUN_OVERRIDES = {
-    #     "trading_compliance_custom": {
-    #         # ETFs + one specific closed-end fund
-    #         "funds": build_fund_list(ETF_FUNDS, "P20127"),
-    #         "output_tag": "etfs_plus_p20127",  # Custom tag for file names
+    #     "trading_compliance_closed_end_private": {
+    #         "funds": build_fund_list(
+    #             exclude_funds(CLOSED_END_FUNDS, PRIVATE_FUNDS),
+    #             "P3727"
+    #         ),
+    #         "output_tag": "p3727",  # Custom tag for file names
     #     },
     #     "eod_compliance_custom": {
-    #         # All three fund groups combined
-    #         "funds": build_fund_list(ETF_FUNDS, CLOSED_END_FUNDS, PRIVATE_FUNDS),
-    #         "output_tag": "all_registered",  # Custom tag for file names
+    #         "funds": build_fund_list(
+    #             exclude_funds(CLOSED_END_FUNDS, PRIVATE_FUNDS),
+    #             "P3727"
+    #         ),
+    #         "output_tag": "p3727",  # Custom tag for file names
     #         "compliance_tests": [
-    #             "gics_compliance",
-    #             "prospectus_80pct_policy",
-    #             "diversification_40act_check",
-    #         ],
+    #                     "gics_compliance",
+    #                     "prospectus_80pct_policy",
+    #                     "diversification_40act_check",
+    #                     "diversification_IRS_check",
+    #                     "diversification_IRC_check",
+    #                     "max_15pct_illiquid_sai",
+    #                     "real_estate_check",
+    #                     "commodities_check",
+    #                     "twelve_d1a_other_inv_cos",
+    #                     "twelve_d2_insurance_cos",
+    #                     "twelve_d3_sec_biz"
+    #                 ],
     #     },
     #     "eod_recon_custom": {
-    #         # Closed-end funds + ETFs + two specific funds
-    #         "funds": build_fund_list(CLOSED_END_FUNDS, ETF_FUNDS, "PD227", "PF227"),
-    #         "output_tag": "cefs_etfs_custom",  # Custom tag for file names
+    #         "funds": build_fund_list(
+    #             exclude_funds(CLOSED_END_FUNDS, PRIVATE_FUNDS),
+    #             "P3727"
+    #         ),
+    #         "output_tag": "p3727",  # Custom tag for file names
     #     },
     # }
     #
@@ -522,8 +537,56 @@ if __name__ == "__main__":
     #     config_names=ACTIVE_RUNS,
     #     base_date=BASE_DATE,
     #     overrides=RUN_OVERRIDES,
+    #
     # )
     # raise SystemExit(exit_code)
+
+    # ------------------------------------------------------------------------
+    # Example 2: Combine multiple fund groups + individual tickers
+    # ------------------------------------------------------------------------
+    ACTIVE_RUNS = [
+        "trading_compliance_custom",
+        "eod_compliance_custom",
+        "eod_recon_custom",
+    ]
+
+    RUN_OVERRIDES = {
+        "trading_compliance_custom": {
+            # ETFs + one specific closed-end fund
+            "funds": build_fund_list("HE3B2", "R21126"),
+            "output_tag": "custom_cef",  # Custom tag for file names
+        },
+        "eod_compliance_custom": {
+            # All three fund groups combined
+            "funds": build_fund_list("HE3B2", "R21126"),
+            "output_tag": "custom_cef",  # Custom tag for file names
+            "compliance_tests": [
+                        "gics_compliance",
+                        "prospectus_80pct_policy",
+                        "diversification_40act_check",
+                        "diversification_IRS_check",
+                        "diversification_IRC_check",
+                        "max_15pct_illiquid_sai",
+                        "real_estate_check",
+                        "commodities_check",
+                        "twelve_d1a_other_inv_cos",
+                        "twelve_d2_insurance_cos",
+                        "twelve_d3_sec_biz"
+                    ],
+        },
+        "eod_recon_custom": {
+            # Closed-end funds + ETFs + two specific funds
+            "funds": build_fund_list("HE3B2", "R21126"),
+            "output_tag": "custom_cef",  # Custom tag for file names
+        },
+    }
+
+    exit_code = run_configuration_batch(
+        config_names=ACTIVE_RUNS,
+        base_date=BASE_DATE,
+        overrides=RUN_OVERRIDES,
+    )
+    raise SystemExit(exit_code)
 
     # ------------------------------------------------------------------------
     # Example 3: Run ALL funds EXCEPT specific ones (exclusion pattern)
@@ -560,27 +623,33 @@ if __name__ == "__main__":
     # Example 4: Complex combinations
     # ------------------------------------------------------------------------
     # ACTIVE_RUNS = [
-    #     "trading_compliance_custom",
-    #     "eod_compliance_custom",
+    #     # "trading_compliance_custom",
+    #     # "eod_compliance_custom",
+    #     "eod_recon_custom"
     # ]
     #
     # RUN_OVERRIDES = {
-    #     "trading_compliance_custom": {
-    #         # ETFs except RDVI and KNG, plus one closed-end fund
-    #         "funds": build_fund_list(
-    #             exclude_funds(ETF_FUNDS, "RDVI", "KNG"),
-    #             "HE3B1"
-    #         ),
-    #     },
-    #     "eod_compliance_custom": {
+    #     # "trading_compliance_custom": {
+    #     #     # ETFs except RDVI and KNG, plus one closed-end fund
+    #     #     "funds": build_fund_list(
+    #     #         # exclude_funds(ETF_FUNDS, "RDVI", "KNG"),
+    #     #         "RDVI"
+    #     #     ),
+    #     # },
+    #     # "eod_compliance_custom": {
+    #     #     # All funds except private funds and specific ETFs, plus add back one private fund
+    #     #     "funds": build_fund_list(
+    #     #         # exclude_funds(ALL_FUNDS, PRIVATE_FUNDS, "RDVI", "KNG"),
+    #     #         "RDVI"  # Add back one private fund
+    #     #     ),
+    #     # },
+    #     "eod_recon_all_custom": {
     #         # All funds except private funds and specific ETFs, plus add back one private fund
-    #         "funds": build_fund_list(
-    #             exclude_funds(ALL_FUNDS, PRIVATE_FUNDS, "RDVI", "KNG"),
-    #             "PD227"  # Add back one private fund
-    #         ),
+    #         "funds":
+    #             build_fund_list("RDVI"),
     #     },
     # }
-    #
+
     # exit_code = run_configuration_batch(
     #     config_names=ACTIVE_RUNS,
     #     base_date=BASE_DATE,

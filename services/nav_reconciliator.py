@@ -322,7 +322,7 @@ class NAVReconciliator:
         Only runs if fund.properties.has_flex_option is True.
         Uses fund.properties.flex_option_pattern to identify flex options.
         """
-        if not self.fund.properties.has_flex_option:
+        if not self.has_flex_option:
             return AssetClassGainLoss(
                 asset_class='flex_options',
                 raw_gl=0.0,
@@ -446,8 +446,8 @@ class NAVReconciliator:
         Simple comparison of current vs prior treasury values.
         Usually no ticker-level detail for treasuries.
         """
-        current_value = self.fund.data.current.values.treasury_value
-        prior_value = self.fund.data.prior.values.treasury_value
+        current_value = self.fund.data.current.total_treasury_value
+        prior_value = self.fund.data.previous.total_treasury_value
 
         gl = current_value - prior_value
 
@@ -462,7 +462,7 @@ class NAVReconciliator:
         On assignment days, option G/L is just the current value.
         Options were closed/rolled, so we don't compare to prior.
         """
-        current_value = self.fund.data.current.vest.option_value
+        current_value = self.fund.data.current.total_option_value
 
         return AssetClassGainLoss(
             asset_class='options',
@@ -526,7 +526,7 @@ class NAVReconciliator:
 
         Formula: TNA * expense_ratio * (days / 365)
         """
-        expense_ratio = self.fund.properties.expense_ratio or 0.0
+        expense_ratio = self.fund.expense_ratio
         tna = self.fund.get_nav_metric('total_net_assets', 'current')
 
         # Check if Friday (3-day accrual)

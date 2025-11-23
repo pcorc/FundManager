@@ -45,6 +45,7 @@ def build_nav_reconciliation_reports(
         report_date: date | datetime | str = None,
         output_dir: str = "",
         *,
+        file_name_prefix: str = "reconciliation_summary",
         create_pdf: bool = True,
         holdings_results: Mapping[str, Any] | None = None,
         nav_results: Mapping[str, Any] | None = None,
@@ -58,7 +59,8 @@ def build_nav_reconciliation_reports(
         return None
 
     date_str = str(report_date)
-    excel_path = Path(output_dir) / f"reconciliation_summary_{date_str}.xlsx"
+    excel_prefix = f"{file_name_prefix}_{date_str}"
+    excel_path = Path(output_dir) / f"{excel_prefix}.xlsx"
 
     holdings_report: Optional[GeneratedReconciliationReport] = None
     if derived_holdings:
@@ -66,7 +68,7 @@ def build_nav_reconciliation_reports(
             derived_holdings,
             report_date,
             output_dir,
-            file_name_prefix="reconciliation_summary",
+            file_name_prefix=file_name_prefix,
         )
 
     nav_report: Optional[GeneratedNAVReconciliationReport] = None
@@ -87,6 +89,7 @@ def build_nav_reconciliation_reports(
             derived_nav,
             report_date,
             output_dir,
+            file_name=f"{excel_prefix}.pdf",
         )
 
     return GeneratedReconciliationArtefacts(

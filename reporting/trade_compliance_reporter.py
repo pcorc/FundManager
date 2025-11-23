@@ -19,6 +19,7 @@ def build_trading_compliance_reports(
     output_dir: str,
     *,
     traded_funds_info: Mapping[str, Mapping[str, Any]] | None = None,
+    fund_registry: Mapping[str, Any] | None = None,
     create_pdf: bool = True,
 ) -> Optional[GeneratedTradingComplianceReport]:
     """Generate trading compliance comparison reports."""
