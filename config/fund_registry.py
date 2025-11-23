@@ -21,14 +21,6 @@ class FundClass:
         return self.config
 
     @property
-    def expense_ratio(self) -> float:
-        return float(self.config.get("expense_ratio", 0.0) or 0.0)
-
-    @property
-    def vehicle(self) -> Optional[str]:
-        return self.config.get("vehicle_wrapper")
-
-    @property
     def index_ticker_join(self) -> Optional[str]:
         return self.config.get("index_ticker_join")
 
@@ -231,16 +223,3 @@ class FundRegistry:
     def index_identifier(self) -> Optional[str]:
         return self.config.get("index_holdings")
 
-    @property
-    def listed_option_type(self) -> Optional[str]:
-        value = self.config.get("listed_option_type")
-        if isinstance(value, str):
-            value = value.strip()
-        return value or None
-
-    @property
-    def diversification_status(self) -> Optional[str]:
-        value = self.config.get("diversification_status")
-        if isinstance(value, str):
-            value = value.strip()
-        return value or None
