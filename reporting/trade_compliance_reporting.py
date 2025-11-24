@@ -456,6 +456,27 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
             delta_cell = sheet.cell(row=row, column=10, value=market_delta)
             delta_cell.number_format = "#,##0.00"
 
+            trade_vs_ante_cell = sheet.cell(row=row, column=11, value=trade_vs_ante)
+            trade_vs_ante_cell.number_format = "0.00%"
+
+            post_vs_ante_cell = sheet.cell(row=row, column=12, value=post_vs_ante)
+            post_vs_ante_cell.number_format = "0.00%"
+
+            net_trade_value_cell = sheet.cell(row=row, column=13, value=net_value)
+            net_trade_value_cell.number_format = "#,##0.00"
+
+            net_buy_qty_cell = sheet.cell(row=row, column=14, value=buy_qty)
+            net_buy_qty_cell.number_format = "#,##0.00"
+
+            net_sell_qty_cell = sheet.cell(row=row, column=15, value=sell_qty)
+            net_sell_qty_cell.number_format = "#,##0.00"
+
+            net_buy_value_cell = sheet.cell(row=row, column=16, value=buy_val)
+            net_buy_value_cell.number_format = "#,##0.00"
+
+            net_sell_value_cell = sheet.cell(row=row, column=17, value=sell_val)
+            net_sell_value_cell.number_format = "#,##0.00"
+
             row += 1
 
     if not summary_rows_written:
@@ -1168,16 +1189,13 @@ def _add_detailed_comparison(pdf: FPDF, data: Mapping[str, Any]) -> None:
     if not table_rows:
         return
 
-    usable_width = pdf.w - pdf.l_margin - pdf.r_margin
-    metric_width = min(70.0, max(45.0, usable_width * 0.25))
-    remaining_width = max(usable_width - metric_width, 60.0)
-    per_value_width = remaining_width / (len(funds) * 3)
-
     header_height = 6
     row_height = 6
     page_limit = pdf.h - pdf.b_margin - 5
 
-    def _render_header(title: str) -> None:
+    fund_chunks = [funds[i:i + 5] for i in range(0, len(funds), 5)]
+
+    def _render_header(title: str, fund_subset: list[tuple[str, Any]], per_value_width: float, metric_width: float) -> None:
         pdf.set_font("Arial", "B", 14)
         pdf.cell(0, 10, title, 0, 1, "L")
         pdf.ln(1)
@@ -1190,7 +1208,7 @@ def _add_detailed_comparison(pdf: FPDF, data: Mapping[str, Any]) -> None:
 
         metric_height = header_height * 2
         pdf.cell(metric_width, metric_height, "Compliance Check", 1, 0, "C", True)
-        for fund_name, _ in funds:
+        for _ in fund_subset:
             display = fund_name if len(fund_name) <= 24 else f"{fund_name[:21]}..."
             pdf.cell(per_value_width * 3, header_height, display, 1, 0, "C", True)
 
@@ -1204,39 +1222,51 @@ def _add_detailed_comparison(pdf: FPDF, data: Mapping[str, Any]) -> None:
         pdf.set_y(start_y + metric_height)
         pdf.set_font("Arial", "", 7)
 
-    _render_header("Detailed Comparison by Compliance Check")
+    for chunk_index, fund_subset in enumerate(fund_chunks):
+        chunk_start = chunk_index * 5
+        usable_width = pdf.w - pdf.l_margin - pdf.r_margin
+        metric_width = min(70.0, max(45.0, usable_width * 0.25))
+        remaining_width = max(usable_width - metric_width, 60.0)
+        per_value_width = remaining_width / (len(fund_subset) * 3)
 
-    for check_name, values in table_rows:
-        if pdf.get_y() + row_height > page_limit:
-            pdf.add_page(orientation=getattr(pdf, "cur_orientation", "L"))
-            _render_header("Detailed Comparison by Compliance Check (cont.)")
+        title = "Detailed Comparison by Compliance Check"
+        if chunk_index:
+            title = f"{title} (Group {chunk_index + 1})"
 
-        pdf.set_x(pdf.l_margin)
-        display_check = check_name if len(check_name) <= 40 else f"{check_name[:37]}..."
-        pdf.set_font("Arial", "B", 7)
-        pdf.cell(metric_width, row_height, display_check, 1, 0, "L")
-        pdf.set_font("Arial", "", 7)
+        _render_header(title, fund_subset, per_value_width, metric_width)
 
-        for before_status, after_status, changed_flag, after_upper in values:
-            pdf.cell(per_value_width, row_height, before_status, 1, 0, "C")
-            if after_upper == "FAIL":
-                pdf.set_fill_color(255, 204, 204)
-                pdf.cell(per_value_width, row_height, after_status, 1, 0, "C", True)
-                pdf.set_fill_color(255, 255, 255)
-            else:
-                pdf.cell(per_value_width, row_height, after_status, 1, 0, "C")
+        for check_name, values in table_rows:
+            if pdf.get_y() + row_height > page_limit:
+                pdf.add_page(orientation=getattr(pdf, "cur_orientation", "L"))
+                _render_header(f"{title} (cont.)", fund_subset, per_value_width, metric_width)
 
-            changed_display = changed_flag or ""
-            if changed_display.upper() == "YES":
-                pdf.set_fill_color(255, 255, 204)
-                pdf.cell(per_value_width, row_height, changed_display, 1, 0, "C", True)
-                pdf.set_fill_color(255, 255, 255)
-            else:
-                pdf.cell(per_value_width, row_height, changed_display, 1, 0, "C")
+            pdf.set_x(pdf.l_margin)
+            display_check = check_name if len(check_name) <= 40 else f"{check_name[:37]}..."
+            pdf.set_font("Arial", "B", 7)
+            pdf.cell(metric_width, row_height, display_check, 1, 0, "L")
+            pdf.set_font("Arial", "", 7)
 
-        pdf.ln(row_height)
+            subset_values = values[chunk_start:chunk_start + len(fund_subset)]
+            for before_status, after_status, changed_flag, after_upper in subset_values:
+                pdf.cell(per_value_width, row_height, before_status, 1, 0, "C")
+                if after_upper == "FAIL":
+                    pdf.set_fill_color(255, 204, 204)
+                    pdf.cell(per_value_width, row_height, after_status, 1, 0, "C", True)
+                    pdf.set_fill_color(255, 255, 255)
+                else:
+                    pdf.cell(per_value_width, row_height, after_status, 1, 0, "C")
 
-    pdf.ln(3)
+                changed_display = changed_flag or ""
+                if changed_display.upper() == "YES":
+                    pdf.set_fill_color(255, 255, 204)
+                    pdf.cell(per_value_width, row_height, changed_display, 1, 0, "C", True)
+                    pdf.set_fill_color(255, 255, 255)
+                else:
+                    pdf.cell(per_value_width, row_height, changed_display, 1, 0, "C")
+
+            pdf.ln(row_height)
+
+        pdf.ln(3)
 
 def generate_trading_compliance_reports(
     comparison_data: Mapping[str, Any],

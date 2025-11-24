@@ -566,20 +566,23 @@ if __name__ == "__main__":
         },
         "eod_compliance_custom": {
             # All three fund groups combined
-            "funds": build_fund_list(ETF_FUNDS),  # IRS AND R2
+            "funds": build_fund_list(
+        exclude_funds("KNG", PRIVATE_FUNDS),
+                ETF_FUNDS
+            ),  # IRS AND R2
             "output_tag": "custom_cef",  # Custom tag for file names
             "compliance_tests": [
-                        "gics_compliance",
-                        "prospectus_80pct_policy",
+                        # "gics_compliance",
+                        # "prospectus_80pct_policy",
                         "diversification_40act_check",
-                        "diversification_IRS_check",
-                        "diversification_IRC_check",
-                        "max_15pct_illiquid_sai",
-                        "real_estate_check",
-                        "commodities_check",
-                        "twelve_d1a_other_inv_cos",
-                        "twelve_d2_insurance_cos",
-                        "twelve_d3_sec_biz"
+                        # "diversification_IRS_check",
+                        # "diversification_IRC_check",
+                        # "max_15pct_illiquid_sai",
+                        # "real_estate_check",
+                        # "commodities_check",
+                        # "twelve_d1a_other_inv_cos",
+                        # "twelve_d2_insurance_cos",
+                        # "twelve_d3_sec_biz"
                     ],
         },
         # "eod_recon_custom": {

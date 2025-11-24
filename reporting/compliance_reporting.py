@@ -14,6 +14,7 @@ import numbers
 import re
 import pandas as pd
 
+from config.fund_definitions import FUND_DEFINITIONS
 from reporting.base_report_pdf import BaseReportPDF
 from reporting.footnotes import FOOTNOTES
 from reporting.report_utils import (
@@ -106,6 +107,22 @@ class ComplianceReport:
             return prepared
 
         return {self.report_date: normalize_compliance_results(raw_results)}
+
+    @staticmethod
+    def _get_vehicle_wrapper(fund_name: str) -> str:
+        return (
+            str(FUND_DEFINITIONS.get(fund_name, {}).get("vehicle_wrapper", "") or "")
+            .lower()
+        )
+
+    def _is_vit_fund(self, fund_name: str) -> bool:
+        return self._get_vehicle_wrapper(fund_name) == "vit"
+
+    def _is_etf_fund(self, fund_name: str) -> bool:
+        return self._get_vehicle_wrapper(fund_name) == "etf"
+
+    def _is_closed_end_fund(self, fund_name: str) -> bool:
+        return self._get_vehicle_wrapper(fund_name) == "closed_end_fund"
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -420,6 +437,9 @@ class ComplianceReport:
                 prospectus = fund_data.get("prospectus_80pct_policy")
                 if not prospectus:
                     logger.warning("No prospectus 80%% policy data for %s", fund_name)
+                    continue
+
+                if self._is_closed_end_fund(fund_name) and fund_name.startswith("TR"):
                     continue
 
                 calculations = prospectus.get("calculations", {}) or {}
@@ -738,6 +758,8 @@ class ComplianceReport:
                 irc = fund_data.get("diversification_IRC_check")
                 if not irc:
                     continue
+                if not self._is_vit_fund(fund_name):
+                    continue
                 calc = irc.get("calculations", {})
                 rows.append(
                     {
@@ -955,7 +977,7 @@ class ComplianceReport:
                         # ),
                         (
                             "12d3 Sec Biz Compliant",
-                            f'=IF(AND(C{excel_row}="PASS",D{excel_row}="PASS",E{excel_row}="PASS",F{excel_row}="PASS"),"PASS","FAIL")',
+                            f'=IF(AND(C{excel_row}="PASS",D{excel_row}="PASS",E{excel_row}="PASS"),"PASS","FAIL")',
                         ),
                         ("SEC-Related Businesses (Shs Out %)", sec_related_str),
                         ("Combined Holdings (Portfolio %)", combined_str),
@@ -988,6 +1010,9 @@ class ComplianceReport:
             for fund_name, fund_data in funds.items():
                 illiquid = fund_data.get("max_15pct_illiquid_sai")
                 if not illiquid:
+                    continue
+
+                if not self._is_etf_fund(fund_name):
                     continue
 
                 calculations = illiquid.get("calculations", {}) or {}
@@ -1061,8 +1086,7 @@ class ComplianceReport:
                                 max_length = max(max_length, len(str(value)))
                                 if cell.row > 1 and cell.data_type in {"n", "f"}:
                                     if is_percent or is_formula_percent:
-                                        format_string = "0.00%" if is_formula_percent else "0.0000%"
-                                        cell.number_format = format_string
+                                        cell.number_format = "0.00%"
                                     else:
                                         cell.number_format = "#,##0.00"
                         except Exception:  # pragma: no cover - defensive
@@ -1610,6 +1634,10 @@ class ComplianceReportPDF(BaseReportPDF):
                 continue
             if key == "diversification_IRS_check" and fund_name not in _IRS_DIVERSIFICATION_FUNDS:
                 continue
+            if key == "diversification_IRC_check" and not self._is_vit_fund(fund_name):
+                continue
+            if key == "max_15pct_illiquid_sai" and not self._is_etf_fund(fund_name):
+                continue
 
             test_data = fund_data.get(key)
             if test_data:
@@ -2128,6 +2156,33 @@ class ComplianceReportPDF(BaseReportPDF):
 
         self._draw_two_column_table(rows)
         self._draw_footnotes_section("irc")
+
+    def print_12d1_other_inv_cos(self, data: Mapping[str, object]) -> None:
+        """Print Rule 12d1-1 Other Investment Companies."""
+
+        calculations = data.get("calculations", {})
+        holdings = calculations.get("investment_companies", []) or []
+
+        holdings_str = ", ".join(
+            f"{holding.get('ticker', '')} ({float(holding.get('ownership_pct') or 0):.2%})"
+            for holding in holdings
+        ) or "None"
+
+        status = "PASS" if data.get("twelve_d1a_other_inv_cos_compliant", data.get("is_compliant", True)) else "FAIL"
+
+        rows = [
+            ("Total Assets", f"{calculations.get('total_assets', 0):,.0f}"),
+            ("Investment Companies", holdings_str),
+            ("Max Ownership %", f"{calculations.get('ownership_pct_max', 0):.2%}"),
+            ("Equity Market Value Sum", f"{calculations.get('equity_market_value_sum', 0):,.0f}"),
+            ("Test 1 (<=3% Ownership)", "PASS" if data.get("test_1_pass") else "FAIL"),
+            ("Test 2 (<=5% Total Assets)", "PASS" if data.get("test_2_pass") else "FAIL"),
+            ("Test 3 (<=10% Total Assets)", "PASS" if data.get("test_3_pass") else "FAIL"),
+            ("Rule 12d1-1 Compliance Status", status),
+        ]
+
+        self._draw_two_column_table(rows)
+        self._draw_footnotes_section("12d1")
 
     def print_max_15pct_illiquid(self, data: Mapping[str, object]) -> None:
         """Print 15% illiquid assets compliance details - FIXED"""
