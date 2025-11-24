@@ -557,11 +557,17 @@ class ComplianceChecker:
             )
 
             share_col = "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
-            share_series = pd.Series(0.0, index=remaining_securities.index, dtype=float)
-            remaining_securities[share_col] = share_series
+
+            # Preserve existing share data instead of overwriting with zeros
+            if share_col not in remaining_securities.columns:
+                remaining_securities[share_col] = 0.0
+            else:
+                remaining_securities[share_col] = pd.to_numeric(
+                    remaining_securities[share_col], errors="coerce"
+                ).fillna(0.0)
 
             remaining_securities["vest_ownership_of_float"] = (
-                share_series / remaining_securities["EQY_SH_OUT_million"]
+                    remaining_securities[share_col] / remaining_securities["EQY_SH_OUT_million"]
             ).fillna(0.0)
             issuer_compliance_2b = remaining_securities["vest_ownership_of_float"] <= ACT_40_OWNERSHIP_LIMIT
             condition_2b_met = bool(issuer_compliance_2b.all())

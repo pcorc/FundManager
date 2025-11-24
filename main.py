@@ -553,35 +553,35 @@ if __name__ == "__main__":
     # ALL_FUNDS,
 
     ACTIVE_RUNS = [
-        # "trading_compliance_custom",
+        "trading_compliance_custom",
         "eod_compliance_custom",
         # "eod_recon_custom",
     ]
 
     RUN_OVERRIDES = {
-        # "trading_compliance_custom": {
-        #     # ETFs + one specific closed-end fund
-        #     "funds": build_fund_list( "SDVD", "RDVI"),
-        #     "output_tag": "custom_cef",  # Custom tag for file names
-        # },
+        "trading_compliance_custom": {
+            # ETFs + one specific closed-end fund
+            "funds": build_fund_list( ETF_FUNDS),
+            "output_tag": "custom_cef",  # Custom tag for file names
+        },
         "eod_compliance_custom": {
             # All three fund groups combined
             "funds": build_fund_list(
-                "RDVI", "SDVD"
+                ETF_FUNDS
             ),
             "output_tag": "custom_cef",  # Custom tag for file names
             "compliance_tests": [
-                        # "gics_compliance",
-                        # "prospectus_80pct_policy",
+                        "gics_compliance",
+                        "prospectus_80pct_policy",
                         "diversification_40act_check",
-                        # "diversification_IRS_check",
-                        # "diversification_IRC_check",
-                        # "max_15pct_illiquid_sai",
-                        # "real_estate_check",
-                        # "commodities_check",
-                        # "twelve_d1a_other_inv_cos",
-                        # "twelve_d2_insurance_cos",
-                        # "twelve_d3_sec_biz"
+                        "diversification_IRS_check",
+                        "diversification_IRC_check",
+                        "max_15pct_illiquid_sai",
+                        "real_estate_check",
+                        "commodities_check",
+                        "twelve_d1a_other_inv_cos",
+                        "twelve_d2_insurance_cos",
+                        "twelve_d3_sec_biz"
                     ],
         },
         # "eod_recon_custom": {

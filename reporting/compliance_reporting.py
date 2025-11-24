@@ -547,7 +547,7 @@ class ComplianceReport:
                 if remaining_details:
                     remaining_str = ", ".join(
                         "({ticker}, {shares:,.0f}, {vest_weight:.2%}, {ownership:.7%})".format(
-                            ticker=entry.get('ticker'),
+                            ticker=entry.get('eqyticker'),
                             shares=self._extract_share_value(entry),
                             vest_weight=float(entry.get('vest_weight', 0.0) or 0.0),
                             ownership=float(entry.get('vest_ownership_of_float', 0.0) or 0.0),
