@@ -80,7 +80,7 @@ class NAVComponents:
                 self.flex_options.raw_gl +
                 self.treasury.raw_gl +
                 self.assignment_gl +
-                self.other
+                self.other - abs(self.distributions)
         )
 
     @property
@@ -92,9 +92,8 @@ class NAVComponents:
                 self.flex_options.adjusted_gl +
                 self.treasury.adjusted_gl +
                 self.assignment_gl +
-                self.other
+                self.other - abs(self.distributions)
         )
-
 
 @dataclass
 class NAVSummary:

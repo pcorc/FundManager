@@ -74,6 +74,9 @@ class BulkDataLoader:
         self._bulk_load_cash_data(
             data_store, all_funds, target_date, previous_date
         )
+        self._bulk_load_distributions(
+            data_store, all_funds, target_date
+        )
         tplus_one = self._business_day_shift(target_date, 1)
         previous_tplus_one = self._business_day_shift(previous_date, 1)
 
@@ -730,6 +733,77 @@ class BulkDataLoader:
 
             except Exception as e:
                 self.logger.warning(f"Failed to load cash {table_name}: {e}")
+
+
+    def _bulk_load_distributions(
+        self,
+        data_store: BulkDataStore,
+        all_funds: Dict,
+        target_date: date,
+    ) -> None:
+        """Load distribution data for all funds for the given date."""
+
+        table_to_funds = self._group_funds_by_table(all_funds, 'distributions')
+
+        for table_name, funds in table_to_funds.items():
+            if not table_name or table_name == 'NULL':
+                continue
+
+            distributions_table = getattr(self.base_cls.classes, table_name, None)
+            if distributions_table is None:
+                self.logger.debug("Distributions table %s not found in metadata", table_name)
+                continue
+
+            try:
+                query = self.session.query(
+                    distributions_table.fund,
+                    distributions_table.declaration_date,
+                    distributions_table.ex_date,
+                    distributions_table.record_date,
+                    distributions_table.reinvest_date,
+                    distributions_table.payable_date,
+                    distributions_table.distro_amt,
+                ).filter(
+                    distributions_table.ex_date == target_date
+                )
+
+                df = pd.read_sql(query.statement, self.session.bind)
+            except Exception as exc:
+                self.logger.error(
+                    "Failed to load distributions from %s for %s: %s",
+                    table_name,
+                    target_date,
+                    exc,
+                )
+                continue
+
+            date_columns = [
+                'declaration_date',
+                'ex_date',
+                'record_date',
+                'reinvest_date',
+                'payable_date',
+            ]
+
+            for col in date_columns:
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col], errors='coerce')
+
+            if 'distro_amt' in df.columns:
+                df['distro_amt'] = pd.to_numeric(df['distro_amt'], errors='coerce')
+
+            for fund in funds:
+                fund_name = fund.name
+                if 'fund' in df.columns:
+                    fund_df = df[df['fund'] == fund_name].copy()
+                else:
+                    fund_df = df.copy()
+                self._store_fund_data(
+                    data_store,
+                    fund_name,
+                    'distributions',
+                    fund_df if isinstance(fund_df, pd.DataFrame) else pd.DataFrame(),
+                )
 
     def _load_bny_us_nav(
         self,

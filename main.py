@@ -576,7 +576,7 @@ if __name__ == "__main__":
         },
         "eod_recon_custom": {
             # Closed-end funds + ETFs + two specific funds
-            "funds": build_fund_list("HE3B2", "R21126"),
+            "funds": build_fund_list("HE3B2", "TR3B2", "R21126"),
             "output_tag": "custom_cef",  # Custom tag for file names
         },
     }

@@ -134,7 +134,11 @@ class ReconResult:
 
     def to_flat_dict(self) -> Dict[Tuple[str, str, str], pd.DataFrame]:
         flat: Dict[Tuple[str, str, str], pd.DataFrame] = {}
-        if self.holdings_df is not None and not self.holdings_df.empty:
+        if self.recon_type == "index_equity":
+            flat[(self.fund, self.date_str, self.recon_type)] = (
+                self.holdings_df if isinstance(self.holdings_df, pd.DataFrame) else pd.DataFrame()
+            )
+        elif self.holdings_df is not None and not self.holdings_df.empty:
             flat[(self.fund, self.date_str, self.recon_type)] = self.holdings_df
         if self.price_df_t is not None and not self.price_df_t.empty:
             flat[(self.fund, self.date_str, f"{self.recon_type}_price_T")] = self.price_df_t
@@ -143,6 +147,8 @@ class ReconResult:
         return flat
 
     def has_data(self) -> bool:
+        if self.recon_type == "index_equity":
+            return True
         return any(
             [
                 self.holdings_df is not None and not self.holdings_df.empty,
@@ -231,6 +237,9 @@ class ReconciliationReport:
         elif descriptor.require_holdings:
             # If holdings are required but no key is defined, treat as no data.
             return None
+
+        if recon_type == "index_equity" and holdings_df is None:
+            holdings_df = pd.DataFrame()
 
         price_t, price_t1 = self._build_price_dfs(
             descriptor,

@@ -541,38 +541,42 @@ class NAVReconciliator:
 
         Returns distribution amount if ex_date matches analysis_date.
         """
-        if not hasattr(self.fund.data, 'distributions'):
-            return 0.0
-
-        distributions = self.fund.data.distributions
-        if distributions.empty:
+        distributions = getattr(self.fund.data, 'distributions', None)
+        if not isinstance(distributions, pd.DataFrame) or distributions.empty:
             return 0.0
 
         if 'ex_date' not in distributions.columns:
             return 0.0
 
-        # Convert dates and filter
         distributions = distributions.copy()
+
+        try:
+            analysis_dt = pd.to_datetime(self.analysis_date).date()
+        except Exception:
+            analysis_dt = self.analysis_date
+
         distributions['ex_date'] = pd.to_datetime(
             distributions['ex_date'], errors='coerce'
         ).dt.date
 
         matching = distributions[
-            (distributions['fund'] == self.fund.name) &
-            (distributions['ex_date'] == self.analysis_date)
-            ]
+            (distributions.get('fund') == self.fund.name) &
+            (distributions['ex_date'] == analysis_dt)
+        ] if 'fund' in distributions.columns else distributions[
+            distributions['ex_date'] == analysis_dt
+        ]
 
         if matching.empty or 'distro_amt' not in matching.columns:
             return 0.0
 
-        amount = pd.to_numeric(
+        amount = abs(pd.to_numeric(
             matching['distro_amt'], errors='coerce'
-        ).fillna(0).sum()
+        ).fillna(0).sum())
 
         if amount:
             self.logger.info(
                 "Distribution going ex on %s: $%s",
-                self.analysis_date,
+                analysis_dt,
                 f"{amount:,.2f}",
             )
 

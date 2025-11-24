@@ -407,6 +407,7 @@ class CombinedReconciliationReport:
             ("Tsy G/L", 24),
             ("Assign G/L", 24),
             ("Accruals", 24),
+            ("Distributions", 24),
             ("Other", 20),
             ("Expected TNA", 30),
             ("G/L Today", 26),
@@ -419,7 +420,7 @@ class CombinedReconciliationReport:
         self.pdf.ln()
         self.pdf.set_font("Arial", size=8)
 
-        totals = {key: 0.0 for key in ["beg_tna", "eqt_gl", "opt_gl", "flex_gl", "tsy_gl", "assign_gl", "accruals", "other", "expected_tna", "gl_today"]}
+        totals = {key: 0.0 for key in ["beg_tna", "eqt_gl", "opt_gl", "flex_gl", "tsy_gl", "assign_gl", "accruals", "distributions", "other", "expected_tna", "gl_today"]}
 
         for fund_name, nav in self._iter_nav_fund_data():
             nav = nav or {}
@@ -430,9 +431,10 @@ class CombinedReconciliationReport:
             tsy_gl = float(nav.get("Treasury G/L", nav.get("treasury_gl", 0.0)) or 0.0)
             assign_gl = float(nav.get("Assignment G/L", nav.get("assignment_gl", 0.0)) or 0.0)
             accruals = float(nav.get("Accruals", nav.get("accruals", 0.0)) or 0.0)
+            distributions = float(nav.get("Distributions", nav.get("distributions", 0.0)) or 0.0)
             other = float(nav.get("Other", nav.get("other", 0.0)) or 0.0)
             expected_tna = float(nav.get("Expected TNA", nav.get("expected_tna", 0.0)) or 0.0)
-            gl_today = eqt_gl + opt_gl + flex_gl + tsy_gl + assign_gl - accruals + other
+            gl_today = eqt_gl + opt_gl + flex_gl + tsy_gl + assign_gl - accruals - abs(distributions) + other
 
             x, y = self.pdf.get_x(), self.pdf.get_y()
             self.pdf.set_font("Arial", "BU", 8)
@@ -443,7 +445,7 @@ class CombinedReconciliationReport:
             self.pdf.set_text_color(0, 0, 0)
             self.pdf.set_font("Arial", size=8)
 
-            values = [beg_tna, eqt_gl, opt_gl, flex_gl, tsy_gl, assign_gl, accruals, other, expected_tna, gl_today]
+            values = [beg_tna, eqt_gl, opt_gl, flex_gl, tsy_gl, assign_gl, accruals, distributions, other, expected_tna, gl_today]
             for value, (_, width) in zip(values, cols[1:], strict=False):
                 self.pdf.cell(width, 6, f"{value:,.0f}", border=1, align="R")
             self.pdf.ln()
@@ -455,6 +457,7 @@ class CombinedReconciliationReport:
             totals["tsy_gl"] += tsy_gl
             totals["assign_gl"] += assign_gl
             totals["accruals"] += accruals
+            totals["distributions"] += distributions
             totals["other"] += other
             totals["expected_tna"] += expected_tna
             totals["gl_today"] += gl_today
@@ -470,6 +473,7 @@ class CombinedReconciliationReport:
             totals["flex_gl"],
             totals["tsy_gl"],
             totals["assign_gl"],
+            totals["distributions"],
             totals["accruals"],
             totals["other"],
             totals["expected_tna"],
@@ -599,6 +603,17 @@ class CombinedReconciliationReport:
 
         self.pdf.set_font("Arial", size=9)
         for metric, value in gl_rows:
+            self.pdf.cell(cols[0][1], 7, metric, border=1)
+            self.pdf.cell(cols[1][1], 7, self._format_currency(value, digits=2), border=1, align="R")
+            self.pdf.ln()
+
+        accruals_value = nav_data.get("Accruals", nav_data.get("accruals", 0.0))
+        distributions_value = nav_data.get("Distributions", nav_data.get("distributions", 0.0))
+
+        for metric, value in (
+            ("  Accruals", -abs(accruals_value)),
+            ("  Distributions", -abs(distributions_value)),
+        ):
             self.pdf.cell(cols[0][1], 7, metric, border=1)
             self.pdf.cell(cols[1][1], 7, self._format_currency(value, digits=2), border=1, align="R")
             self.pdf.ln()
