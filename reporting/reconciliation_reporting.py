@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from config.fund_definitions import FUND_DEFINITIONS, INDEX_FLEX_FUNDS
-from reporting.report_utils import normalize_reconciliation_payload, normalize_report_date
+from reporting.report_utils import _normalize_reconciliation_payload, normalize_report_date
 from utilities.reconciliation_utils import split_flex_price_frames
 
 
@@ -897,7 +897,7 @@ def generate_reconciliation_reports(
     *,
     file_name_prefix: str = "reconciliation_results",
 ) -> GeneratedReconciliationReport:
-    normalized = normalize_reconciliation_payload(results)
+    normalized = _normalize_reconciliation_payload(results)
     if not normalized:
         return GeneratedReconciliationReport(None)
 

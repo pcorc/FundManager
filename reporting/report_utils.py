@@ -125,11 +125,43 @@ def summarise_compliance_status(normalized_results: Mapping[str, Any]) -> Dict[s
 # Reconciliation helpers
 # ---------------------------------------------------------------------------
 
-def normalize_reconciliation_payload(raw_results: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
-    """Ensure reconciliation results expose ``summary`` and ``details`` keys."""
+def _normalize_reconciliation_payload(raw_results: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """
+    Ensure reconciliation results expose ``summary`` and ``details`` keys.
+    Also unwraps date-keyed structure if present.
 
+    Handles both structures:
+    - {fund_name: payload} (direct)
+    - {date_str: {fund_name: payload}} (date-wrapped)
+
+    Returns: {fund_name: {"summary": {...}, "details": {...}}}
+    """
+
+    if not raw_results:
+        return {}
+
+    # STEP 1: Detect and unwrap date-keyed structure if present
+    first_key = next(iter(raw_results.keys()))
+    first_value = raw_results[first_key]
+
+    # Check if this is date-wrapped: {date: {fund: payload}}
+    fund_level_data = raw_results
+    if isinstance(first_value, dict) and first_value:
+        sample_nested_key = next(iter(first_value.keys()))
+        sample_nested_value = first_value.get(sample_nested_key)
+
+        # If nested value has reconciliation-specific keys, parent is date wrapper
+        if isinstance(sample_nested_value, dict) and any(
+                key in sample_nested_value
+                for key in ["summary", "details", "custodian_equity",
+                            "custodian_option", "index_equity"]
+        ):
+            # This is date-wrapped, unwrap to fund level
+            fund_level_data = first_value
+
+    # STEP 2: Normalize the fund-level data to ensure summary/details structure
     normalized: Dict[str, Dict[str, Any]] = {}
-    for fund_name, payload in (raw_results or {}).items():
+    for fund_name, payload in (fund_level_data or {}).items():
         if not payload:
             continue
         if "summary" in payload or "details" in payload:
@@ -139,6 +171,7 @@ def normalize_reconciliation_payload(raw_results: Mapping[str, Any]) -> Dict[str
             summary = payload
             details = {}
         normalized[fund_name] = {"summary": summary, "details": details}
+
     return normalized
 
 
@@ -170,18 +203,46 @@ def summarise_reconciliation_breaks(normalized_results: Mapping[str, Dict[str, A
 # NAV reconciliation helpers
 # ---------------------------------------------------------------------------
 
-def normalize_nav_payload(raw_results: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
-    """Ensure NAV reconciliation payload exposes ``summary`` and ``details``."""
+def _normalize_nav_payload(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize the NAV payload to ensure consistent structure.
 
-    normalized: Dict[str, Dict[str, Any]] = {}
-    for fund_name, payload in (raw_results or {}).items():
-        if not payload:
-            continue
-        summary = payload.get("summary", {}) if isinstance(payload, Mapping) else {}
-        details = payload.get("detailed_calculations", {}) if isinstance(payload, Mapping) else {}
-        normalized[fund_name] = {"summary": summary, "details": details}
+    Unwraps date-keyed structure if present and returns fund-level data.
+    """
+    if not payload:
+        return {}
+
+    # Detect and unwrap date-keyed structure if present
+    first_key = next(iter(payload.keys()))
+    first_value = payload[first_key]
+
+    # Check if this is date-wrapped: {date: {fund: payload}}
+    if isinstance(first_value, dict) and first_value:
+        sample_nested_key = next(iter(first_value.keys()))
+        sample_nested_value = first_value.get(sample_nested_key)
+
+        # If nested value has NAV-specific keys, parent is date wrapper
+        if isinstance(sample_nested_value, dict) and any(
+                key in sample_nested_value
+                for key in ["Beginning TNA", "Expected NAV", "Custodian NAV",
+                            "Expected TNA", "NAV Diff ($)", "summary", "detailed_calculations"]
+        ):
+            # This is date-wrapped, unwrap to fund level
+            fund_level_data = first_value
+        else:
+            # Already fund-level
+            fund_level_data = payload
+    else:
+        # Already fund-level
+        fund_level_data = payload
+
+    # Return as dict, ensuring we have fund-level data
+    normalized: Dict[str, Any] = {}
+    for fund_name, fund_data in fund_level_data.items():
+        if isinstance(fund_data, dict):
+            normalized[fund_name] = fund_data
+
     return normalized
-
 
 def summarise_nav_differences(normalized_results: Mapping[str, Dict[str, Any]]) -> Dict[str, float]:
     """Aggregate NAV differences across funds."""

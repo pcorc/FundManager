@@ -114,7 +114,7 @@ def run_eod_mode(
     """Execute the full EOD workflow for the provided data."""
 
     def _build_prefix(base: str) -> str:
-        return f"{base}_{tag}" if tag else base
+        return f"{base}_{output_tag}" if output_tag else base
 
     results = _run_operations(
         registry,

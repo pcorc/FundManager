@@ -12,8 +12,8 @@ import re
 
 from reporting.combined_reconciliation_report import build_combined_reconciliation_pdf
 from reporting.report_utils import (
-    normalize_nav_payload,
-    normalize_reconciliation_payload,
+    _normalize_nav_payload,
+    _normalize_reconciliation_payload,
     normalize_report_date,
 )
 
@@ -57,11 +57,44 @@ class NAVReconciliationExcelReport:
         self._export()
 
     def _normalize_nav_payload(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
-        """Normalize the NAV payload to ensure consistent structure."""
+        """
+        Normalize the NAV payload to ensure consistent structure.
+
+        Unwraps date-keyed structure if present and returns fund-level data.
+        """
+        if not payload:
+            return {}
+
+        # Detect and unwrap date-keyed structure if present
+        first_key = next(iter(payload.keys()))
+        first_value = payload[first_key]
+
+        # Check if this is date-wrapped: {date: {fund: payload}}
+        if isinstance(first_value, dict) and first_value:
+            sample_nested_key = next(iter(first_value.keys()))
+            sample_nested_value = first_value.get(sample_nested_key)
+
+            # If nested value has NAV-specific keys, parent is date wrapper
+            if isinstance(sample_nested_value, dict) and any(
+                    key in sample_nested_value
+                    for key in ["Beginning TNA", "Expected NAV", "Custodian NAV",
+                                "Expected TNA", "NAV Diff ($)", "summary", "detailed_calculations"]
+            ):
+                # This is date-wrapped, unwrap to fund level
+                fund_level_data = first_value
+            else:
+                # Already fund-level
+                fund_level_data = payload
+        else:
+            # Already fund-level
+            fund_level_data = payload
+
+        # Return as dict, ensuring we have fund-level data
         normalized: Dict[str, Any] = {}
-        for fund_name, fund_data in payload.items():
+        for fund_name, fund_data in fund_level_data.items():
             if isinstance(fund_data, dict):
                 normalized[fund_name] = fund_data
+
         return normalized
 
     def _export(self) -> None:
@@ -738,16 +771,24 @@ def generate_nav_reconciliation_reports(reconciliation_results, date_str, excel_
         reconciliation_results: Dict with structure {date_str: {fund_name: nav_results}}
         date_str: Date string for the report
         excel_path: Path where the Excel file will be saved
+        workbook: Optional existing workbook to add sheets to
     """
     resolved_date = normalize_report_date(date_str)
 
+    # ✅ FIX: Simplified normalization logic
     if isinstance(reconciliation_results, dict):
+        # Try to find data by date string
         if date_str in reconciliation_results:
             normalized = reconciliation_results[date_str]
+        elif resolved_date in reconciliation_results:
+            normalized = reconciliation_results[resolved_date]
         else:
+            # Check if this is already fund-level data (no date wrapper)
+            # Look for NAV-specific keys to determine if this is fund data
             first_key = next(iter(reconciliation_results.keys())) if reconciliation_results else None
             if first_key and isinstance(reconciliation_results[first_key], dict):
                 first_value = reconciliation_results[first_key]
+                # Check if this looks like NAV data (has NAV-specific keys)
                 if any(
                     key in first_value
                     for key in [
@@ -756,10 +797,14 @@ def generate_nav_reconciliation_reports(reconciliation_results, date_str, excel_
                         "NAV Diff ($)",
                         "Expected NAV",
                         "Custodian NAV",
+                        "Beginning TNA",
+                        "Expected TNA",
                     ]
                 ):
+                    # This is already fund-level data
                     normalized = reconciliation_results
                 else:
+                    # This might be nested, try to extract
                     normalized = reconciliation_results.get(first_key, {})
             else:
                 normalized = reconciliation_results
@@ -784,30 +829,65 @@ def generate_nav_reconciliation_reports(reconciliation_results, date_str, excel_
 
 
 def generate_reconciliation_summary_pdf(
-    reconciliation_results: Mapping[str, Any],
-    nav_results: Mapping[str, Any],
-    report_date: date | datetime | str,
-    output_dir: str,
-    *,
-    file_name: str | None = None,
+        reconciliation_results: Mapping[str, Any],
+        nav_results: Mapping[str, Any],
+        report_date: date | datetime | str,
+        output_dir: str,
+        *,
+        file_name: str | None = None,
 ) -> Optional[str]:
     """Create the combined holdings + NAV reconciliation PDF."""
 
-    recon_payload = normalize_reconciliation_payload(reconciliation_results)
-    nav_payload = normalize_nav_payload(nav_results)
-    if not recon_payload and not nav_payload:
+    # Get the date string first
+    date_str = normalize_report_date(report_date)
+
+    # Unwrap date layer if present for both payloads
+    raw_recon = reconciliation_results or {}
+    raw_nav = nav_results or {}
+
+    # Unwrap holdings date layer if present
+    if raw_recon:
+        first_key = next(iter(raw_recon.keys()))
+        first_value = raw_recon[first_key]
+        # Check if this looks like date-wrapped structure
+        if isinstance(first_value, dict) and first_value:
+            sample_key = next(iter(first_value.keys()))
+            sample_value = first_value.get(sample_key)
+            # If nested value looks like holdings data, unwrap
+            if isinstance(sample_value, dict) and any(
+                    key in sample_value for key in ["summary", "details", "custodian_equity"]
+            ):
+                raw_recon = first_value
+
+    # Unwrap NAV date layer if present
+    if raw_nav:
+        first_key = next(iter(raw_nav.keys()))
+        first_value = raw_nav[first_key]
+        # Check if this looks like date-wrapped structure
+        if isinstance(first_value, dict) and first_value:
+            sample_key = next(iter(first_value.keys()))
+            sample_value = first_value.get(sample_key)
+            # If nested value looks like NAV data, unwrap
+            if isinstance(sample_value, dict) and any(
+                    key in sample_value for key in ["Beginning TNA", "Expected NAV", "summary"]
+            ):
+                raw_nav = first_value
+
+    if not raw_recon and not raw_nav:
         return None
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    date_str = normalize_report_date(report_date)
     resolved_name = file_name or f"reconciliation_summary_{date_str}.pdf"
     pdf_path = output_path / resolved_name
 
+    # Build holdings structure for PDF
     holdings_details: Dict[str, Dict[str, Any]] = {date_str: {}}
     holdings_summary: Dict[str, list[Dict[str, Any]]] = {date_str: []}
-    for fund, payload in recon_payload.items():
+    for fund, payload in raw_recon.items():
+        if not payload:
+            continue
         holdings_details[date_str][fund] = payload.get("details", {})
         holdings_summary[date_str].append(
             {
@@ -816,14 +896,21 @@ def generate_reconciliation_summary_pdf(
             }
         )
 
+    # Build NAV structure for PDF
     nav_details: Dict[str, Dict[str, Any]] = {date_str: {}}
     nav_summary: Dict[str, list[Dict[str, Any]]] = {date_str: []}
-    for fund, payload in nav_payload.items():
-        nav_details[date_str][fund] = payload.get("summary", {})
+
+    for fund, payload in raw_nav.items():
+        if not payload:
+            continue
+        # Store the complete payload with all top-level metrics
+        nav_details[date_str][fund] = payload
+
+        # For the summary list, also pass the full payload
         nav_summary[date_str].append(
             {
                 "fund": fund,
-                "summary": payload.get("summary", {}),
+                "summary": payload,  # Pass full payload
             }
         )
 

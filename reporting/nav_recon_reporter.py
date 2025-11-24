@@ -59,13 +59,18 @@ def build_nav_reconciliation_reports(
         return None
 
     date_str = str(report_date)
+
+    # ✅ FIX: Wrap in date structure for consistency across all reporting functions
+    nav_by_date = {date_str: derived_nav} if derived_nav else {}
+    holdings_by_date = {date_str: derived_holdings} if derived_holdings else {}
+
     excel_prefix = f"{file_name_prefix}_{date_str}"
     excel_path = Path(output_dir) / f"{excel_prefix}.xlsx"
 
     holdings_report: Optional[GeneratedReconciliationReport] = None
     if derived_holdings:
         holdings_report = generate_reconciliation_reports(
-            derived_holdings,
+            holdings_by_date,  # ✅ Pass wrapped structure
             report_date,
             output_dir,
             file_name_prefix=file_name_prefix,
@@ -75,7 +80,7 @@ def build_nav_reconciliation_reports(
     if derived_nav:
         # Build the Excel path
         excel_output = generate_nav_reconciliation_reports(
-            derived_nav,
+            nav_by_date,  # ✅ Pass wrapped structure
             str(report_date),
             excel_path,
         )
@@ -85,8 +90,8 @@ def build_nav_reconciliation_reports(
     combined_pdf: Optional[str] = None
     if create_pdf:
         combined_pdf = generate_reconciliation_summary_pdf(
-            derived_holdings,
-            derived_nav,
+            holdings_by_date,  # ✅ Pass wrapped structure
+            nav_by_date,  # ✅ Pass wrapped structure
             report_date,
             output_dir,
             file_name=f"{excel_prefix}.pdf",

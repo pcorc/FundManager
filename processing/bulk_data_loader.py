@@ -441,7 +441,7 @@ class BulkDataLoader:
         )
 
         columns = [table]
-        underlying_column = getattr(table, 'equity_ticker', None)
+        underlying_column = getattr(table, 'equity_underlying_ticker', None) #TODO
 
         if bbg_equity_table is not None and underlying_column is not None:
             columns.extend(
@@ -1381,7 +1381,7 @@ class BulkDataLoader:
         columns = [
             nasdaq.file_date.label('date'),
             nasdaq.fund.label('fund'),
-            nasdaq.ticker.label('equity_ticker'),
+            nasdaq.ticker.label('eqyticker'),
             nasdaq.index_weight.label('weight_index'),
             nasdaq.price.label('price_index'),
         ]
@@ -1435,7 +1435,7 @@ class BulkDataLoader:
         columns = [
             sp.EFFECTIVE_DATE.label('date'),
             sp.INDEX_CODE.label('fund'),
-            sp.TICKER.label('equity_ticker'),
+            sp.TICKER.label('eqyticker'),
             sp.INDEX_WEIGHT.label('weight_index'),
             sp.LOCAL_PRICE.label('price_index'),
         ]
@@ -1489,7 +1489,7 @@ class BulkDataLoader:
         columns = [
             cboe.date.label('date'),
             cboe.index_name.label('fund'),
-            cboe.ticker.label('equity_ticker'),
+            cboe.ticker.label('eqyticker'),
             cboe.stock_weight.label('weight_index'),
             cboe.price.label('price_index'),
         ]
@@ -1538,7 +1538,7 @@ class BulkDataLoader:
         columns = [
             dogg.DATE.label('date'),
             literal(fund.name).label('fund'),
-            dogg.TICKER.label('equity_ticker'),
+            dogg.TICKER.label('eqyticker'),
             literal(0.10).label('weight_index'),
         ]
         if bbg is not None:

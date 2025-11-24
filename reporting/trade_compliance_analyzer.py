@@ -778,6 +778,7 @@ class TradingComplianceAnalyzer:
             "equity": (
                 "ticker",
                 "equity_ticker",
+                "eqyticker",
                 "symbol",
                 "underlying_symbol",
             ),

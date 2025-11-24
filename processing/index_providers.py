@@ -43,7 +43,7 @@ class IndexManager:
         query = (self.session.query(
             self.base_cls.classes.nasdaq_holdings.date.label('date'),
             self.base_cls.classes.nasdaq_holdings.fund.label('fund'),
-            self.base_cls.classes.nasdaq_holdings.ticker.label('equity_ticker'),
+            self.base_cls.classes.nasdaq_holdings.ticker.label('eqyticker'),
             self.base_cls.classes.nasdaq_holdings.index_weight.label('weight_index'),
             self.base_cls.classes.nasdaq_holdings.price.label('price_index'),
             self.base_cls.classes.bbg_equity_flds_blotter.GICS_SECTOR_NAME,
@@ -68,7 +68,7 @@ class IndexManager:
         query = self.session.query(
             self.base_cls.classes.sp_holdings.EFFECTIVE_DATE.label('date'),
             self.base_cls.classes.sp_holdings.INDEX_CODE.label('fund'),
-            self.base_cls.classes.sp_holdings.TICKER.label('equity_ticker'),
+            self.base_cls.classes.sp_holdings.TICKER.label('eqyticker'),
             self.base_cls.classes.sp_holdings.INDEX_WEIGHT.label('weight_index'),
             self.base_cls.classes.sp_holdings.LOCAL_PRICE.label('price_index'),
             self.base_cls.classes.bbg_equity_flds_blotter.GICS_SECTOR_NAME,
@@ -88,7 +88,7 @@ class IndexManager:
         query = self.session.query(
             self.base_cls.classes.cboe_holdings.date.label('date'),
             self.base_cls.classes.cboe_holdings.index_name.label('fund'),
-            self.base_cls.classes.cboe_holdings.ticker.label('equity_ticker'),
+            self.base_cls.classes.cboe_holdings.ticker.label('eqyticker'),
             self.base_cls.classes.cboe_holdings.stock_weight.label('weight_index'),
             self.base_cls.classes.cboe_holdings.price.label('price_index'),
             self.base_cls.classes.bbg_equity_flds_blotter.GICS_SECTOR_NAME,
@@ -106,7 +106,7 @@ class IndexManager:
         """Get DOGG index holdings"""
         query = self.session.query(
             self.base_cls.classes.dogg_index.DATE.label('date'),
-            self.base_cls.classes.dogg_index.TICKER.label('equity_ticker'),
+            self.base_cls.classes.dogg_index.TICKER.label('eqyticker'),
             literal(0.10).label('weight_index'),
             self.base_cls.classes.bbg_equity_flds_blotter.GICS_SECTOR_NAME,
             self.base_cls.classes.bbg_equity_flds_blotter.GICS_INDUSTRY_NAME,

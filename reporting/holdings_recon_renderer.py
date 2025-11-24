@@ -168,7 +168,7 @@ class HoldingsReconciliationRenderer:
         ticker_col = next(
             (
                 col
-                for col in ["equity_ticker", "optticker", "occ_symbol", "norm_ticker", "ticker", "cusip"]
+                for col in ["equity_ticker", "eqyticker", "optticker", "occ_symbol", "norm_ticker", "ticker", "cusip"]
                 if col in df.columns
             ),
             None,
