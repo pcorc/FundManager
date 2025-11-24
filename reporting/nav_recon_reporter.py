@@ -26,17 +26,35 @@ class GeneratedReconciliationArtefacts:
     nav: Optional[GeneratedNAVReconciliationReport]
     combined_reconciliation_pdf: Optional[str]
 
+
 def _extract_results(
         results: ProcessingResults | None,
         attribute: str,
 ) -> Mapping[str, Any]:
+    """
+    Extract results from ProcessingResults and convert dataclasses to dicts.
+
+    This is the single conversion point for NAVReconciliationResults objects.
+    They must be converted here before entering the reporting pipeline.
+    """
     if results is None:
         return {}
+
     payload: dict[str, Any] = {}
+
     for fund_name, fund_result in results.fund_results.items():
         value = getattr(fund_result, attribute, None)
-        if value:
+
+        if not value:
+            continue
+
+        # Convert NAVReconciliationResults dataclass to legacy dict format
+        if hasattr(value, 'to_legacy_dict'):
+            payload[fund_name] = value.to_legacy_dict()
+        else:
+            # Already a dict or other format, use as-is
             payload[fund_name] = value
+
     return payload
 
 
