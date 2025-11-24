@@ -311,6 +311,10 @@ class ComplianceChecker:
                     how="outer",
                     suffixes=("", "_option"),
                 )
+                if "option_market_value" in holdings_df.columns:
+                    holdings_df["option_market_value"] = holdings_df["option_market_value"].fillna(0)
+                else:
+                    holdings_df["option_market_value"] = 0
             else:
                 holdings_df = vest_eqy_holdings
 
@@ -1177,7 +1181,8 @@ class ComplianceChecker:
                     "twelve_d3_sec_biz_compliant": is_compliant,
                     "rule_1_pass": rule_1_pass,
                     "rule_2_pass": rule_2_pass,
-                    "rule_3_pass": rule_3_pass,                },
+                    "rule_3_pass": rule_3_pass,
+                },
                 calculations=calculations,
             )
         except Exception as exc:  # pragma: no cover - defensive logging path
@@ -1212,7 +1217,6 @@ class ComplianceChecker:
             )
 
             # For options, check if they're illiquid
-            illiquid_opt_value = 0.0
             if not vest_opt_holdings.empty:
                 illiquid_opt_mask = vest_opt_holdings["is_illiquid"] == True
                 illiquid_opt_value = float(
@@ -1229,7 +1233,7 @@ class ComplianceChecker:
             # Check compliance
             illiquid_compliant = illiquid_percentage <= ILLIQUID_MAX_THRESHOLD
             equity_compliant = equity_percentage >= EQUITY_MIN_THRESHOLD
-            is_compliant = illiquid_compliant and equity_compliant
+            is_compliant = illiquid_compliant
 
             calculations = {
                 "total_assets": total_assets,

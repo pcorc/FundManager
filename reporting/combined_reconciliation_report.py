@@ -398,89 +398,152 @@ class CombinedReconciliationReport:
         self.pdf.cell(0, 8, "Gain/Loss Components by Fund", ln=True, align="C")
         self.pdf.ln(2)
 
-        cols = [
-            ("Fund", 25),
-            ("Beg. TNA", 30),
-            ("Eqt G/L", 24),
-            ("Opt G/L", 24),
-            ("Flex G/L", 24),
-            ("Tsy G/L", 24),
-            ("Assign G/L", 24),
-            ("Accruals", 24),
-            ("Distributions", 24),
-            ("Other", 20),
-            ("Expected TNA", 30),
-            ("G/L Today", 26),
+        available_width = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
+
+        col_defs = [
+            {"key": "fund", "label": "Fund", "width": 28, "always": True},
+            {
+                "key": "beg_tna",
+                "label": "Beg. TNA",
+                "width": 28,
+                "always": True,
+                "keys": [
+                    "Beginning TNA",
+                    "beginning_tna",
+                    "beg_tna",
+                    "Beginning NAV",
+                    "beginning_nav",
+                    "prior_nav",
+                ],
+            },
+            {"key": "eqt_gl", "label": "Eqt G/L", "width": 24, "keys": ["Equity G/L", "equity_gl"]},
+            {"key": "opt_gl", "label": "Opt G/L", "width": 24, "keys": ["Option G/L", "options_gl"]},
+            {
+                "key": "flex_gl",
+                "label": "Flex G/L",
+                "width": 22,
+                "keys": ["Flex Option G/L", "flex_options_gl"],
+            },
+            {
+                "key": "tsy_gl",
+                "label": "Tsy G/L",
+                "width": 22,
+                "keys": ["Treasury G/L", "treasury_gl"],
+            },
+            {
+                "key": "assign_gl",
+                "label": "Assign G/L",
+                "width": 22,
+                "keys": ["Assignment G/L", "assignment_gl"],
+            },
+            {
+                "key": "accruals",
+                "label": "Accruals",
+                "width": 22,
+                "keys": ["Accruals", "accruals", "expense_accruals", "Expense Accruals"],
+            },
+            {
+                "key": "distributions",
+                "label": "Distributions",
+                "width": 22,
+                "keys": ["Distributions", "distributions", "distribution"],
+            },
+            {"key": "other", "label": "Other", "width": 20, "keys": ["Other", "other"]},
+            {
+                "key": "expected_tna",
+                "label": "Expected TNA",
+                "width": 28,
+                "keys": ["Expected TNA", "expected_tna", "Expected NAV", "expected_nav"],
+            },
+            {"key": "gl_today", "label": "G/L Today", "width": 26, "always": True},
         ]
 
-        self.pdf.set_font("Arial", "B", 8)
-        self.pdf.set_fill_color(240, 240, 240)
-        for label, width in cols:
-            self.pdf.cell(width, 6, label, border=1, fill=True, align="C")
-        self.pdf.ln()
-        self.pdf.set_font("Arial", size=8)
+        def _resolve_number(nav: Mapping[str, Any], keys: list[str]) -> float:
+            for key in keys:
+                if key not in nav:
+                    continue
+                try:
+                    return float(nav.get(key) or 0.0)
+                except (TypeError, ValueError):
+                    continue
+            return 0.0
 
-        totals = {key: 0.0 for key in ["beg_tna", "eqt_gl", "opt_gl", "flex_gl", "tsy_gl", "assign_gl", "accruals", "distributions", "other", "expected_tna", "gl_today"]}
+        rows: list[dict[str, float | str]] = []
+        totals = {col["key"]: 0.0 for col in col_defs if col["key"] != "fund"}
 
         for fund_name, nav in self._iter_nav_fund_data():
             nav = nav or {}
-            beg_tna = float(nav.get("Beginning TNA", nav.get("prior_nav", 0.0)) or 0.0)
-            eqt_gl = float(nav.get("Equity G/L", nav.get("equity_gl", 0.0)) or 0.0)
-            opt_gl = float(nav.get("Option G/L", nav.get("options_gl", 0.0)) or 0.0)
-            flex_gl = float(nav.get("Flex Option G/L", nav.get("flex_options_gl", 0.0)) or 0.0)
-            tsy_gl = float(nav.get("Treasury G/L", nav.get("treasury_gl", 0.0)) or 0.0)
-            assign_gl = float(nav.get("Assignment G/L", nav.get("assignment_gl", 0.0)) or 0.0)
-            accruals = float(nav.get("Accruals", nav.get("accruals", 0.0)) or 0.0)
-            distributions = float(nav.get("Distributions", nav.get("distributions", 0.0)) or 0.0)
-            other = float(nav.get("Other", nav.get("other", 0.0)) or 0.0)
-            expected_tna = float(nav.get("Expected TNA", nav.get("expected_tna", 0.0)) or 0.0)
-            gl_today = eqt_gl + opt_gl + flex_gl + tsy_gl + assign_gl - accruals - abs(distributions) + other
+            values: dict[str, float | str] = {"fund": fund_name}
 
+            for col in col_defs:
+                if col["key"] == "fund":
+                    continue
+                nav_keys = col.get("keys", [col["label"]])
+                values[col["key"]] = _resolve_number(nav, nav_keys)
+
+            values["gl_today"] = (
+                values.get("eqt_gl", 0.0)
+                + values.get("opt_gl", 0.0)
+                + values.get("flex_gl", 0.0)
+                + values.get("tsy_gl", 0.0)
+                + values.get("assign_gl", 0.0)
+                - values.get("accruals", 0.0)
+                - abs(values.get("distributions", 0.0))
+                + values.get("other", 0.0)
+            )
+
+            rows.append(values)
+            for key in totals:
+                totals[key] += float(values.get(key, 0.0) or 0.0)
+
+        def _has_nonzero(key: str) -> bool:
+            return any(abs(float(row.get(key, 0.0) or 0.0)) > 0 for row in rows)
+
+        selected_cols = [
+            col
+            for col in col_defs
+            if col.get("always") or _has_nonzero(col["key"]) or col["key"] == "fund"
+        ]
+
+        total_pref_width = sum(col["width"] for col in selected_cols)
+        scale = min(1.0, available_width / total_pref_width) if total_pref_width else 1.0
+
+        for col in selected_cols:
+            col["render_width"] = max(col["width"] * scale, 16)
+
+        self.pdf.set_font("Arial", "B", 8)
+        self.pdf.set_fill_color(240, 240, 240)
+        for col in selected_cols:
+            self.pdf.cell(col["render_width"], 6, col["label"], border=1, fill=True, align="C")
+        self.pdf.ln()
+        self.pdf.set_font("Arial", size=8)
+
+        for row in rows:
             x, y = self.pdf.get_x(), self.pdf.get_y()
             self.pdf.set_font("Arial", "BU", 8)
             self.pdf.set_text_color(0, 0, 200)
-            self.pdf.cell(cols[0][1], 6, fund_name, border=1, align="C")
-            if fund_name in self.fund_links:
-                self.pdf.link(x, y, cols[0][1], 6, self.fund_links[fund_name])
+            fund_width = next(col["render_width"] for col in selected_cols if col["key"] == "fund")
+            self.pdf.cell(fund_width, 6, str(row["fund"]), border=1, align="C")
+            if row["fund"] in self.fund_links:
+                self.pdf.link(x, y, fund_width, 6, self.fund_links[row["fund"]])
             self.pdf.set_text_color(0, 0, 0)
             self.pdf.set_font("Arial", size=8)
 
-            values = [beg_tna, eqt_gl, opt_gl, flex_gl, tsy_gl, assign_gl, accruals, distributions, other, expected_tna, gl_today]
-            for value, (_, width) in zip(values, cols[1:], strict=False):
-                self.pdf.cell(width, 6, f"{value:,.0f}", border=1, align="R")
+            for col in selected_cols:
+                if col["key"] == "fund":
+                    continue
+                value = float(row.get(col["key"], 0.0) or 0.0)
+                self.pdf.cell(col["render_width"], 6, f"{value:,.0f}", border=1, align="R")
             self.pdf.ln()
 
-            totals["beg_tna"] += beg_tna
-            totals["eqt_gl"] += eqt_gl
-            totals["opt_gl"] += opt_gl
-            totals["flex_gl"] += flex_gl
-            totals["tsy_gl"] += tsy_gl
-            totals["assign_gl"] += assign_gl
-            totals["accruals"] += accruals
-            totals["distributions"] += distributions
-            totals["other"] += other
-            totals["expected_tna"] += expected_tna
-            totals["gl_today"] += gl_today
-
-        # Total row
         self.pdf.set_font("Arial", "B", 8)
         self.pdf.set_fill_color(230, 230, 230)
-        self.pdf.cell(cols[0][1], 6, "TOTAL", border=1, fill=True, align="C")
-        total_values = [
-            totals["beg_tna"],
-            totals["eqt_gl"],
-            totals["opt_gl"],
-            totals["flex_gl"],
-            totals["tsy_gl"],
-            totals["assign_gl"],
-            totals["distributions"],
-            totals["accruals"],
-            totals["other"],
-            totals["expected_tna"],
-            totals["gl_today"],
-        ]
-        for value, (_, width) in zip(total_values, cols[1:], strict=False):
-            self.pdf.cell(width, 6, f"{value:,.0f}", border=1, fill=True, align="R")
+        self.pdf.cell(next(col["render_width"] for col in selected_cols if col["key"] == "fund"), 6, "TOTAL", border=1, fill=True, align="C")
+        for col in selected_cols:
+            if col["key"] == "fund":
+                continue
+            value = totals.get(col["key"], 0.0)
+            self.pdf.cell(col["render_width"], 6, f"{value:,.0f}", border=1, fill=True, align="R")
         self.pdf.ln()
 
     def _add_fund_detail_page(self, fund_name: str) -> None:

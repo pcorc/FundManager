@@ -547,41 +547,46 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------------
     # Example 2: Combine multiple fund groups + individual tickers
     # ------------------------------------------------------------------------
+    # ETF_FUNDS,
+    # CLOSED_END_FUNDS,
+    # PRIVATE_FUNDS,
+    # ALL_FUNDS,
+
     ACTIVE_RUNS = [
-        # "trading_compliance_custom",
-        # "eod_compliance_custom",
-        "eod_recon_custom",
+        "trading_compliance_custom",
+        "eod_compliance_custom",
+        # "eod_recon_custom",
     ]
 
     RUN_OVERRIDES = {
-        # "trading_compliance_custom": {
-        #     # ETFs + one specific closed-end fund
-        #     "funds": build_fund_list("HE3B2", "R21126"),
-        #     "output_tag": "custom_cef",  # Custom tag for file names
-        # },
-        # "eod_compliance_custom": {
-        #     # All three fund groups combined
-        #     "funds": build_fund_list("HE3B2", "R21126"),
-        #     "output_tag": "custom_cef",  # Custom tag for file names
-        #     "compliance_tests": [
-        #                 "gics_compliance",
-        #                 "prospectus_80pct_policy",
-        #                 "diversification_40act_check",
-        #                 "diversification_IRS_check",
-        #                 "diversification_IRC_check",
-        #                 "max_15pct_illiquid_sai",
-        #                 "real_estate_check",
-        #                 "commodities_check",
-        #                 "twelve_d1a_other_inv_cos",
-        #                 "twelve_d2_insurance_cos",
-        #                 "twelve_d3_sec_biz"
-        #             ],
-        # },
-        "eod_recon_custom": {
-            # Closed-end funds + ETFs + two specific funds
-            "funds": build_fund_list("HE3B2", "TR2B2", "R21126",), #"HE3B2", "TR2B2", "R21126"
+        "trading_compliance_custom": {
+            # ETFs + one specific closed-end fund
+            "funds": build_fund_list( ETF_FUNDS),
             "output_tag": "custom_cef",  # Custom tag for file names
         },
+        "eod_compliance_custom": {
+            # All three fund groups combined
+            "funds": build_fund_list(ETF_FUNDS),  # IRS AND R2
+            "output_tag": "custom_cef",  # Custom tag for file names
+            "compliance_tests": [
+                        "gics_compliance",
+                        "prospectus_80pct_policy",
+                        "diversification_40act_check",
+                        "diversification_IRS_check",
+                        "diversification_IRC_check",
+                        "max_15pct_illiquid_sai",
+                        "real_estate_check",
+                        "commodities_check",
+                        "twelve_d1a_other_inv_cos",
+                        "twelve_d2_insurance_cos",
+                        "twelve_d3_sec_biz"
+                    ],
+        },
+        # "eod_recon_custom": {
+        #     # Closed-end funds + ETFs + two specific funds
+        #     "funds": build_fund_list("HE3B2", "TR2B2", "R21126",), #"HE3B2", "TR2B2", "R21126"
+        #     "output_tag": "custom_cef",  # Custom tag for file names
+        # },
     }
 
     exit_code = run_configuration_batch(
