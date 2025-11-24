@@ -245,7 +245,7 @@ class ComplianceReport:
             else pd.DataFrame()
         )
         if not mapping_df.empty:
-            mapping_df = mapping_df.applymap(
+            mapping_df = mapping_df.map(
                 lambda value: str(value).strip() if value is not None else ""
             )
         summary_columns = [

@@ -262,12 +262,12 @@ class ReconciliationReport:
         recon_type: str | None = None,
     ) -> None:
         regular_df = subresults.get("regular_options")
-        if not regular_df.empty:
+        if isinstance(regular_df, pd.DataFrame) and not regular_df.empty:
             key = (fund, date_str, "custodian_option_regular")
             flat[key] = self._prepare_holdings_df(regular_df, fund, date_str, "custodian_option_regular", "optticker")
 
         flex_df = subresults.get("flex_options")
-        if not flex_df.empty:
+        if isinstance(flex_df, pd.DataFrame) and not flex_df.empty:
             prepared = self._prepare_holdings_df(flex_df, fund, date_str, "custodian_option_flex", "optticker")
             flat[(fund, date_str, "custodian_option_flex")] = prepared
             flat[(fund, date_str, "custodian_option_flex_holdings")] = prepared
@@ -286,7 +286,7 @@ class ReconciliationReport:
 
         price_t1_df = subresults.get("price_discrepancies_T1")
         flex_price_t1, _ = split_flex_price_frames(price_t1_df)
-        if not flex_price_t1.empty:
+        if isinstance(flex_price_t1, pd.DataFrame) and not flex_price_t1.empty:
             prepared = self._prepare_price_df(
                 flex_price_t1,
                 fund,
@@ -304,7 +304,7 @@ class ReconciliationReport:
         subresults: Mapping[str, Any],
     ) -> None:
         flex_df = subresults.get("flex_options")
-        if not flex_df.empty:
+        if isinstance(flex_df, pd.DataFrame) and not flex_df.empty:
             prepared = self._prepare_holdings_df(
                 flex_df,
                 fund,

@@ -588,7 +588,8 @@ class NAVReconciliator:
             return 0.0
 
         flows = self.fund.data.flows
-        if flows.empty:
+
+        if not isinstance(flows, pd.DataFrame) or flows.empty:
             return 0.0
 
         # Get beginning TNA and shares
