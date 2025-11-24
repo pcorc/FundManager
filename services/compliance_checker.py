@@ -1592,8 +1592,13 @@ class ComplianceChecker:
         ).fillna(0.0)
 
         share_col = "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
-        share_series = pd.Series(0.0, index=df.index, dtype=float)
-        df[share_col] = share_series
+        if share_col not in df.columns:
+            df[share_col] = 0.0
+        else:
+            # Fill any NaN values with 0, but preserve existing valid data
+            df[share_col] = pd.to_numeric(df[share_col], errors="coerce").fillna(0.0)
+
+        # Ensure eqyticker is string type for grouping
         df["eqyticker"] = df["eqyticker"].astype(str)
 
         google_mask = df["eqyticker"].isin(["GOOG", "GOOGL"])

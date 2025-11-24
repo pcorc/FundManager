@@ -1193,6 +1193,8 @@ def _add_detailed_comparison(pdf: FPDF, data: Mapping[str, Any]) -> None:
     row_height = 6
     page_limit = pdf.h - pdf.b_margin - 5
 
+    fund_order = [fund_name for fund_name, _ in funds]
+    fund_index = {name: idx for idx, name in enumerate(fund_order)}
     fund_chunks = [funds[i:i + 5] for i in range(0, len(funds), 5)]
 
     def _render_header(title: str, fund_subset: list[tuple[str, Any]], per_value_width: float, metric_width: float) -> None:
@@ -1208,13 +1210,13 @@ def _add_detailed_comparison(pdf: FPDF, data: Mapping[str, Any]) -> None:
 
         metric_height = header_height * 2
         pdf.cell(metric_width, metric_height, "Compliance Check", 1, 0, "C", True)
-        for _ in fund_subset:
+        for fund_name, _ in fund_subset:
             display = fund_name if len(fund_name) <= 24 else f"{fund_name[:21]}..."
             pdf.cell(per_value_width * 3, header_height, display, 1, 0, "C", True)
 
         pdf.ln(header_height)
         pdf.set_xy(start_x + metric_width, start_y + header_height)
-        for _ in funds:
+        for _ in fund_subset:
             for sub in ("Before", "After", "Changed"):
                 pdf.cell(per_value_width, header_height, sub, 1, 0, "C", True)
 
@@ -1246,7 +1248,15 @@ def _add_detailed_comparison(pdf: FPDF, data: Mapping[str, Any]) -> None:
             pdf.cell(metric_width, row_height, display_check, 1, 0, "L")
             pdf.set_font("Arial", "", 7)
 
-            subset_values = values[chunk_start:chunk_start + len(fund_subset)]
+            subset_indices = [
+                fund_index.get(fund_name, chunk_start + offset)
+                for offset, (fund_name, _) in enumerate(fund_subset)
+            ]
+            subset_values = [
+                values[idx] if idx is not None and idx < len(values) else ("", "", "", "")
+                for idx in subset_indices
+            ]
+
             for before_status, after_status, changed_flag, after_upper in subset_values:
                 pdf.cell(per_value_width, row_height, before_status, 1, 0, "C")
                 if after_upper == "FAIL":
