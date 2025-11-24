@@ -146,6 +146,7 @@ def main(
             ex_post_store=data_stores["ex_post"],
             params=trading_params,
             output_dir=output_dir,
+            output_tag=options.output_tag,
         )
 
         log_processing_summary(logger, "ex-ante", results_ex_ante.summary)
@@ -164,6 +165,7 @@ def main(
             data_store=data_stores["eod"],
             params=eod_params,
             output_dir=output_dir,
+            output_tag=options.output_tag,
         )
 
         log_processing_summary(logger, "eod", processing_results.summary)
@@ -234,6 +236,7 @@ def run_time_series(
             output_dir=output_dir,
             create_pdf=params.create_pdf,
             generate_daily_reports=generate_daily_reports,
+            output_tag=params.output_tag,
         )
 
     except Exception as exc:  # pragma: no cover - defensive catch-all
@@ -545,38 +548,38 @@ if __name__ == "__main__":
     # Example 2: Combine multiple fund groups + individual tickers
     # ------------------------------------------------------------------------
     ACTIVE_RUNS = [
-        "trading_compliance_custom",
-        "eod_compliance_custom",
+        # "trading_compliance_custom",
+        # "eod_compliance_custom",
         "eod_recon_custom",
     ]
 
     RUN_OVERRIDES = {
-        "trading_compliance_custom": {
-            # ETFs + one specific closed-end fund
-            "funds": build_fund_list("HE3B2", "R21126"),
-            "output_tag": "custom_cef",  # Custom tag for file names
-        },
-        "eod_compliance_custom": {
-            # All three fund groups combined
-            "funds": build_fund_list("HE3B2", "R21126"),
-            "output_tag": "custom_cef",  # Custom tag for file names
-            "compliance_tests": [
-                        "gics_compliance",
-                        "prospectus_80pct_policy",
-                        "diversification_40act_check",
-                        "diversification_IRS_check",
-                        "diversification_IRC_check",
-                        "max_15pct_illiquid_sai",
-                        "real_estate_check",
-                        "commodities_check",
-                        "twelve_d1a_other_inv_cos",
-                        "twelve_d2_insurance_cos",
-                        "twelve_d3_sec_biz"
-                    ],
-        },
+        # "trading_compliance_custom": {
+        #     # ETFs + one specific closed-end fund
+        #     "funds": build_fund_list("HE3B2", "R21126"),
+        #     "output_tag": "custom_cef",  # Custom tag for file names
+        # },
+        # "eod_compliance_custom": {
+        #     # All three fund groups combined
+        #     "funds": build_fund_list("HE3B2", "R21126"),
+        #     "output_tag": "custom_cef",  # Custom tag for file names
+        #     "compliance_tests": [
+        #                 "gics_compliance",
+        #                 "prospectus_80pct_policy",
+        #                 "diversification_40act_check",
+        #                 "diversification_IRS_check",
+        #                 "diversification_IRC_check",
+        #                 "max_15pct_illiquid_sai",
+        #                 "real_estate_check",
+        #                 "commodities_check",
+        #                 "twelve_d1a_other_inv_cos",
+        #                 "twelve_d2_insurance_cos",
+        #                 "twelve_d3_sec_biz"
+        #             ],
+        # },
         "eod_recon_custom": {
             # Closed-end funds + ETFs + two specific funds
-            "funds": build_fund_list("HE3B2", "TR3B2", "R21126"),
+            "funds": build_fund_list("HE3B2", "TR2B2", "R21126"),
             "output_tag": "custom_cef",  # Custom tag for file names
         },
     }

@@ -21,8 +21,10 @@ from reporting.compliance_reporter import (
 from reporting.compliance_reporting import GeneratedComplianceReport
 from reporting.reconciliation_reporter import build_reconciliation_reports
 from reporting.nav_recon_reporter import build_nav_reconciliation_reports
-from reporting.trade_compliance_reporter import build_trading_compliance_reports
-
+from reporting.trade_compliance_reporter import (
+    build_trading_compliance_reports,
+    combine_trading_and_compliance_reports,
+)
 
 @dataclass(frozen=True)
 class DataLoadRequest:
@@ -112,7 +114,7 @@ def run_eod_mode(
     """Execute the full EOD workflow for the provided data."""
 
     def _build_prefix(base: str) -> str:
-        return f"{base}_{output_tag}" if output_tag else base
+        return f"{base}_{tag}" if tag else base
 
     results = _run_operations(
         registry,
@@ -220,7 +222,7 @@ def run_trading_mode(
         if fund_info:
             traded_funds_info[fund_name] = fund_info
 
-    artefacts = build_trading_compliance_reports(
+    trading_report = build_trading_compliance_reports(
         results_ex_ante=ante_payload,
         results_ex_post=post_payload,
         report_date=params.ex_post_date,
@@ -245,12 +247,19 @@ def run_trading_mode(
             create_pdf=params.create_pdf,
         )
 
-    combined_artefacts = SimpleNamespace(
-        report=artefacts,
-        ex_post_compliance=ex_post_compliance_report,
+    combined_report = combine_trading_and_compliance_reports(
+        trading_report=trading_report,
+        compliance_report=ex_post_compliance_report,
+        report_date=params.ex_post_date,
+        output_dir=str(output_dir),
+        file_name_prefix=_build_prefix("trading_compliance_results_combined"),
     )
 
-    return results_ex_ante, results_ex_post, combined_artefacts
+    combined_artefacts = SimpleNamespace(
+        report=trading_report,
+        ex_post_compliance=ex_post_compliance_report,
+        combined_report=combined_report,
+    )
 
 
 def run_eod_range_mode(
@@ -409,6 +418,7 @@ def flatten_trading_paths(artefacts) -> Dict[str, str]:  # type: ignore[no-untyp
 
     _append("trading_compliance", _extract("report"))
     _append("trading_ex_post_compliance", _extract("ex_post_compliance"))
+    _append("trading_compliance_combined", _extract("combined_report"))
 
     return paths
 

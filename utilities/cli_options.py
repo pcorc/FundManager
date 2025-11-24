@@ -52,6 +52,7 @@ class TradingComplianceParameters:
     custodian_previous_date: date
     compliance_tests: List[str]
     create_pdf: bool
+    output_tag: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -200,6 +201,7 @@ def resolve_trading_parameters(options: CLIOptions) -> TradingComplianceParamete
         custodian_previous_date=custodian_previous,
         compliance_tests=list(options.compliance_tests),
         create_pdf=options.create_pdf,
+        output_tag=options.output_tag,
     )
 
 

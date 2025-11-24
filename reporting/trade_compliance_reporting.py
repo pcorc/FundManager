@@ -553,7 +553,7 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
                 value = float(trade.get("market_value", 0.0) or 0.0)
                 if quantity == 0.0 and value == 0.0:
                     continue
-                ticker = str(trade.get("ticker", ""))
+                ticker = str(trade.get("eqyticker", ""))
                 _write_row("Buy", ticker, quantity, value)
 
             for trade in sells_list:
