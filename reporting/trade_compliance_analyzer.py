@@ -162,10 +162,10 @@ class TradingComplianceAnalyzer:
 
         summary_metrics = {
             "ex_ante": self._extract_summary_metrics_payload(
-                ante_results.get("summary_metrics")
+                self._get_summary_payload(ante_results)
             ),
             "ex_post": self._extract_summary_metrics_payload(
-                post_results.get("summary_metrics")
+                self._get_summary_payload(post_results)
             ),
         }
         return {
@@ -620,6 +620,26 @@ class TradingComplianceAnalyzer:
         return column, pd.Series(0.0, index=df.index, dtype=float)
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _get_summary_payload(results: Optional[Mapping[str, Any]]) -> Mapping[str, Any]:
+        """Return the best available payload for summary metrics.
+
+        Some upstream pipelines provide summary totals under
+        ``fund_current_totals`` instead of ``summary_metrics``. This helper
+        normalises both shapes so downstream reporting can still render the
+        Summary Metrics tables.
+        """
+
+        if not isinstance(results, Mapping):
+            return {}
+
+        for key in ("summary_metrics", "fund_current_totals"):
+            payload = results.get(key)
+            if isinstance(payload, Mapping):
+                return payload
+
+        return {}
+
     def _extract_summary_metrics_payload(self, result: Any) -> Dict[str, float]:
         calculations: Mapping[str, Any]
         if isinstance(result, Mapping):

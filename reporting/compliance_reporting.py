@@ -635,7 +635,7 @@ class ComplianceReport:
                             remaining_label,
                             remaining_str,
                         ),
-                        ("Max Ownership % of Float in 75% bucket", max_ownership_float),
+                        ("Max Ownership % of Float in 75% bucket", f"{max_ownership_float:.5f}"),
                         ("OCC Market Value", occ_market_value),
                         ("OCC Weight", float(calculations.get("occ_weight", 0.0) or 0.0)),
                         ("Notes", notes),
@@ -1718,14 +1718,35 @@ class ComplianceReportPDF(BaseReportPDF):
             return False
 
     def _get_summary_value(self, fund_data: Mapping[str, Any], key: str) -> object:
+        """
+        Retrieve summary metric value with priority:
+        1. fund_current_totals
+        2. summary_metrics.ex_post
+        3. summary_metrics.ex_ante
+        4. Default to 0.0
+        """
         if not isinstance(fund_data, Mapping):
             return 0.0
+
+        # Priority 1: Check fund_current_totals (from compliance checker)
         totals = fund_data.get("fund_current_totals")
         if isinstance(totals, Mapping) and key in totals:
             return totals.get(key)
+
+        # Priority 2 & 3: Check summary_metrics (ex_post, then ex_ante)
         summary = fund_data.get("summary_metrics")
-        if isinstance(summary, Mapping) and key in summary:
-            return summary.get(key)
+        if isinstance(summary, Mapping):
+            # Try ex_post first (user preference)
+            ex_post = summary.get("ex_post")
+            if isinstance(ex_post, Mapping) and key in ex_post:
+                return ex_post.get(key)
+
+            # Fall back to ex_ante
+            ex_ante = summary.get("ex_ante")
+            if isinstance(ex_ante, Mapping) and key in ex_ante:
+                return ex_ante.get(key)
+
+        # Default
         return 0.0
 
     def _is_test_selected(self, test_name: str) -> bool:
@@ -1756,6 +1777,25 @@ class ComplianceReportPDF(BaseReportPDF):
                 return None
             current = current.get(key)
         return current
+
+    def _get_40act_status(self, condition_met: bool, fund_registration: str) -> str:
+        """
+        Returns status for 40 Act conditions based on fund registration.
+        Non-diversified funds show N/A for failed conditions, but PASS if they pass.
+
+        Args:
+            condition_met: Whether the condition is met
+            fund_registration: The fund's registration status (e.g., "diversified", "non-diversified")
+
+        Returns:
+            "PASS" if condition is met, "N/A" if non-diversified fund fails, "FAIL" otherwise
+        """
+        if condition_met:
+            return "PASS"
+        elif fund_registration == "non-diversified":
+            return "N/A"
+        else:
+            return "FAIL"
 
     @staticmethod
     def _title_case(value: object) -> str:
@@ -2044,6 +2084,7 @@ class ComplianceReportPDF(BaseReportPDF):
         cumulative_excluded = calculations.get("cumulative_weight_excluded", 0)
         cumulative_remaining = calculations.get("cumulative_weight_remaining", 0)
         occ_mkt_val = calculations.get("occ_market_value", 0)
+        fund_registration = calculations.get("fund_registration", "").lower()
 
         issuer_limited_assets_list = calculations.get("issuer_limited_securities", [])
         if isinstance(issuer_limited_assets_list, list) and issuer_limited_assets_list:
@@ -2057,9 +2098,12 @@ class ComplianceReportPDF(BaseReportPDF):
 
         rows = [
             ("Fund Registration", calculations.get("fund_registration")),
-            ("Condition 40 Act 1", "PASS" if data.get("condition_40act_1") else "FAIL"),
-            ("Condition 40 Act 2a", "PASS" if data.get("condition_40act_2a") else "FAIL"),
-            ("Condition 40 Act 2b", "PASS" if data.get("condition_40act_2b") else "FAIL"),
+            # ("Condition 40 Act 1", "PASS" if data.get("condition_40act_1") else "FAIL"),
+            # ("Condition 40 Act 2a", "PASS" if data.get("condition_40act_2a") else "FAIL"),
+            # ("Condition 40 Act 2b", "PASS" if data.get("condition_40act_2b") else "FAIL"),
+            ("Condition 40 Act 1", self._get_40act_status(data.get("condition_40act_1"), fund_registration)),
+            ("Condition 40 Act 2a", self._get_40act_status(data.get("condition_40act_2a"), fund_registration)),
+            ("Condition 40 Act 2b", self._get_40act_status(data.get("condition_40act_2b"), fund_registration)),
             ("Total Assets", f"{total_assets:,.0f}"),
             ("Non-Qualifying Assets Weight", f"{non_qual_weight:.2%}"),
             ("Issuer Limited Assets (Sum)", f"{issuer_limited_sum:,.0f}"),
@@ -2173,7 +2217,7 @@ class ComplianceReportPDF(BaseReportPDF):
         rows = [
             ("Total Assets", f"{calculations.get('total_assets', 0):,.0f}"),
             ("Investment Companies", holdings_str),
-            ("Max Ownership %", f"{calculations.get('ownership_pct_max', 0):.2%}"),
+            ("Max Ownership %", f"{calculations.get('ownership_pct_max', 0):.7%}"),
             ("Equity Market Value Sum", f"{calculations.get('equity_market_value_sum', 0):,.0f}"),
             ("Test 1 (<=3% Ownership)", "PASS" if data.get("test_1_pass") else "FAIL"),
             ("Test 2 (<=5% Total Assets)", "PASS" if data.get("test_2_pass") else "FAIL"),
@@ -2288,7 +2332,7 @@ class ComplianceReportPDF(BaseReportPDF):
         rows = [
             ("Total Assets", f"{calculations.get('total_assets', 0):,.0f}"),
             ("Insurance Holdings", holdings_str),
-            ("Max Ownership %", f"{calculations.get('max_ownership_pct', 0):.2%}"),
+            ("Max Ownership %", f"{calculations.get('max_ownership_pct', 0):.6%}"),
             ("Rule 12d2 Compliance Status", status),
         ]
 

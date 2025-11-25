@@ -16,49 +16,12 @@ class FundHoldings:
         options: Optional[pd.DataFrame] = None,
         flex_options: Optional[pd.DataFrame] = None,  # NEW
         treasury: Optional[pd.DataFrame] = None,
-        cash: float = 0.0,
-        nav: float = 0.0,
-        tna: float = 0.0,
-        ta: float = 0.0,
-        expenses: float = 0.0,
-        shares_outstanding: float = 0.0,
+
     ) -> None:
         self.equity = self._clean_holdings_dataframe(equity, holding_type='equity')
         self.options = self._clean_holdings_dataframe(options, holding_type='options')
         self.flex_options = self._clean_holdings_dataframe(flex_options, holding_type='flex_options')
         self.treasury = self._clean_holdings_dataframe(treasury, holding_type='treasury')
-
-        self.cash = float(cash or 0.0)
-        self.nav = float(nav or 0.0)
-        self.tna = float(tna or 0.0)
-        self.ta = float(ta or 0.0)
-        self.expenses = float(expenses or 0.0)
-        self.shares_outstanding = float(shares_outstanding or 0.0)
-
-    # Backward-compatible aliases
-    @property
-    def reported_cash(self) -> float:
-        return self.cash
-
-    @property
-    def reported_nav(self) -> float:
-        return self.nav
-
-    @property
-    def reported_tna(self) -> float:
-        return self.tna
-
-    @property
-    def reported_ta(self) -> float:
-        return self.ta
-
-    @property
-    def reported_expenses(self) -> float:
-        return self.expenses
-
-    @property
-    def reported_shares_outstanding(self) -> float:
-        return self.shares_outstanding
 
     def _clean_holdings_dataframe(self, df: Optional[pd.DataFrame], holding_type: str) -> pd.DataFrame:
         """Clean and standardize holdings DataFrame with proper numeric types."""
@@ -112,12 +75,6 @@ class FundHoldings:
             options=self.options.copy() if isinstance(self.options, pd.DataFrame) else pd.DataFrame(),
             flex_options=self.flex_options.copy() if isinstance(self.flex_options, pd.DataFrame) else pd.DataFrame(),  # NEW
             treasury=self.treasury.copy() if isinstance(self.treasury, pd.DataFrame) else pd.DataFrame(),
-            cash=self.cash,
-            nav=self.nav,
-            tna=self.tna,
-            ta=self.ta,
-            expenses=self.expenses,
-            shares_outstanding=self.shares_outstanding,
         )
 
 class FundMetrics:
@@ -893,6 +850,64 @@ class Fund:
 
         return pd.DataFrame()
 
+
+
+    # ========================================================================
+    # ASSIGNMENT DATA ACCESS
+    # ========================================================================
+
+    def get_assignments(
+            self,
+            filter_date: Optional[date | str] = None,
+    ) -> pd.DataFrame:
+        """
+        Get option assignment data, optionally filtered by date.
+
+        Args:
+            filter_date: If provided, filter assignments to this date
+
+        Returns:
+            DataFrame with assignment records
+
+        Example:
+            assignments = fund.get_assignments(filter_date=analysis_date)
+            if not assignments.empty:
+                total_gl = assignments['pnl'].sum()
+        """
+        # Check for assignments in data
+        assignments = None
+        if hasattr(self.data, 'assignments'):
+            assignments = self.data.assignments
+        elif hasattr(self.data, 'option_assignments'):
+            assignments = self.data.option_assignments
+
+        if not isinstance(assignments, pd.DataFrame) or assignments.empty:
+            return pd.DataFrame()
+
+        # If no date filter, return all
+        if filter_date is None:
+            return assignments.copy()
+
+        # Filter by date
+        date_cols = [
+            col for col in assignments.columns
+            if 'date' in str(col).lower()
+        ]
+
+        if not date_cols:
+            return assignments.copy()
+
+        try:
+            df = assignments.copy()
+            df[date_cols[0]] = pd.to_datetime(df[date_cols[0]])
+            target = pd.Timestamp(filter_date).normalize()
+            filtered = df[df[date_cols[0]].dt.normalize() == target]
+            return filtered
+        except Exception:
+            return assignments.copy()
+
+
+
     # ========================================================================
     # SETTLEMENT DATE CHECKING
     # ========================================================================
@@ -1039,60 +1054,6 @@ class Fund:
                 return float(value)
 
         return 0.0
-
-    # ========================================================================
-    # ASSIGNMENT DATA ACCESS
-    # ========================================================================
-
-    def get_assignments(
-            self,
-            filter_date: Optional[date | str] = None,
-    ) -> pd.DataFrame:
-        """
-        Get option assignment data, optionally filtered by date.
-
-        Args:
-            filter_date: If provided, filter assignments to this date
-
-        Returns:
-            DataFrame with assignment records
-
-        Example:
-            assignments = fund.get_assignments(filter_date=analysis_date)
-            if not assignments.empty:
-                total_gl = assignments['pnl'].sum()
-        """
-        # Check for assignments in data
-        assignments = None
-        if hasattr(self.data, 'assignments'):
-            assignments = self.data.assignments
-        elif hasattr(self.data, 'option_assignments'):
-            assignments = self.data.option_assignments
-
-        if not isinstance(assignments, pd.DataFrame) or assignments.empty:
-            return pd.DataFrame()
-
-        # If no date filter, return all
-        if filter_date is None:
-            return assignments.copy()
-
-        # Filter by date
-        date_cols = [
-            col for col in assignments.columns
-            if 'date' in str(col).lower()
-        ]
-
-        if not date_cols:
-            return assignments.copy()
-
-        try:
-            df = assignments.copy()
-            df[date_cols[0]] = pd.to_datetime(df[date_cols[0]])
-            target = pd.Timestamp(filter_date).normalize()
-            filtered = df[df[date_cols[0]].dt.normalize() == target]
-            return filtered
-        except Exception:
-            return assignments.copy()
 
     # ========================================================================
     # DIVIDEND DATA ACCESS

@@ -27,6 +27,34 @@ ALL_FUNDS = set(FUND_DEFINITIONS.keys())
 # Additional custom fund groups
 ALL_REGISTERED_FUNDS = ETF_FUNDS | CLOSED_END_FUNDS | PRIVATE_FUNDS
 
+# Wrapper-based groups
+MUTUAL_AND_VIT_WRAPPERS = {"mutual_fund", "vit"}
+MUTUAL_AND_VIT_FUNDS = {
+    ticker
+    for ticker, metadata in FUND_DEFINITIONS.items()
+    if metadata.get("vehicle_wrapper") in MUTUAL_AND_VIT_WRAPPERS
+}
+
+# Convenience groups for daily runs
+DAILY_GROUP_1_CEF_PRIVATE = CLOSED_END_FUNDS | PRIVATE_FUNDS
+DAILY_GROUP_2_ETF = ETF_FUNDS
+DAILY_GROUP_3_VIT_AND_MF = MUTUAL_AND_VIT_FUNDS | {"FTCSH", "FTMIX", "KNGIX"}
+
+# Default batch definitions for common daily runs
+DAILY_EOD_AND_RECON_RUNS = [
+    "eod_compliance_daily_cef_private",
+    "eod_recon_daily_cef_private",
+    "eod_compliance_daily_etf",
+    "eod_recon_daily_etf",
+    "eod_compliance_daily_vitmf",
+    "eod_recon_daily_vitmf",
+]
+
+DAILY_TRADING_COMPLIANCE_RUNS = [
+    "trading_compliance_daily_cef_private",
+    "trading_compliance_daily_etf",
+    "trading_compliance_daily_vitmf",
+]
 
 def get_fund_group(group_name: str) -> Set[str]:
     """
@@ -319,6 +347,39 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "description": "Trading compliance for all funds except specified ones (must override 'funds')",
     },
 
+    "trading_compliance_daily_cef_private": {
+        "analysis_type": "trading_compliance",
+        "date_mode": "single",
+        "funds": sorted(DAILY_GROUP_1_CEF_PRIVATE),
+        "compliance_tests": FULL_COMPLIANCE_TESTS,
+        "create_pdf": True,
+        "output_dir": "./outputs",
+        "output_tag": "cef",  # Tag for output file names
+        "description": "Daily trading compliance for closed-end and private funds",
+    },
+
+    "trading_compliance_daily_etf": {
+        "analysis_type": "trading_compliance",
+        "date_mode": "single",
+        "funds": sorted(DAILY_GROUP_2_ETF),
+        "compliance_tests": FULL_COMPLIANCE_TESTS,
+        "create_pdf": True,
+        "output_dir": "./outputs",
+        "output_tag": "etf",  # Tag for output file names
+        "description": "Daily trading compliance for ETF funds",
+    },
+
+    "trading_compliance_daily_vitmf": {
+        "analysis_type": "trading_compliance",
+        "date_mode": "single",
+        "funds": sorted(DAILY_GROUP_3_VIT_AND_MF),
+        "compliance_tests": FULL_COMPLIANCE_TESTS,
+        "create_pdf": True,
+        "output_dir": "./outputs",
+        "output_tag": "vitmf",  # Tag for output file names
+        "description": "Daily trading compliance for mutual fund and VIT accounts",
+    },
+
     # ========================================================================
     # EOD COMPLIANCE CONFIGURATIONS (Single Date Mode)
     # ========================================================================
@@ -440,6 +501,75 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "output_dir": "./outputs",
         "output_tag": "all_except",  # Tag for output file names (override if needed)
         "description": "Holdings and NAV reconciliation for all funds except specified ones (must override 'funds')",
+    },
+
+    "eod_compliance_daily_cef_private": {
+        "analysis_type": "eod",
+        "date_mode": "single",
+        "funds": sorted(DAILY_GROUP_1_CEF_PRIVATE),
+        "eod_reports": ["compliance"],
+        "compliance_tests": FULL_COMPLIANCE_TESTS,
+        "create_pdf": True,
+        "output_dir": "./outputs",
+        "output_tag": "cef",  # Tag for output file names
+        "description": "Daily EOD compliance for closed-end and private funds",
+    },
+
+    "eod_compliance_daily_etf": {
+        "analysis_type": "eod",
+        "date_mode": "single",
+        "funds": sorted(DAILY_GROUP_2_ETF),
+        "eod_reports": ["compliance"],
+        "compliance_tests": FULL_COMPLIANCE_TESTS,
+        "create_pdf": True,
+        "output_dir": "./outputs",
+        "output_tag": "etf",  # Tag for output file names
+        "description": "Daily EOD compliance for ETF funds",
+    },
+
+    "eod_compliance_daily_vitmf": {
+        "analysis_type": "eod",
+        "date_mode": "single",
+        "funds": sorted(DAILY_GROUP_3_VIT_AND_MF),
+        "eod_reports": ["compliance"],
+        "compliance_tests": FULL_COMPLIANCE_TESTS,
+        "create_pdf": True,
+        "output_dir": "./outputs",
+        "output_tag": "vitmf",  # Tag for output file names
+        "description": "Daily EOD compliance for mutual fund and VIT accounts",
+    },
+
+    "eod_recon_daily_cef_private": {
+        "analysis_type": "eod",
+        "date_mode": "single",
+        "funds": sorted(DAILY_GROUP_1_CEF_PRIVATE),
+        "eod_reports": ["reconciliation", "nav"],
+        "create_pdf": True,
+        "output_dir": "./outputs",
+        "output_tag": "cef",  # Tag for output file names
+        "description": "Daily holdings and NAV reconciliation for closed-end and private funds",
+    },
+
+    "eod_recon_daily_etf": {
+        "analysis_type": "eod",
+        "date_mode": "single",
+        "funds": sorted(DAILY_GROUP_2_ETF),
+        "eod_reports": ["reconciliation", "nav"],
+        "create_pdf": True,
+        "output_dir": "./outputs",
+        "output_tag": "etf",  # Tag for output file names
+        "description": "Daily holdings and NAV reconciliation for ETF funds",
+    },
+
+    "eod_recon_daily_vitmf": {
+        "analysis_type": "eod",
+        "date_mode": "single",
+        "funds": sorted(DAILY_GROUP_3_VIT_AND_MF),
+        "eod_reports": ["reconciliation", "nav"],
+        "create_pdf": True,
+        "output_dir": "./outputs",
+        "output_tag": "vitmf",  # Tag for output file names
+        "description": "Daily holdings and NAV reconciliation for mutual fund and VIT accounts",
     },
 
     # ========================================================================

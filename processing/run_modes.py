@@ -261,6 +261,8 @@ def run_trading_mode(
         combined_report=combined_report,
     )
 
+    return results_ex_ante, results_ex_post, combined_artefacts
+
 
 def run_eod_range_mode(
     session,

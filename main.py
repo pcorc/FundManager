@@ -411,6 +411,7 @@ def _execute_single_date_config(
         "funds": config.get("funds", []),
         "create_pdf": config.get("create_pdf", True),
         "output_dir": config.get("output_dir", "./outputs"),
+        "output_tag": config.get("output_tag"),
     }
 
     if analysis_type == "trading_compliance":
@@ -472,7 +473,7 @@ def _execute_range_date_config(
 if __name__ == "__main__":
 
     # Base date: All date offsets (T, T-1, T-2) are calculated from this
-    BASE_DATE = "2025-11-21"
+    BASE_DATE = "2025-11-24"
 
     # ------------------------------------------------------------------------
     # Example 1: Run predefined configurations
@@ -553,24 +554,25 @@ if __name__ == "__main__":
     # ALL_FUNDS,
 
     ACTIVE_RUNS = [
-        "trading_compliance_custom",
-        "eod_compliance_custom",
-        # "eod_recon_custom",
+        # "trading_compliance_custom",
+        # "eod_compliance_custom",
+        "eod_recon_custom",
     ]
 
     RUN_OVERRIDES = {
-        "trading_compliance_custom": {
-            # ETFs + one specific closed-end fund
-            "funds": build_fund_list( ETF_FUNDS),
-            "output_tag": "custom_cef",  # Custom tag for file names
-        },
+        # "trading_compliance_custom": {
+        #     # ETFs + one specific closed-end fund
+        #     "funds": build_fund_list( ETF_FUNDS),
+        #     "output_tag": "custom_cef",  # Custom tag for file names
+        # },
         "eod_compliance_custom": {
             # All three fund groups combined
             "funds": build_fund_list(
-                ETF_FUNDS
+                "KNG"
             ),
-            "output_tag": "custom_cef",  # Custom tag for file names
+            "output_tag": "cef",  # Custom tag for file names
             "compliance_tests": [
+                        "summary_metrics",
                         "gics_compliance",
                         "prospectus_80pct_policy",
                         "diversification_40act_check",
@@ -584,11 +586,13 @@ if __name__ == "__main__":
                         "twelve_d3_sec_biz"
                     ],
         },
-        # "eod_recon_custom": {
-        #     # Closed-end funds + ETFs + two specific funds
-        #     "funds": build_fund_list("HE3B2", "TR2B2", "R21126",), #"HE3B2", "TR2B2", "R21126"
-        #     "output_tag": "custom_cef",  # Custom tag for file names
-        # },
+        "eod_recon_custom": {
+            # Closed-end funds + ETFs + two specific funds
+            "funds": build_fund_list(
+                "KNG"
+            ),
+            "output_tag": "cef",  # Custom tag for file names
+        },
     }
 
     exit_code = run_configuration_batch(
