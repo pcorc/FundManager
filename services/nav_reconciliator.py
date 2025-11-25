@@ -8,7 +8,7 @@ import logging
 import pandas as pd
 from pandas.tseries.offsets import BDay, MonthEnd
 
-from processing.fund import Fund
+from processing.fund import Fund, FundHoldings
 from config.fund_definitions import INDEX_FLEX_FUNDS
 from services.nav_recon_dataclasses import (
     AssetClassGainLoss,
@@ -484,37 +484,127 @@ class NAVReconciliator:
             filter_date=self.analysis_date
         )
 
-        if assignments.empty:
+        if not assignments.empty:
+            # Try to find P&L columns
+            value_cols = [
+                col for col in assignments.columns
+                if any(keyword in str(col).lower()
+                       for keyword in ('pnl', 'gl', 'gain', 'loss', 'amount'))
+            ]
+
+            for col in value_cols:
+                series = pd.to_numeric(assignments[col], errors='coerce').dropna()
+                if not series.empty:
+                    return float(series.sum())
+
+            # Fallback: calculate from quantity * price
+            quantity_cols = [
+                col for col in assignments.columns
+                if 'quantity' in str(col).lower() or 'contracts' in str(col).lower()
+            ]
+            price_cols = [
+                col for col in assignments.columns
+                if 'price' in str(col).lower() or 'premium' in str(col).lower()
+            ]
+
+            if quantity_cols and price_cols:
+                qty = pd.to_numeric(assignments[quantity_cols[0]], errors='coerce').fillna(0)
+                price = pd.to_numeric(assignments[price_cols[0]], errors='coerce').fillna(0)
+                return float((qty * price).sum())
+
+        # If explicit assignment records aren't present, derive from holdings
+        return self._calculate_assignment_gl_from_holdings()
+
+    def _calculate_assignment_gl_from_holdings(self) -> float:
+        """Calculate assignment P&L using T-1 holdings and custodian prices."""
+        try:
+            expiration_dt = pd.Timestamp(self.analysis_date).date()
+        except Exception:
             return 0.0
 
-        # Try to find P&L columns
-        value_cols = [
-            col for col in assignments.columns
-            if any(keyword in str(col).lower()
-                   for keyword in ('pnl', 'gl', 'gain', 'loss', 'amount'))
-        ]
+        t1_options = getattr(self.fund.data.previous, 'vest', FundHoldings()).options
+        t1_cust_options = getattr(self.fund.data.previous, 'custodian', FundHoldings()).options
 
-        for col in value_cols:
-            series = pd.to_numeric(assignments[col], errors='coerce').dropna()
-            if not series.empty:
-                return float(series.sum())
+        if not isinstance(t1_cust_options, pd.DataFrame) or t1_cust_options.empty:
+            return 0.0
 
-        # Fallback: calculate from quantity * price
-        quantity_cols = [
-            col for col in assignments.columns
-            if 'quantity' in str(col).lower() or 'contracts' in str(col).lower()
-        ]
-        price_cols = [
-            col for col in assignments.columns
-            if 'price' in str(col).lower() or 'premium' in str(col).lower()
-        ]
+        # Merge T-1 custodian options with internal data for strike/equity_price info
+        if isinstance(t1_options, pd.DataFrame) and not t1_options.empty:
+            merged_options = t1_cust_options.merge(
+                t1_options[[col for col in ['optticker', 'strike', 'equity_price', 'maturity']
+                            if col in t1_options.columns]],
+                on='optticker',
+                how='left',
+                suffixes=('', '_internal')
+            )
+        else:
+            merged_options = t1_cust_options.copy()
 
-        if quantity_cols and price_cols:
-            qty = pd.to_numeric(assignments[quantity_cols[0]], errors='coerce').fillna(0)
-            price = pd.to_numeric(assignments[price_cols[0]], errors='coerce').fillna(0)
-            return float((qty * price).sum())
+        maturity_column = None
+        for candidate in ('maturity', 'maturity_date'):
+            if candidate in merged_options.columns:
+                maturity_column = candidate
+                break
 
-        return 0.0
+        if maturity_column is None:
+            return 0.0
+
+        merged_options['maturity'] = pd.to_datetime(
+            merged_options[maturity_column], errors='coerce'
+        ).dt.date
+        expiring_options = merged_options[merged_options['maturity'] == expiration_dt].copy()
+
+        if expiring_options.empty:
+            return 0.0
+
+        # Apply price overrides from price breaks (enables T-1 price changes)
+        price_breaks = self.fund.get_price_breaks('option')
+        if isinstance(price_breaks, pd.DataFrame) and not price_breaks.empty:
+            if 'price_cust' in price_breaks.columns:
+                expiring_options['price'] = expiring_options['optticker'].map(
+                    price_breaks['price_cust']
+                ).fillna(expiring_options.get('price', 0))
+
+        expiring_options['equity_price'] = expiring_options.get('equity_price', 0).fillna(0)
+        expiring_options['strike'] = expiring_options.get('strike', 0).fillna(0)
+
+        expiring_options['last_part'] = expiring_options['optticker'].astype(str).str.split().str[-1]
+        expiring_options['option_type'] = expiring_options['last_part'].str.extract(r'([PC])', expand=False)
+        expiring_options['option_type'] = expiring_options['option_type'].fillna('C').str.upper()
+        expiring_options.drop('last_part', axis=1, inplace=True)
+
+        expiring_options['price'] = expiring_options.get('price', 0).fillna(0)
+        expiring_options['shares_cust'] = expiring_options.get('shares_cust', 0).fillna(0)
+
+        is_call = expiring_options['option_type'] == 'C'
+        is_put = ~is_call
+
+        expired_calls = is_call & (expiring_options['equity_price'] < expiring_options['strike'])
+        expired_puts = is_put & (expiring_options['equity_price'] > expiring_options['strike'])
+        expired_mask = expired_calls | expired_puts
+
+        assigned_mask = ~expired_mask
+
+        expiring_options['intrinsic_value'] = 0.0
+
+        expiring_options.loc[is_call & assigned_mask, 'intrinsic_value'] = (
+            expiring_options.loc[is_call & assigned_mask, 'equity_price'] -
+            expiring_options.loc[is_call & assigned_mask, 'strike']
+        )
+
+        expiring_options.loc[is_put & assigned_mask, 'intrinsic_value'] = (
+            expiring_options.loc[is_put & assigned_mask, 'strike'] -
+            expiring_options.loc[is_put & assigned_mask, 'equity_price']
+        )
+
+        expiring_options['price_difference'] = expiring_options['price'] - expiring_options['intrinsic_value']
+        expiring_options['pnl'] = expiring_options['price_difference'] * expiring_options['shares_cust'].abs() * 100
+
+        expired_pnl = expiring_options.loc[expired_mask, 'pnl'].sum()
+        assigned_pnl = expiring_options.loc[~expired_mask, 'pnl'].sum()
+
+        net_expiration_activity = assigned_pnl + expired_pnl
+        return float(net_expiration_activity)
 
     def _calculate_dividends(self) -> float:
         """Calculate dividend income from equity holdings."""

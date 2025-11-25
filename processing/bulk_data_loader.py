@@ -5,11 +5,11 @@ from datetime import date
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pandas as pd
-from sqlalchemy import func, literal, and_, or_
+from sqlalchemy import func, literal, and_, or_, text
 from pandas.tseries.offsets import BDay
 
 from utilities.ticker_utils import normalize_all_holdings
-
+from config.fund_definitions import PRIVATE_FUNDS, CLOSED_END_FUNDS
 
 
 @dataclass
@@ -56,17 +56,15 @@ class BulkDataLoader:
 
         # Get all funds from registry
         all_funds = self.fund_registry.funds
+        tplus_one = self._business_day_shift(target_date, 1)
+        previous_tplus_one = self._business_day_shift(previous_date, 1)
 
         # Bulk load by table type (not by fund)
         self._bulk_load_custodian_holdings(
             data_store, all_funds, target_date, previous_date
         )
         self._bulk_load_vest_holdings(
-            data_store,
-            all_funds,
-            target_date,
-            previous_date,
-            analysis_type=analysis_type,
+            data_store, all_funds, target_date, previous_date
         )
         self._bulk_load_nav_data(
             data_store, all_funds, target_date, previous_date
@@ -77,8 +75,13 @@ class BulkDataLoader:
         self._bulk_load_distributions(
             data_store, all_funds, target_date
         )
-        tplus_one = self._business_day_shift(target_date, 1)
-        previous_tplus_one = self._business_day_shift(previous_date, 1)
+        self._bulk_load_assignments(
+            data_store, all_funds, target_date, previous_date
+        )
+        self._bulk_load_trades(
+            data_store, all_funds, target_date, previous_date
+        )
+
 
         self._bulk_load_index_data(
             data_store,
@@ -220,8 +223,6 @@ class BulkDataLoader:
         all_funds: Dict,
         target_date: date,
         previous_date: Optional[date],
-        *,
-        analysis_type: Optional[str] = None,
     ) -> None:
         """Load ALL Vest holdings for ALL funds in one query."""
         holdings_map = [
@@ -803,6 +804,127 @@ class BulkDataLoader:
                     fund_name,
                     'distributions',
                     fund_df if isinstance(fund_df, pd.DataFrame) else pd.DataFrame(),
+                )
+
+    def _bulk_load_assignments(
+        self,
+        data_store: BulkDataStore,
+        all_funds: Dict,
+        target_date: date,
+        previous_date: Optional[date],
+    ) -> None:
+        """Load option assignment data for all funds."""
+
+        table_to_funds = self._group_funds_by_table(
+            all_funds, 'option_custodian_assignment'
+        )
+
+        for table_name, funds in table_to_funds.items():
+            if not table_name or table_name == 'NULL':
+                continue
+
+            table = getattr(self.base_cls.classes, table_name, None)
+            if table is None:
+                self.logger.debug("Assignment table %s not found", table_name)
+                continue
+
+            try:
+                query = self.session.query(table)
+                date_column = self._get_table_column(
+                    table,
+                    'date',
+                    'process_date',
+                    'effective_date',
+                    'assignment_date',
+                    'trade_date',
+                )
+                if date_column is not None:
+                    query = self._apply_date_filter(query, date_column, target_date, previous_date)
+
+                df = pd.read_sql(query.statement, self.session.bind)
+            except Exception as exc:
+                self.logger.warning(
+                    "Failed to load assignments from %s: %s", table_name, exc
+                )
+                continue
+
+            for fund in funds:
+                fund_name = fund.name
+                filtered = self._filter_by_fund(df, fund_name, fund.mapping_data)
+                current, previous = self._split_current_previous(
+                    filtered,
+                    self._find_date_column(
+                        filtered,
+                        'date',
+                        'process_date',
+                        'effective_date',
+                        'assignment_date',
+                        'trade_date',
+                    ),
+                    target_date,
+                    previous_date,
+                )
+
+                self._store_fund_data(data_store, fund_name, 'assignments', current)
+                if previous_date is not None:
+                    self._store_fund_data(data_store, fund_name, 'assignments_t1', previous)
+
+    def _bulk_load_trades(
+        self,
+        data_store: BulkDataStore,
+        all_funds: Dict,
+        target_date: date,
+        previous_date: Optional[date],
+    ) -> None:
+        """Load trade execution data for all funds."""
+
+        for fund in all_funds.values():
+            try:
+                equity_trades = self._get_equity_trades_data(fund, target_date)
+                option_trades = self._get_option_trades_data(fund, target_date)
+                flex_option_trades = self._split_flex_trades(
+                    fund, option_trades
+                )
+                treasury_trades = self._get_treasury_trades_data(fund, target_date)
+
+                self._store_fund_data(data_store, fund.name, 'equity_trades', equity_trades)
+                self._store_fund_data(data_store, fund.name, 'option_trades', option_trades)
+                self._store_fund_data(
+                    data_store, fund.name, 'flex_option_trades', flex_option_trades
+                )
+                self._store_fund_data(data_store, fund.name, 'treasury_trades', treasury_trades)
+
+                if previous_date is not None:
+                    self._store_fund_data(
+                        data_store,
+                        fund.name,
+                        'equity_trades_t1',
+                        self._get_equity_trades_data(fund, previous_date),
+                    )
+                    previous_option_trades = self._get_option_trades_data(
+                        fund, previous_date
+                    )
+                    self._store_fund_data(
+                        data_store,
+                        fund.name,
+                        'option_trades_t1',
+                        previous_option_trades,
+                    )
+                    self._store_fund_data(
+                        data_store,
+                        fund.name,
+                        'flex_option_trades_t1',
+                        self._split_flex_trades(fund, previous_option_trades),
+                    )
+                    self._store_fund_data(
+                        data_store,
+                        fund.name,
+                        'treasury_trades_t1',
+                        self._get_treasury_trades_data(fund, previous_date),
+                    )
+            except Exception as exc:
+                self.logger.warning(
+                    "Failed to load trades for %s: %s", fund.name, exc
                 )
 
     def _load_bny_us_nav(
@@ -1745,6 +1867,146 @@ class BulkDataLoader:
             return query
 
         return self.session.query(table)
+
+    def _get_trades_data(self, fund, date):
+        """
+        Fetch trade execution data from EMSX for both equity and option trades.
+        """
+        try:
+            EmxsOrder = self.base_cls.classes.emsx_equity_order_sub
+            EmxsRoute = self.base_cls.classes.emsx_equity_route_sub
+
+            query = self.session.query(
+                EmxsRoute.emsx_route_as_of_date.label('date'),
+                literal(fund.name).label('fund'),
+                EmxsOrder.emsx_asset_class.label('type'),
+                EmxsOrder.emsx_ticker.label('ticker'),
+                EmxsOrder.emsx_side.label('side'),
+                EmxsOrder.emsx_amount.label('quantity'),
+                EmxsRoute.emsx_avg_price.label('price')
+            ).join(
+                EmxsRoute, EmxsOrder.emsx_sequence == EmxsRoute.emsx_sequence
+            ).filter(
+                EmxsOrder.emsx_order_as_of_date == date,
+                EmxsRoute.emsx_custom_account == fund.name,
+                EmxsOrder.emsx_status == 'FILLED',
+                EmxsRoute.emsx_route_as_of_date == EmxsOrder.emsx_order_as_of_date,
+                EmxsRoute.emsx_status == 'FILLED'
+            ).order_by(
+                'date', 'ticker', EmxsOrder.emsx_side.desc()
+            )
+
+            return self._execute_query(self.session, query)
+
+        except Exception as e:
+            self.logger.warning("Failed to load trades for %s: %s", fund.name, e)
+            return pd.DataFrame()
+
+    def _get_equity_trades_data(self, fund, date):
+        """Fetch equity trade execution data."""
+        all_trades = self._get_trades_data(fund, date)
+        if all_trades.empty:
+            return pd.DataFrame()
+
+        equity_trades = all_trades[all_trades['type'] == 'Equity'].copy()
+        return equity_trades
+
+    def _get_option_trades_data(self, fund, date):
+        """Fetch option trade execution data, handling block trading when needed."""
+        uses_block_trading = (fund.name in PRIVATE_FUNDS or fund.name in CLOSED_END_FUNDS)
+
+        if uses_block_trading:
+            return self._get_block_option_trades(fund, date)
+
+        all_trades = self._get_trades_data(fund, date)
+        if all_trades.empty:
+            return pd.DataFrame()
+
+        option_trades = all_trades[all_trades['type'] == 'Option'].copy()
+        if option_trades.empty:
+            return pd.DataFrame()
+
+        option_trades['ticker'] = option_trades['ticker'].str.replace(' Equity', '', regex=False)
+        option_trades['ticker'] = option_trades['ticker'].str.replace(' Index', '', regex=False)
+        option_trades.rename(columns={'ticker': 'optticker'}, inplace=True)
+        return option_trades
+
+    def _get_block_option_trades(self, fund, date):
+        """Fetch block option trade execution data using direct SQL."""
+        try:
+            sql_query = text(
+                """
+                SELECT 
+                    order_as_of_date as date,
+                    account as fund,
+                    short_ticker as optticker,
+                    long_ticker,
+                    isin,
+                    emsx_side as side,
+                    emsx_filled as quantity,
+                    emsx_avg_price as price,
+                    emsx_principal as principal
+                FROM ftcm.vw_combined_block_opt
+                WHERE account = :account_name
+                AND order_as_of_date = :trade_date
+                ORDER BY order_as_of_date, short_ticker, emsx_side DESC
+            """
+            )
+
+            result = self.session.execute(
+                sql_query,
+                {
+                    'account_name': fund.name,
+                    'trade_date': date
+                }
+            )
+
+            df = pd.DataFrame(result.fetchall())
+
+            if not df.empty:
+                df['optticker'] = df['optticker'].str.replace('BRK/B', 'BRKB', regex=False)
+                df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce')
+                df['price'] = pd.to_numeric(df['price'], errors='coerce')
+                df['principal'] = pd.to_numeric(df['principal'], errors='coerce')
+
+            return df
+
+        except Exception as e:
+            self.logger.warning("Failed to load block option trades for %s: %s", fund.name, e)
+            return pd.DataFrame()
+
+    def _get_treasury_trades_data(self, fund, date):
+        """Fetch treasury trades if available in the EMSX dataset."""
+        all_trades = self._get_trades_data(fund, date)
+        if all_trades.empty or 'type' not in all_trades.columns:
+            return pd.DataFrame()
+
+        treasury_mask = all_trades['type'].str.contains('Treasury', case=False, na=False)
+        treasury_trades = all_trades[treasury_mask].copy()
+        return treasury_trades
+
+    def _split_flex_trades(self, fund, option_trades: pd.DataFrame) -> pd.DataFrame:
+        """Split option trades into flex vs regular based on fund configuration."""
+        if not isinstance(option_trades, pd.DataFrame) or option_trades.empty:
+            return pd.DataFrame()
+
+        has_flex = bool(fund.mapping_data.get('has_flex_option'))
+        if not has_flex:
+            return pd.DataFrame()
+
+        flex_pattern = fund.mapping_data.get('flex_option_pattern')
+        if not flex_pattern:
+            flex_type = fund.mapping_data.get('flex_option_type')
+            if flex_type == 'single_stock':
+                flex_pattern = r'^2'
+            else:
+                flex_pattern = r'SPX|XSP'
+
+        if 'optticker' not in option_trades.columns:
+            return pd.DataFrame()
+
+        mask = option_trades['optticker'].str.contains(flex_pattern, na=False, regex=True)
+        return option_trades[mask].copy()
 
     def _get_numeric_series(self, df: pd.DataFrame, *column_names: str) -> Tuple[pd.Series, bool]:
         """

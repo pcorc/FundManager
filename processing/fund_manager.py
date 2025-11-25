@@ -299,10 +299,14 @@ class FundManager:
         ),
         
         # Add other values for T
-        equity_trades = fund_data_dict.get('equity_trades', pd.DataFrame()),
-        cr_rd_data = fund_data_dict.get('cr_rd', pd.DataFrame()),
-        flows = self._extract_flow_value(fund_data_dict.get('flows', pd.DataFrame())),
-        fund_name = fund_name,
+        equity_trades=fund_data_dict.get('equity_trades', pd.DataFrame()),
+        option_trades=fund_data_dict.get('option_trades', pd.DataFrame()),
+        flex_option_trades=fund_data_dict.get('flex_option_trades', pd.DataFrame()),
+        treasury_trades=fund_data_dict.get('treasury_trades', pd.DataFrame()),
+        cr_rd_data=fund_data_dict.get('cr_rd', pd.DataFrame()),
+        assignments=fund_data_dict.get('assignments', pd.DataFrame()),
+        flows=self._extract_flow_value(fund_data_dict.get('flows', pd.DataFrame())),
+        fund_name=fund_name,
         )
 
         # Populate T-1 snapshot
@@ -333,8 +337,12 @@ class FundManager:
             ),
 
             # Add other values for T-1
-            equity_trades=pd.DataFrame(),
+            equity_trades=fund_data_dict.get('equity_trades_t1', pd.DataFrame()),
+            option_trades=fund_data_dict.get('option_trades_t1', pd.DataFrame()),
+            flex_option_trades=fund_data_dict.get('flex_option_trades_t1', pd.DataFrame()),
+            treasury_trades=fund_data_dict.get('treasury_trades_t1', pd.DataFrame()),
             cr_rd_data=pd.DataFrame(),
+            assignments=fund_data_dict.get('assignments_t1', pd.DataFrame()),
             flows=self._extract_flow_value(fund_data_dict.get('flows_t1', pd.DataFrame())),
             fund_name=fund_name,
         )
