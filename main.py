@@ -565,27 +565,27 @@ if __name__ == "__main__":
         #     "funds": build_fund_list( ETF_FUNDS),
         #     "output_tag": "custom_cef",  # Custom tag for file names
         # },
-        "eod_compliance_custom": {
-            # All three fund groups combined
-            "funds": build_fund_list(
-                "KNG"
-            ),
-            "output_tag": "cef",  # Custom tag for file names
-            "compliance_tests": [
-                        "summary_metrics",
-                        "gics_compliance",
-                        "prospectus_80pct_policy",
-                        "diversification_40act_check",
-                        "diversification_IRS_check",
-                        "diversification_IRC_check",
-                        "max_15pct_illiquid_sai",
-                        "real_estate_check",
-                        "commodities_check",
-                        "twelve_d1a_other_inv_cos",
-                        "twelve_d2_insurance_cos",
-                        "twelve_d3_sec_biz"
-                    ],
-        },
+        # "eod_compliance_custom": {
+        #     # All three fund groups combined
+        #     "funds": build_fund_list(
+        #         "KNG"
+        #     ),
+        #     "output_tag": "cef",  # Custom tag for file names
+        #     "compliance_tests": [
+        #                 "summary_metrics",
+        #                 "gics_compliance",
+        #                 "prospectus_80pct_policy",
+        #                 "diversification_40act_check",
+        #                 "diversification_IRS_check",
+        #                 "diversification_IRC_check",
+        #                 "max_15pct_illiquid_sai",
+        #                 "real_estate_check",
+        #                 "commodities_check",
+        #                 "twelve_d1a_other_inv_cos",
+        #                 "twelve_d2_insurance_cos",
+        #                 "twelve_d3_sec_biz"
+        #             ],
+        # },
         "eod_recon_custom": {
             # Closed-end funds + ETFs + two specific funds
             "funds": build_fund_list(

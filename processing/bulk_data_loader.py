@@ -64,7 +64,7 @@ class BulkDataLoader:
             data_store, all_funds, target_date, previous_date
         )
         self._bulk_load_vest_holdings(
-            data_store, all_funds, target_date, previous_date
+            data_store, all_funds, target_date, analysis_type, previous_date,
         )
         self._bulk_load_nav_data(
             data_store, all_funds, target_date, previous_date
@@ -222,6 +222,7 @@ class BulkDataLoader:
         data_store: BulkDataStore,
         all_funds: Dict,
         target_date: date,
+        analysis_type: str,
         previous_date: Optional[date],
     ) -> None:
         """Load ALL Vest holdings for ALL funds in one query."""
@@ -1896,7 +1897,7 @@ class BulkDataLoader:
                 'date', 'ticker', EmxsOrder.emsx_side.desc()
             )
 
-            return self._execute_query(self.session, query)
+            return pd.read_sql(query.statement, self.session.bind)
 
         except Exception as e:
             self.logger.warning("Failed to load trades for %s: %s", fund.name, e)
@@ -1984,6 +1985,7 @@ class BulkDataLoader:
         treasury_mask = all_trades['type'].str.contains('Treasury', case=False, na=False)
         treasury_trades = all_trades[treasury_mask].copy()
         return treasury_trades
+
 
     def _split_flex_trades(self, fund, option_trades: pd.DataFrame) -> pd.DataFrame:
         """Split option trades into flex vs regular based on fund configuration."""

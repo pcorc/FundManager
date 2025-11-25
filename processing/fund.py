@@ -77,6 +77,127 @@ class FundHoldings:
             treasury=self.treasury.copy() if isinstance(self.treasury, pd.DataFrame) else pd.DataFrame(),
         )
 
+
+
+class FundMetrics:
+    """Computed metrics from holdings data."""
+    def __init__(self, snapshot: 'FundSnapshot'):
+        self.snapshot = snapshot
+
+    @property
+    def total_equity_value(self) -> float:
+        """Total equity market value computed from holdings."""
+        return self._compute_equity_value()
+
+    @property
+    def total_option_value(self) -> float:
+        """Total regular option market value computed from holdings."""
+        return self._compute_option_value()
+
+    @property
+    def total_flex_option_value(self) -> float:
+        """Total flex option market value computed from holdings."""
+        return self._compute_flex_option_value()
+
+    @property
+    def total_treasury_value(self) -> float:
+        """Total treasury market value computed from holdings."""
+        return self._compute_treasury_value()
+
+    @property
+    def total_option_delta_adjusted_notional(self) -> float:
+        """Total delta-adjusted notional for all options (regular + flex)."""
+        regular = self._compute_option_delta_adjusted_notional()
+        flex = self._compute_flex_option_delta_adjusted_notional()
+        return regular + flex
+
+    @property
+    def total_holdings_value(self) -> float:
+        """Total value of all holdings (equity + options + flex + treasury)."""
+        return (
+            self.total_equity_value +
+            self.total_option_value +
+            self.total_flex_option_value +
+            self.total_treasury_value
+        )
+
+    def _compute_equity_value(self) -> float:
+        """Calculate total equity value - uses Vest if available, otherwise Custodian."""
+        # Primary source: Vest (OMS data)
+        for frame in (self.snapshot.vest.equity, self.snapshot.custodian.equity):
+            value = self.snapshot._frame_value_sum(
+                frame, ["equity_market_value", "market_value", "net_market_value"]
+            )
+            if value is not None:
+                return value  # Return first available value (Vest preferred)
+            fallback = self.snapshot._price_quantity_sum(frame)
+            if fallback is not None:
+                return fallback
+        return 0.0
+
+    def _compute_option_value(self) -> float:
+        """Calculate total regular option value - uses Vest if available, otherwise Custodian."""
+        for frame in (self.snapshot.vest.options, self.snapshot.custodian.options):
+            value = self.snapshot._frame_value_sum(
+                frame, ["option_market_value", "market_value", "net_market_value"]
+            )
+            if value is not None:
+                return value  # Return first available value (Vest preferred)
+            fallback = self.snapshot._price_quantity_sum(frame, multiplier=100.0)
+            if fallback is not None:
+                return fallback
+        return 0.0
+
+    def _compute_flex_option_value(self) -> float:
+        """Calculate total flex option value - uses Vest if available, otherwise Custodian."""
+        for frame in (self.snapshot.vest.flex_options, self.snapshot.custodian.flex_options):
+            value = self.snapshot._frame_value_sum(
+                frame, ["flex_option_market_value", "option_market_value", "market_value", "net_market_value"]
+            )
+            if value is not None:
+                return value  # Return first available value (Vest preferred)
+            fallback = self.snapshot._price_quantity_sum(frame, multiplier=100.0)
+            if fallback is not None:
+                return fallback
+        return 0.0
+
+    def _compute_treasury_value(self) -> float:
+        """Calculate total treasury value - uses Vest if available, otherwise Custodian."""
+        for frame in (self.snapshot.vest.treasury, self.snapshot.custodian.treasury):
+            value = self.snapshot._frame_value_sum(
+                frame, ["treasury_market_value", "market_value", "net_market_value"]
+            )
+            if value is not None:
+                return value  # Return first available value (Vest preferred)
+            fallback = self.snapshot._price_quantity_sum(frame)
+            if fallback is not None:
+                return fallback
+        return 0.0
+
+    def _compute_option_delta_adjusted_notional(self) -> float:
+        """Calculate delta-adjusted notional for regular options - uses Vest if available, otherwise Custodian."""
+        for frame in (self.snapshot.vest.options, self.snapshot.custodian.options):
+            value = self.snapshot._frame_value_sum(
+                frame,
+                ["option_delta_adjusted_notional", "delta_adjusted_notional"],
+            )
+            if value is not None:
+                return value  # Return first available value (Vest preferred)
+        return 0.0
+
+    def _compute_flex_option_delta_adjusted_notional(self) -> float:
+        """Calculate delta-adjusted notional for flex options - uses Vest if available, otherwise Custodian."""
+        for frame in (self.snapshot.vest.flex_options, self.snapshot.custodian.flex_options):
+            value = self.snapshot._frame_value_sum(
+                frame,
+                ["flex_option_delta_adjusted_notional", "option_delta_adjusted_notional", "delta_adjusted_notional"],
+            )
+            if value is not None:
+                return value  # Return first available value (Vest preferred)
+        return 0.0
+
+
+
 class FundSnapshot:
     """Container for all holdings data at a point in time."""
 
@@ -96,8 +217,12 @@ class FundSnapshot:
         basket: Optional[pd.DataFrame] = None,
         overlap: Optional[pd.DataFrame] = None,
         fund_name: Optional[str] = None,
-        equity_trades: Optional[pd.DataFrame] = None,  # FIXED: pd.DataFrame not str
-        cr_rd_data: Optional[pd.DataFrame] = None,  # FIXED: pd.DataFrame not str (creation/redemption)
+        equity_trades: Optional[pd.DataFrame] = None,
+        cr_rd_data: Optional[pd.DataFrame] = None,
+        assignments: Optional[pd.DataFrame] = None,
+        option_trades: Optional[pd.DataFrame] = None,
+        flex_option_trades: Optional[pd.DataFrame] = None,
+        treasury_trades: Optional[pd.DataFrame] = None,
     ) -> None:
         self.vest = vest if isinstance(vest, FundHoldings) else FundHoldings()
         self.custodian = custodian if isinstance(custodian, FundHoldings) else FundHoldings()
@@ -118,6 +243,14 @@ class FundSnapshot:
         self.fund_name = fund_name
         self.equity_trades = equity_trades if isinstance(equity_trades, pd.DataFrame) else pd.DataFrame()
         self.cr_rd_data = cr_rd_data if isinstance(cr_rd_data, pd.DataFrame) else pd.DataFrame()
+        self.assignments = assignments if isinstance(assignments, pd.DataFrame) else pd.DataFrame()
+        self.option_trades = option_trades if isinstance(option_trades, pd.DataFrame) else pd.DataFrame()
+        self.flex_option_trades = (
+            flex_option_trades if isinstance(flex_option_trades, pd.DataFrame) else pd.DataFrame()
+        )
+        self.treasury_trades = (
+            treasury_trades if isinstance(treasury_trades, pd.DataFrame) else pd.DataFrame()
+        )
 
         # Initialize metrics (computed from holdings)
         self._metrics = None
@@ -286,124 +419,6 @@ class FundSnapshot:
             if not price.empty and not quantity.empty:
                 return float((price * quantity * multiplier).sum())
         return None
-
-
-class FundMetrics:
-    """Computed metrics from holdings data."""
-    def __init__(self, snapshot: 'FundSnapshot'):
-        self.snapshot = snapshot
-
-    @property
-    def total_equity_value(self) -> float:
-        """Total equity market value computed from holdings."""
-        return self._compute_equity_value()
-
-    @property
-    def total_option_value(self) -> float:
-        """Total regular option market value computed from holdings."""
-        return self._compute_option_value()
-
-    @property
-    def total_flex_option_value(self) -> float:
-        """Total flex option market value computed from holdings."""
-        return self._compute_flex_option_value()
-
-    @property
-    def total_treasury_value(self) -> float:
-        """Total treasury market value computed from holdings."""
-        return self._compute_treasury_value()
-
-    @property
-    def total_option_delta_adjusted_notional(self) -> float:
-        """Total delta-adjusted notional for all options (regular + flex)."""
-        regular = self._compute_option_delta_adjusted_notional()
-        flex = self._compute_flex_option_delta_adjusted_notional()
-        return regular + flex
-
-    @property
-    def total_holdings_value(self) -> float:
-        """Total value of all holdings (equity + options + flex + treasury)."""
-        return (
-            self.total_equity_value +
-            self.total_option_value +
-            self.total_flex_option_value +
-            self.total_treasury_value
-        )
-
-    def _compute_equity_value(self) -> float:
-        """Calculate total equity value - uses Vest if available, otherwise Custodian."""
-        # Primary source: Vest (OMS data)
-        for frame in (self.snapshot.vest.equity, self.snapshot.custodian.equity):
-            value = self.snapshot._frame_value_sum(
-                frame, ["equity_market_value", "market_value", "net_market_value"]
-            )
-            if value is not None:
-                return value  # Return first available value (Vest preferred)
-            fallback = self.snapshot._price_quantity_sum(frame)
-            if fallback is not None:
-                return fallback
-        return 0.0
-
-    def _compute_option_value(self) -> float:
-        """Calculate total regular option value - uses Vest if available, otherwise Custodian."""
-        for frame in (self.snapshot.vest.options, self.snapshot.custodian.options):
-            value = self.snapshot._frame_value_sum(
-                frame, ["option_market_value", "market_value", "net_market_value"]
-            )
-            if value is not None:
-                return value  # Return first available value (Vest preferred)
-            fallback = self.snapshot._price_quantity_sum(frame, multiplier=100.0)
-            if fallback is not None:
-                return fallback
-        return 0.0
-
-    def _compute_flex_option_value(self) -> float:
-        """Calculate total flex option value - uses Vest if available, otherwise Custodian."""
-        for frame in (self.snapshot.vest.flex_options, self.snapshot.custodian.flex_options):
-            value = self.snapshot._frame_value_sum(
-                frame, ["flex_option_market_value", "option_market_value", "market_value", "net_market_value"]
-            )
-            if value is not None:
-                return value  # Return first available value (Vest preferred)
-            fallback = self.snapshot._price_quantity_sum(frame, multiplier=100.0)
-            if fallback is not None:
-                return fallback
-        return 0.0
-
-    def _compute_treasury_value(self) -> float:
-        """Calculate total treasury value - uses Vest if available, otherwise Custodian."""
-        for frame in (self.snapshot.vest.treasury, self.snapshot.custodian.treasury):
-            value = self.snapshot._frame_value_sum(
-                frame, ["treasury_market_value", "market_value", "net_market_value"]
-            )
-            if value is not None:
-                return value  # Return first available value (Vest preferred)
-            fallback = self.snapshot._price_quantity_sum(frame)
-            if fallback is not None:
-                return fallback
-        return 0.0
-
-    def _compute_option_delta_adjusted_notional(self) -> float:
-        """Calculate delta-adjusted notional for regular options - uses Vest if available, otherwise Custodian."""
-        for frame in (self.snapshot.vest.options, self.snapshot.custodian.options):
-            value = self.snapshot._frame_value_sum(
-                frame,
-                ["option_delta_adjusted_notional", "delta_adjusted_notional"],
-            )
-            if value is not None:
-                return value  # Return first available value (Vest preferred)
-        return 0.0
-
-    def _compute_flex_option_delta_adjusted_notional(self) -> float:
-        """Calculate delta-adjusted notional for flex options - uses Vest if available, otherwise Custodian."""
-        for frame in (self.snapshot.vest.flex_options, self.snapshot.custodian.flex_options):
-            value = self.snapshot._frame_value_sum(
-                frame,
-                ["flex_option_delta_adjusted_notional", "option_delta_adjusted_notional", "delta_adjusted_notional"],
-            )
-            if value is not None:
-                return value  # Return first available value (Vest preferred)
-        return 0.0
 
 
 
