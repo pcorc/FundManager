@@ -414,22 +414,9 @@ class FundData:
         *,
         current: Optional[FundSnapshot] = None,
         previous: Optional[FundSnapshot] = None,
-        # index: Optional[FundHoldings] = None,  # ADD - current index holdings
-        # previous_index: Optional[FundHoldings] = None,  # ADD - T-1 index holdings
-        # equity_trades: Optional[pd.DataFrame] = None,  # ADD - trades data
-        # cr_rd_data: Optional[pd.DataFrame] = None,  # ADD - corporate actions
     ) -> None:
         self.current = current if isinstance(current, FundSnapshot) else FundSnapshot()
         self.previous = previous if isinstance(previous, FundSnapshot) else FundSnapshot()
-        self.prior = self.previous  # Alias
-
-        # NAV reconciliation data - ADD THESE LINES
-        self.price_breaks: Dict[str, pd.DataFrame] = {}
-        self.assignments: Optional[pd.DataFrame] = None
-        self.distributions: Optional[pd.DataFrame] = None
-        self.flows: Optional[pd.DataFrame] = None
-        self.config: Dict[str, Any] = {}
-        self.other: float = 0.0
 
 
 class Fund:
