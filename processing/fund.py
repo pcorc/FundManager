@@ -621,7 +621,7 @@ class Fund:
             return pd.DataFrame()
 
         # Get the snapshot
-        snap = self.data.current if snapshot == 'current' else self.data.prior
+        snap = self.data.current if snapshot == 'current' else self.data.previous
         if snap is None:
             return pd.DataFrame()
 
@@ -660,7 +660,7 @@ class Fund:
             regular_opts = fund.get_regular_options('current')
         """
         # Get the snapshot
-        snap = self.data.current if snapshot == 'current' else self.data.prior
+        snap = self.data.current if snapshot == 'current' else self.data.previous
         if snap is None:
             return pd.DataFrame()
 
@@ -736,8 +736,8 @@ class Fund:
                     all_tickers.update(df[ticker_col].dropna().unique())
 
         # Gather from prior snapshot if requested
-        if include_prior and self.data.prior:
-            for source in (self.data.prior.vest, self.data.prior.custodian):
+        if include_prior and self.data.previous:
+            for source in (self.data.previous.vest, self.data.previous.custodian):
                 if source is None:
                     continue
 
@@ -781,8 +781,8 @@ class Fund:
 
         pattern = self.config.get("flex_option_pattern") or "SPX|XSP"
         snapshots = [self.data.current]
-        if include_prior and self.data.prior:
-            snapshots.append(self.data.prior)
+        if include_prior and self.data.previous:
+            snapshots.append(self.data.previous)
 
         for snapshot in snapshots:
             if not snapshot:
@@ -1038,7 +1038,7 @@ class Fund:
             tna = fund.get_nav_metric('total_net_assets', 'current')
             shares = fund.get_nav_metric('shares_outstanding', 'current')
         """
-        snap = self.data.current if snapshot == 'current' else self.data.prior
+        snap = self.data.current if snapshot == 'current' else self.data.previous
         if snap is None:
             return 0.0
 

@@ -149,7 +149,7 @@ class NAVReconciliator:
         Calculate equity G/L with ticker-level details.
 
         Compares:
-        - fund.data.current.vest.equity vs fund.data.prior.vest.equity
+        - fund.data.current.vest.equity vs fund.data.previous.vest.equity
         - Applies custodian price adjustments from price_breaks
         """
         # Get all unique tickers across snapshots
@@ -164,7 +164,7 @@ class NAVReconciliator:
 
         # Get holdings DataFrames
         vest_current = self.fund.data.current.vest.equity
-        vest_prior = self.fund.data.prior.vest.equity
+        vest_prior = self.fund.data.previous.vest.equity
 
         # Get price breaks for adjustments
         price_breaks = self.fund.get_price_breaks('equity')
@@ -267,7 +267,7 @@ class NAVReconciliator:
         Calculate regular (non-flex) option G/L with ticker-level details.
 
         Compares:
-        - fund.data.current.vest.options vs fund.data.prior.vest.options
+        - fund.data.current.vest.options vs fund.data.previous.vest.options
         - Excludes flex options if fund has_flex_option=True
         - Applies 100x multiplier for option contracts
         """
@@ -286,7 +286,11 @@ class NAVReconciliator:
 
         # Get holdings DataFrames
         vest_current = self.fund.data.current.vest.options
-        vest_prior = self.fund.data.prior.vest.options
+        vest_prior = self.fund.data.previous.vest.options
+
+        # Roll days should source T-1 prices from execution data
+        use_roll_trade_prices = self._is_prior_day_option_roll()
+        trades_t1 = getattr(self.fund.data.previous, 'option_trades', pd.DataFrame())
 
         # Get price breaks
         price_breaks = self.fund.get_price_breaks('option')
@@ -300,6 +304,8 @@ class NAVReconciliator:
                 vest_prior,
                 price_breaks,
                 multiplier=100.0,  # Option contract multiplier
+                trades_t1=trades_t1,
+                use_trade_prices=use_roll_trade_prices,
             )
             if detail:
                 ticker_details.append(detail)
@@ -344,7 +350,10 @@ class NAVReconciliator:
 
         # Get holdings DataFrames
         vest_current = self.fund.data.current.vest.options
-        vest_prior = self.fund.data.prior.vest.options
+        vest_prior = self.fund.data.previous.vest.options
+
+        use_roll_trade_prices = self._is_prior_day_option_roll()
+        trades_t1 = getattr(self.fund.data.previous, 'flex_option_trades', pd.DataFrame())
 
         # Get price breaks
         price_breaks = self.fund.get_price_breaks('option')
@@ -358,6 +367,8 @@ class NAVReconciliator:
                 vest_prior,
                 price_breaks,
                 multiplier=100.0,
+                trades_t1=trades_t1,
+                use_trade_prices=use_roll_trade_prices,
             )
             if detail:
                 ticker_details.append(detail)
@@ -380,6 +391,8 @@ class NAVReconciliator:
             vest_prior: pd.DataFrame,
             price_breaks: pd.DataFrame,
             multiplier: float = 100.0,
+            trades_t1: Optional[pd.DataFrame] = None,
+            use_trade_prices: bool = False,
     ) -> Optional[TickerGainLoss]:
         """
         Calculate G/L for a single option ticker.
@@ -407,6 +420,13 @@ class NAVReconciliator:
         # Start with vest prices
         price_t_custodian = price_t_vest
         price_t1_custodian = price_t1_vest
+
+        # On option roll dates, use execution prices from the T-1 trades feed
+        if use_trade_prices:
+            trade_price = self._get_trade_execution_price(trades_t1, ticker)
+            if trade_price is not None:
+                price_t1_vest = trade_price
+                price_t1_custodian = trade_price
 
         # Apply custodian price adjustments
         if not price_breaks.empty and ticker in price_breaks.index:
@@ -437,6 +457,57 @@ class NAVReconciliator:
                 gl_raw=gl_raw,
                 gl_adjusted=gl_adjusted,
             )
+        return None
+
+    def _is_prior_day_option_roll(self) -> bool:
+        """Check if the prior calendar day was an option roll/settlement date."""
+        try:
+            analysis_ts = pd.Timestamp(self.analysis_date)
+        except Exception:
+            return False
+
+        prior_day = analysis_ts - pd.Timedelta(days=1)
+        return self.fund.is_option_settlement_date(prior_day)
+
+
+    @staticmethod
+    def _get_trade_execution_price(
+            trades: Optional[pd.DataFrame], ticker: str
+    ) -> Optional[float]:
+        """Return a weighted execution price for a ticker from the trades DataFrame."""
+        if not isinstance(trades, pd.DataFrame) or trades.empty:
+            return None
+
+        if 'optticker' not in trades.columns:
+            return None
+
+        ticker_trades = trades[trades['optticker'] == ticker]
+        if ticker_trades.empty:
+            return None
+
+        # Determine quantity column for weighting
+        qty_col = None
+        for candidate in ('quantity', 'qty', 'contracts', 'shares'):
+            if candidate in ticker_trades.columns:
+                qty_col = candidate
+                break
+
+        price_series = pd.to_numeric(ticker_trades.get('price'), errors='coerce')
+
+        if qty_col:
+            qty_series = pd.to_numeric(
+                ticker_trades[qty_col], errors='coerce'
+            ).abs()
+            mask = (qty_series > 0) & price_series.notna()
+            if mask.any():
+                weighted_price = (price_series[mask] * qty_series[mask]).sum() / qty_series[mask].sum()
+                return float(weighted_price)
+
+        # Fallback to the last valid price if no quantities
+        valid_prices = price_series.dropna()
+        if not valid_prices.empty:
+            return float(valid_prices.iloc[-1])
+
         return None
 
     def _calculate_treasury_gl(self) -> AssetClassGainLoss:
