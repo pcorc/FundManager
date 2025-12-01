@@ -215,7 +215,7 @@ class ComplianceReport:
                         "Date": date_str,
                         "Fund": fund_name,
                         "Cash": combined.get("cash_value", 0.0),
-                        "Treasury": combined.get("treasury", 0.0),
+                        "Treasury": combined.get("treasury_market_value", 0.0),  # CHANGED
                         "Equity": combined.get("equity_market_value", 0.0),
                         "Option DAN": combined.get("option_delta_adjusted_notional", 0.0),
                         "Option MV": combined.get("option_market_value", 0.0),
@@ -231,7 +231,9 @@ class ComplianceReport:
             "Treasury",
             "Equity",
             "Option DAN",
-            "Option MV",
+            "Regular Option MV",
+            "Flex Option MV",
+            "Total Option MV",
             "Total Assets",
             "Total Net Assets",
         ]
@@ -1154,7 +1156,7 @@ class ComplianceReportPDF(BaseReportPDF):
 
         summary_metrics = [
             ("Cash", lambda data: self._format_currency(self._get_summary_value(data, "cash_value"))),
-            ("Treasury", lambda data: self._format_currency(self._get_summary_value(data, "treasury"))),
+            ("Treasury", lambda data: self._format_currency(self._get_summary_value(data, "treasury_market_value"))),  # CHANGED
             ("Equity", lambda data: self._format_currency(self._get_summary_value(data, "equity_market_value"))),
             ("Option DAN", lambda data: self._format_currency(self._get_summary_value(data, "option_delta_adjusted_notional"))),
             ("Option MV", lambda data: self._format_currency(self._get_summary_value(data, "option_market_value"))),
@@ -1719,35 +1721,21 @@ class ComplianceReportPDF(BaseReportPDF):
 
     def _get_summary_value(self, fund_data: Mapping[str, Any], key: str) -> object:
         """
-        Retrieve summary metric value with priority:
-        1. fund_current_totals
-        2. summary_metrics.ex_post
-        3. summary_metrics.ex_ante
-        4. Default to 0.0
+        Retrieve summary metric value from summary_metrics test results.
+
+        Returns the value for the given key, or 0.0 if not found.
         """
         if not isinstance(fund_data, Mapping):
             return 0.0
 
-        # Priority 1: Check fund_current_totals (from compliance checker)
-        totals = fund_data.get("fund_current_totals")
-        if isinstance(totals, Mapping) and key in totals:
-            return totals.get(key)
+        # Get the summary_metrics result (it's a flat dict)
+        summary_result = fund_data.get("summary_metrics")
 
-        # Priority 2 & 3: Check summary_metrics (ex_post, then ex_ante)
-        summary = fund_data.get("summary_metrics")
-        if isinstance(summary, Mapping):
-            # Try ex_post first (user preference)
-            ex_post = summary.get("ex_post")
-            if isinstance(ex_post, Mapping) and key in ex_post:
-                return ex_post.get(key)
+        if not isinstance(summary_result, Mapping):
+            return 0.0
 
-            # Fall back to ex_ante
-            ex_ante = summary.get("ex_ante")
-            if isinstance(ex_ante, Mapping) and key in ex_ante:
-                return ex_ante.get(key)
-
-        # Default
-        return 0.0
+        # Get the value directly from the flat dict
+        return summary_result.get(key, 0.0)
 
     def _is_test_selected(self, test_name: str) -> bool:
         if not self.allowed_tests:

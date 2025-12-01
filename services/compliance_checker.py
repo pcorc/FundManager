@@ -137,27 +137,40 @@ class ComplianceChecker:
 
         return results
 
-
     def calculate_summary_metrics(self, fund: Fund) -> ComplianceResult:
+        """Calculate summary metrics for the fund."""
+        try:
+            total_assets, total_net_assets, expenses, cash_value = self._get_current_totals(fund)
 
-        total_assets, total_net_assets, expenses, cash_value = self._get_current_totals(fund)
+            snapshot = fund.data.current
 
-        calculations = {
-            "cash_value": cash_value,
-            "equity_market_value": fund.data.current.total_equity_value,
-            "option_delta_adjusted_notional": fund.data.current.total_option_delta_adjusted_notional,
-            "option_market_value": fund.data.current.total_option_value,
-            "treasury": fund.data.current.total_treasury_value,
-            "total_assets": total_assets,
-            "total_net_assets": total_net_assets,
-            "expenses": expenses,
-        }
+            calculations = {
+                "cash_value": cash_value,
+                "equity_market_value": snapshot.total_equity_value,
+                "option_market_value": snapshot.total_option_value,  # Regular options only
+                "flex_option_market_value": snapshot.total_flex_option_value,  # Flex options
+                "total_option_market_value": snapshot.total_all_options_value,  # All options combined
+                "option_delta_adjusted_notional": snapshot.total_option_delta_adjusted_notional,  # Already includes flex
+                "treasury_market_value": snapshot.total_treasury_value,
+                "total_assets": total_assets,
+                "total_net_assets": total_net_assets,
+                "expenses": expenses,
+            }
 
-        return ComplianceResult(
-            is_compliant=True,
-            details={"rule": "summary_metrics", "status": "calculated"},
-            calculations=calculations,
-        )
+            return ComplianceResult(
+                is_compliant=True,
+                details={"rule": "summary_metrics", "status": "calculated"},
+                calculations=calculations,
+            )
+
+        except Exception as exc:
+            logger.error("Error calculating summary metrics for %s: %s", fund.name, exc)
+            return ComplianceResult(
+                is_compliant=False,
+                details={"rule": "summary_metrics", "status": "error"},
+                calculations={},
+                error=str(exc),
+            )
 
     def prospectus_80pct_policy(self, fund: Fund) -> ComplianceResult:
         try:
@@ -1767,16 +1780,15 @@ class ComplianceChecker:
 
         return merged, overlap_details.reindex(columns=overlap_columns).reset_index(drop=True)
 
-
     def _get_current_totals(self, fund: Fund) -> tuple[float, float, float, float]:
-        """Return custodian total assets, total net assets, expenses, and cash."""
-        snapshot = getattr(fund.data, "current", None)
-        custodian = getattr(snapshot, "custodian", None) if snapshot else None
+        """Return snapshot total assets, total net assets, expenses, and cash."""
+        snapshot = fund.data.current
 
-        total_assets = float(getattr(custodian, "ta", 0.0) or 0.0) if custodian else 0.0
-        total_net_assets = float(getattr(custodian, "tna", 0.0) or 0.0) if custodian else 0.0
-        expenses = float(getattr(custodian, "expenses", 0.0) or 0.0) if custodian else 0.0
-        cash_value = float(getattr(custodian, "cash", 0.0) or 0.0) if custodian else 0.0
+        # These are properties on FundSnapshot, not on custodian
+        total_assets = snapshot.ta
+        total_net_assets = snapshot.tna
+        expenses = snapshot.expenses
+        cash_value = snapshot.cash
 
         return total_assets, total_net_assets, expenses, cash_value
 
