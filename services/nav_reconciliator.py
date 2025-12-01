@@ -95,7 +95,6 @@ class NAVReconciliator:
 
         if is_assignment_day:
             assignment_gl = self._process_assignments()
-            # On assignment days, options are "rolled" - just use current value
             option_gl = self._calculate_rolled_option_gl()
         else:
             option_gl = self._calculate_option_gl()
@@ -289,13 +288,11 @@ class NAVReconciliator:
         vest_prior = self.fund.data.previous.vest.options
 
         # Roll days should source T-1 prices from execution data
-        use_roll_trade_prices = self._is_prior_day_option_roll()
+        use_roll_trade_prices = self.fund.is_option_settlement_date(self.analysis_date)
         trades_t1 = getattr(self.fund.data.previous, 'option_trades', pd.DataFrame())
 
-        # Get price breaks
         price_breaks = self.fund.get_price_breaks('option')
 
-        # Calculate ticker-level details
         ticker_details = []
         for ticker in sorted(all_tickers):
             detail = self._calculate_option_ticker_gl(
@@ -352,7 +349,7 @@ class NAVReconciliator:
         vest_current = self.fund.data.current.vest.options
         vest_prior = self.fund.data.previous.vest.options
 
-        use_roll_trade_prices = self._is_prior_day_option_roll()
+        use_roll_trade_prices = self.fund.is_option_settlement_date(self.analysis_date)
         trades_t1 = getattr(self.fund.data.previous, 'flex_option_trades', pd.DataFrame())
 
         # Get price breaks
@@ -459,17 +456,6 @@ class NAVReconciliator:
             )
         return None
 
-    def _is_prior_day_option_roll(self) -> bool:
-        """Check if the prior calendar day was an option roll/settlement date."""
-        try:
-            analysis_ts = pd.Timestamp(self.analysis_date)
-        except Exception:
-            return False
-
-        prior_day = analysis_ts - pd.Timedelta(days=1)
-        return self.fund.is_option_settlement_date(prior_day)
-
-
     @staticmethod
     def _get_trade_execution_price(
             trades: Optional[pd.DataFrame], ticker: str
@@ -545,15 +531,18 @@ class NAVReconciliator:
     # OTHER COMPONENT CALCULATIONS
     # ========================================================================
 
-    def _process_assignments(self) -> float:
+    def _process_assignments_old(self) -> float:
         """
         Process option assignments on settlement days.
 
         Extracts assignment G/L from fund.data.assignments.
         """
-        assignments = self.fund.get_assignments(
-            filter_date=self.analysis_date
-        )
+        # assignments = self.fund.get_assignments(
+        #     filter_date=self.analysis_date
+        # )
+
+        # we will comment out get_assignments for now and instead we will evaluate with t-1 option holdings
+
 
         if not assignments.empty:
             # Try to find P&L columns
@@ -586,7 +575,7 @@ class NAVReconciliator:
         # If explicit assignment records aren't present, derive from holdings
         return self._calculate_assignment_gl_from_holdings()
 
-    def _calculate_assignment_gl_from_holdings(self) -> float:
+    def _process_assignments(self) -> float:
         """Calculate assignment P&L using T-1 holdings and custodian prices."""
         try:
             expiration_dt = pd.Timestamp(self.analysis_date).date()
@@ -602,7 +591,7 @@ class NAVReconciliator:
         # Merge T-1 custodian options with internal data for strike/equity_price info
         if isinstance(t1_options, pd.DataFrame) and not t1_options.empty:
             merged_options = t1_cust_options.merge(
-                t1_options[[col for col in ['optticker', 'strike', 'equity_price', 'maturity']
+                t1_options[[col for col in ['optticker', 'strike', 'equity_underlying_price', 'maturity']
                             if col in t1_options.columns]],
                 on='optticker',
                 how='left',
@@ -676,6 +665,7 @@ class NAVReconciliator:
 
         net_expiration_activity = assigned_pnl + expired_pnl
         return float(net_expiration_activity)
+
 
     def _calculate_dividends(self) -> float:
         """Calculate dividend income from equity holdings."""

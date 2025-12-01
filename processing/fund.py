@@ -818,9 +818,6 @@ class Fund:
             return source.treasury
         return pd.DataFrame()
 
-    # ========================================================================
-    # PRICE BREAK ACCESS
-    # ========================================================================
 
     def get_price_breaks(self, asset_class: str) -> pd.DataFrame:
         """
@@ -853,11 +850,6 @@ class Fund:
 
         return pd.DataFrame()
 
-
-
-    # ========================================================================
-    # ASSIGNMENT DATA ACCESS
-    # ========================================================================
 
     def get_assignments(
             self,
@@ -910,35 +902,45 @@ class Fund:
             return assignments.copy()
 
 
-
-    # ========================================================================
-    # SETTLEMENT DATE CHECKING
-    # ========================================================================
-
-    def is_option_settlement_date(self, check_date: date | str) -> bool:
+    def is_option_settlement_date(self, check_date: str) -> bool:
         """
-        Determine if a given date is an option settlement date.
+        Determine if a date (with offset) matches the last option settlement date.
 
         Args:
             check_date: Date to check (date object or string)
+            offset_days: Days to offset from check_date (negative for prior days)
+                         If 0, checks if check_date itself is a settlement date
+                         If -1, checks if yesterday was the last settlement date
 
         Returns:
-            True if the date is a settlement date based on:
-            - Fund's option_roll_tenor configuration (weekly/monthly/quarterly)
-            - Third Friday rules for monthly/quarterly
-            - Assignment data if available
+            True if (check_date + offset_days) equals the most recent settlement date
 
         Example:
-            if fund.is_option_settlement_date('2024-01-19'):
-                # Process assignment G/L
-                pass
+            # Check if today is a settlement date
+            fund.is_option_settlement_date('2024-01-19')
+
+            # Check if yesterday was the last settlement (for using trade prices)
+            fund.is_option_settlement_date('2024-01-22', offset_days=-1)  # True if last roll was Jan 19
         """
-        if check_date is None:
+        check_ts = pd.Timestamp(check_date).normalize()
+        target_date = pd.bdate_range(end=check_ts, periods=2)[0]
+        last_settlement = self._find_last_settlement_date(check_ts)
+
+        if last_settlement is None:
             return False
 
-        # Convert to pandas Timestamp for easier date math
-        timestamp = pd.Timestamp(check_date)
+        return target_date.normalize() == last_settlement.normalize()
 
+    def _find_last_settlement_date(self, from_date: pd.Timestamp) -> pd.Timestamp:
+        """
+        Find the most recent option settlement date on or before from_date.
+
+        Args:
+            from_date: Date to search backwards from
+
+        Returns:
+            The most recent settlement date, or None if not found
+        """
         # Get tenor from properties or config
         tenor = ""
         if hasattr(self.data, 'option_roll_tenor'):
@@ -946,74 +948,63 @@ class Fund:
         elif hasattr(self.data, 'config') and isinstance(self.data.config, dict):
             tenor = str(self.data.config.get('option_roll_tenor', '')).lower()
 
-        # Check based on tenor
+        from_date = from_date.normalize()
+
+        # Weekly: find last Friday
         if tenor == 'weekly':
-            # Every Friday
-            return timestamp.weekday() == 4
+            days_since_friday = (from_date.weekday() - 4) % 7
+            last_friday = from_date - pd.Timedelta(days=days_since_friday)
+            return last_friday
 
+        # Monthly: find last 3rd Friday
         elif tenor == 'monthly':
-            # Third Friday of the month OR last business day
-            month_start = timestamp.replace(day=1)
-            month_end = timestamp + pd.tseries.offsets.MonthEnd(0)
+            # Check current month first
+            month_start = from_date.replace(day=1)
+            third_fridays = pd.date_range(month_start, from_date, freq='WOM-3FRI')
 
-            # Check for third Friday
-            third_fridays = pd.date_range(
-                month_start,
-                month_end,
-                freq='WOM-3FRI',
-            )
-            if not third_fridays.empty and timestamp.normalize() == third_fridays[0].normalize():
-                return True
+            if len(third_fridays) > 0 and third_fridays[-1] <= from_date:
+                return third_fridays[-1]
 
-            # Check for last business day
-            last_bday = month_end - pd.tseries.offsets.BDay(0)
-            return timestamp.normalize() == last_bday.normalize()
+            # Look in previous month
+            prev_month = month_start - pd.Timedelta(days=1)
+            prev_month_start = prev_month.replace(day=1)
+            prev_month_end = month_start - pd.Timedelta(days=1)
+            third_fridays = pd.date_range(prev_month_start, prev_month_end, freq='WOM-3FRI')
 
+            if len(third_fridays) > 0:
+                return third_fridays[-1]
+
+        # Quarterly: find last 3rd Friday in Mar/Jun/Sep/Dec
         elif tenor == 'quarterly':
-            # Only in March, June, September, December
-            if timestamp.month not in (3, 6, 9, 12):
-                return False
+            # Start from current date and work backwards
+            search_date = from_date
 
-            # Third Friday of the quarter-end month
-            month_start = timestamp.replace(day=1)
-            month_end = timestamp + pd.tseries.offsets.MonthEnd(0)
+            for _ in range(12):  # Look back up to 12 months
+                if search_date.month in (3, 6, 9, 12):
+                    month_start = search_date.replace(day=1)
+                    month_end = (month_start + pd.offsets.MonthEnd(0)).normalize()
 
-            third_fridays = pd.date_range(
-                month_start,
-                month_end,
-                freq='WOM-3FRI',
-            )
-            return any(timestamp.normalize() == tf.normalize() for tf in third_fridays)
+                    third_fridays = pd.date_range(month_start, month_end, freq='WOM-3FRI')
 
-        # Default: check if it's a third Friday
-        month_start = timestamp.replace(day=1)
-        month_end = timestamp + pd.tseries.offsets.MonthEnd(0)
-        third_fridays = pd.date_range(month_start, month_end, freq='WOM-3FRI')
-        if any(timestamp.normalize() == tf.normalize() for tf in third_fridays):
-            return True
+                    if len(third_fridays) > 0 and third_fridays[0] <= from_date:
+                        return third_fridays[0]
 
-        # Check assignments data if available
-        if hasattr(self.data, 'assignments'):
-            assignments = self.data.assignments
-            if isinstance(assignments, pd.DataFrame) and not assignments.empty:
-                date_cols = [
-                    col for col in assignments.columns
-                    if 'date' in str(col).lower()
-                ]
-                if date_cols:
-                    try:
-                        dates = pd.to_datetime(
-                            assignments[date_cols[0]], errors='coerce'
-                        ).dt.normalize()
-                        return timestamp.normalize() in dates.values
-                    except Exception:
-                        pass
+                # Move to previous month
+                search_date = (search_date.replace(day=1) - pd.Timedelta(days=1))
 
-        return False
+        # Default: try to find last 3rd Friday
+        for months_back in range(3):
+            check_month = from_date - pd.offsets.MonthBegin(months_back)
+            month_start = check_month.replace(day=1)
+            month_end = (month_start + pd.offsets.MonthEnd(0)).normalize()
 
-    # ========================================================================
-    # NAV DATA ACCESS
-    # ========================================================================
+            third_fridays = pd.date_range(month_start, month_end, freq='WOM-3FRI')
+
+            if len(third_fridays) > 0 and third_fridays[0] <= from_date:
+                return third_fridays[0]
+
+        return None
+
 
     def get_nav_metric(
             self,
@@ -1058,9 +1049,6 @@ class Fund:
 
         return 0.0
 
-    # ========================================================================
-    # DIVIDEND DATA ACCESS
-    # ========================================================================
 
     def get_equity_dividends(self) -> float:
         """
