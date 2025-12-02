@@ -16,6 +16,7 @@ from config.database import initialize_database
 from config.fund_registry import FundRegistry
 from config.run_configurations import (
     calculate_date_offsets,
+    generate_business_date_range,
     get_config,
     list_available_configs,
     merge_overrides,
@@ -473,7 +474,8 @@ def _execute_range_date_config(
 if __name__ == "__main__":
 
     # Base date: All date offsets (T, T-1, T-2) are calculated from this
-    BASE_DATE = "2025-11-17"
+    BASE_DATE = "2025-11-03"
+    BASE_DATE_RANGE: Optional[tuple[str, str]] = None
 
     # ------------------------------------------------------------------------
     # Example 1: Run predefined configurations
@@ -490,35 +492,33 @@ if __name__ == "__main__":
         #     "output_tag": "cef",  # Custom tag for file names
         # },
         "eod_compliance_etfs": {
-            "funds": build_fund_list(ETF_FUNDS),
+            "funds": build_fund_list("TDVI"),
             "output_tag": "etfs",  # Custom tag for file names
             "compliance_tests": [
                         "summary_metrics",
-                        # "gics_compliance",
-                        # "prospectus_80pct_policy",
-                        # "diversification_40act_check",
-                        # "diversification_IRS_check",
-                        # "diversification_IRC_check",
-                        # "max_15pct_illiquid_sai",
-                        # "real_estate_check",
-                        # "commodities_check",
-                        # "twelve_d1a_other_inv_cos",
-                        # "twelve_d2_insurance_cos",
-                        # "twelve_d3_sec_biz"
+                        "gics_compliance",
+                        "prospectus_80pct_policy",
+                        "diversification_40act_check",
+                        "diversification_IRS_check",
+                        "diversification_IRC_check",
+                        "max_15pct_illiquid_sai",
+                        "real_estate_check",
+                        "commodities_check",
+                        "twelve_d1a_other_inv_cos",
+                        "twelve_d2_insurance_cos",
+                        "twelve_d3_sec_biz"
                     ],
         },
         # "eod_recon_custom": {
-        #     "funds": build_fund_list(
-        #         exclude_funds(CLOSED_END_FUNDS, PRIVATE_FUNDS),
-        #         "P3727"
-        #     ),
-        #     "output_tag": "p3727",  # Custom tag for file names
+        # "funds": build_fund_list(ETF_FUNDS),
+        #     "output_tag": "etfs",  # Custom tag for file names
         # },
     }
 
     exit_code = run_configuration_batch(
         config_names=ACTIVE_RUNS,
         base_date=BASE_DATE,
+        base_date_range=BASE_DATE_RANGE,
         overrides=RUN_OVERRIDES,
     )
     raise SystemExit(exit_code)

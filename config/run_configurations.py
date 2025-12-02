@@ -259,6 +259,36 @@ def calculate_date_offsets(base_date: date) -> Dict[str, date]:
         "t2": t2,
     }
 
+def generate_business_date_range(start_date: date, end_date: date) -> List[date]:
+    """
+    Generate a list of business days (Mon-Fri) between two dates, inclusive.
+
+    Args:
+        start_date: Range start (will be adjusted to business day if weekend)
+        end_date: Range end (will be adjusted to business day if weekend)
+
+    Returns:
+        A list of business-day ``date`` objects between the start and end dates.
+
+    Raises:
+        ValueError: If ``start_date`` occurs after ``end_date``
+    """
+
+    start_date = ensure_business_day(start_date)
+    end_date = ensure_business_day(end_date)
+
+    if start_date > end_date:
+        raise ValueError("start_date must be on or before end_date")
+
+    business_days: List[date] = []
+    current = start_date
+
+    while current <= end_date:
+        if current.weekday() < 5:  # Monday-Friday
+            business_days.append(current)
+        current += timedelta(days=1)
+
+    return business_days
 
 # ============================================================================
 # RUN CONFIGURATION TEMPLATES

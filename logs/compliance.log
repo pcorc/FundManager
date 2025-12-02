@@ -870,3 +870,17 @@
 2025-12-01 14:46:12,599 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-17.pdf
 2025-12-01 14:56:52,465 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-17.pdf
 2025-12-01 15:09:51,239 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-17.pdf
+2025-12-01 15:18:17,235 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-17.pdf
+2025-12-01 15:20:33,165 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-03.pdf
+2025-12-01 16:35:54,252 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-03.pdf
+2025-12-01 16:44:18,971 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-03.pdf
+2025-12-01 16:55:36,447 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-03.pdf
+2025-12-01 17:39:37,862 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-03.pdf
+2025-12-01 17:42:07,826 - compliance_report - ERROR - PDF generation failed: not enough values to unpack (expected 5, got 4)
+2025-12-01 17:44:24,218 - compliance_report - ERROR - PDF generation failed: not enough values to unpack (expected 5, got 4)
+2025-12-01 17:45:25,039 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-03.pdf
+2025-12-01 21:23:42,673 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-03.pdf
+2025-12-02 02:48:48,100 - compliance_report - ERROR - PDF generation failed: 'ComplianceReportPDF' object has no attribute '_get_vehicle_wrapper'
+2025-12-02 05:44:45,062 - compliance_report - ERROR - PDF generation failed: 'ComplianceReportPDF' object has no attribute '_get_vehicle_wrapper'
+2025-12-02 06:10:05,751 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-03.pdf
+2025-12-02 06:28:51,020 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-03.pdf

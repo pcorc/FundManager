@@ -637,7 +637,7 @@ class ComplianceReport:
                             remaining_label,
                             remaining_str,
                         ),
-                        ("Max Ownership % of Float in 75% bucket", f"{max_ownership_float:.5f}"),
+                        ("Max Ownership % of Float in 75% bucket", f"{max_ownership_float:.5%}"),
                         ("OCC Market Value", occ_market_value),
                         ("OCC Weight", float(calculations.get("occ_weight", 0.0) or 0.0)),
                         ("Notes", notes),
@@ -1108,9 +1108,27 @@ class ComplianceReportPDF(BaseReportPDF):
     ) -> None:
         super().__init__(output_path, orientation="L")
         self.results = flatten_compliance_results(results)
-        self.allowed_tests = {test for test in allowed_tests or [] if test}
+        self.allowed_tests = (
+            {test for test in allowed_tests if test}
+            if allowed_tests is not None
+            else None
+        )
         self.generate_pdf()
         self.save_pdf()
+
+    @staticmethod
+    def _get_vehicle_wrapper(fund_name: str) -> str:
+        """Get the vehicle wrapper type for a fund."""
+        return (
+            str(FUND_DEFINITIONS.get(fund_name, {}).get("vehicle_wrapper", "") or "")
+            .lower()
+        )
+
+    def _is_vit_fund(self, fund_name: str) -> bool:
+        return self._get_vehicle_wrapper(fund_name) == "vit"
+
+    def _is_etf_fund(self, fund_name: str) -> bool:
+        return self._get_vehicle_wrapper(fund_name) == "etf"
 
     def save_pdf(self) -> None:
         """Save the PDF to the specified output path."""
@@ -1492,25 +1510,83 @@ class ComplianceReportPDF(BaseReportPDF):
         ]
 
         sections = [
-            ("Summary Metrics", summary_metrics, None, None),
-            ("Prospectus 80% Policy", prospectus_metrics, "prospectus_80pct", None),
+            ("Summary Metrics", summary_metrics, None, None, ("summary_metrics",)),
+            (
+                "Prospectus 80% Policy",
+                prospectus_metrics,
+                "prospectus_80pct",
+                None,
+                ("prospectus_80pct_policy",),
+            ),
             (
                 "40 Act Diversification",
                 forty_act_metrics,
                 "40act",
                 {"Registration Match", "Condition 2a OCC"},
+                ("diversification_40act_check",),
             ),
-            ("IRS Diversification", irs_metrics, "irs", None),
-            ("IRC Diversification", irc_metrics, "irc", None),
-            ("15% Illiquid Assets", illiquid_metrics, "illiquid", None),
-            ("Real Estate", real_estate_metrics, "real_estate", None),
-            ("Commodities", commodities_metrics, "commodities", None),
-            ("Rule 12d1-1", rule_12d1_metrics, "12d1", None),
-            ("Rule 12d2", rule_12d2_metrics, "12d2", None),
-            ("Rule 12d3", rule_12d3_metrics, "12d3", None),
+            (
+                "IRS Diversification",
+                irs_metrics,
+                "irs",
+                None,
+                ("diversification_IRS_check",),
+            ),
+            (
+                "IRC Diversification",
+                irc_metrics,
+                "irc",
+                None,
+                ("diversification_IRC_check",),
+            ),
+            (
+                "15% Illiquid Assets",
+                illiquid_metrics,
+                "illiquid",
+                None,
+                ("max_15pct_illiquid_sai",),
+            ),
+            (
+                "Real Estate",
+                real_estate_metrics,
+                "real_estate",
+                None,
+                ("real_estate_check",),
+            ),
+            (
+                "Commodities",
+                commodities_metrics,
+                "commodities",
+                None,
+                ("commodities_check",),
+            ),
+            (
+                "Rule 12d1-1",
+                rule_12d1_metrics,
+                "12d1",
+                None,
+                ("twelve_d1a_other_inv_cos",),
+            ),
+            (
+                "Rule 12d2",
+                rule_12d2_metrics,
+                "12d2",
+                None,
+                ("twelve_d2_insurance_cos",),
+            ),
+            (
+                "Rule 12d3",
+                rule_12d3_metrics,
+                "12d3",
+                None,
+                ("twelve_d3_sec_biz",),
+            ),
         ]
 
-        for idx, (title, metrics, footnote, skip_labels) in enumerate(sections):
+        for idx, (title, metrics, footnote, skip_labels, keys) in enumerate(sections):
+            if not any(self._is_test_selected(key) for key in keys):
+                continue
+
             self._render_metric_section(
                 title,
                 metrics,
@@ -1527,6 +1603,7 @@ class ComplianceReportPDF(BaseReportPDF):
                 if has_gics_data:
                     # Space before GICS block
                     self.pdf.ln(4)
+                    self._print_test_header("GICS Diversification")
                     self._render_gics_compliance_overview()
                     # Space after GICS block
                     self.pdf.ln(8)
@@ -1738,6 +1815,14 @@ class ComplianceReportPDF(BaseReportPDF):
         return summary_result.get(key, 0.0)
 
     def _is_test_selected(self, test_name: str) -> bool:
+        if test_name == "diversification_IRC_check":
+            has_vit_wrapper = any(
+                self._get_vehicle_wrapper(fund_name) == "vit"
+                for funds in self.results.values()
+                for fund_name in funds.keys()
+            )
+            if not has_vit_wrapper:
+                return False
         if not self.allowed_tests:
             return True
         return test_name in self.allowed_tests
@@ -1814,7 +1899,7 @@ class ComplianceReportPDF(BaseReportPDF):
             upper = value.strip().upper()
             if upper in {"PASS", "FAIL"}:
                 return upper
-        return ""
+        return "PASS"
 
     @staticmethod
     def _yes_no(value: object) -> str:
@@ -2205,7 +2290,7 @@ class ComplianceReportPDF(BaseReportPDF):
         rows = [
             ("Total Assets", f"{calculations.get('total_assets', 0):,.0f}"),
             ("Investment Companies", holdings_str),
-            ("Max Ownership %", f"{calculations.get('ownership_pct_max', 0):.7%}"),
+            ("Max Ownership %", f"{calculations.get('ownership_pct_max', 0):.7f}"),
             ("Equity Market Value Sum", f"{calculations.get('equity_market_value_sum', 0):,.0f}"),
             ("Test 1 (<=3% Ownership)", "PASS" if data.get("test_1_pass") else "FAIL"),
             ("Test 2 (<=5% Total Assets)", "PASS" if data.get("test_2_pass") else "FAIL"),
@@ -2544,7 +2629,7 @@ def generate_compliance_reports(
         gics_mapping=gics_mapping,
     )
 
-    pdf_path = None
+    pdf_file_path = None
     if create_pdf:
         try:
             pdf_file_path = str(Path(output_dir) / f"{file_name_prefix}_{report.report_date}.pdf")
