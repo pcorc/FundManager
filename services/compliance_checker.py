@@ -1242,13 +1242,13 @@ class ComplianceChecker:
             if "is_illiquid" not in vest_opt_holdings.columns:
                 vest_opt_holdings["is_illiquid"] = False
 
-            # Calculate illiquid values
+            illiquid_eqy_value = 0
             illiquid_mask = vest_eqy_holdings["is_illiquid"] == True
             illiquid_eqy_value = float(
                 vest_eqy_holdings.loc[illiquid_mask, "equity_market_value"].sum()
             )
 
-            # For options, check if they're illiquid
+            illiquid_opt_value = 0
             if not vest_opt_holdings.empty:
                 illiquid_opt_mask = vest_opt_holdings["is_illiquid"] == True
                 illiquid_opt_value = float(

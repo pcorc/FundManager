@@ -1923,7 +1923,7 @@ class ComplianceReportPDF(BaseReportPDF):
             return ""
         if pd.isna(number):
             return ""
-        return f"{number:.2%}"
+        return f"{number:.5%}"
 
     def _format_integer(self, value: object) -> str:
         try:
@@ -2290,7 +2290,7 @@ class ComplianceReportPDF(BaseReportPDF):
         rows = [
             ("Total Assets", f"{calculations.get('total_assets', 0):,.0f}"),
             ("Investment Companies", holdings_str),
-            ("Max Ownership %", f"{calculations.get('ownership_pct_max', 0):.7f}"),
+            ("Max Ownership %", f"{calculations.get('ownership_pct_max', 0):.7%}"),
             ("Equity Market Value Sum", f"{calculations.get('equity_market_value_sum', 0):,.0f}"),
             ("Test 1 (<=3% Ownership)", "PASS" if data.get("test_1_pass") else "FAIL"),
             ("Test 2 (<=5% Total Assets)", "PASS" if data.get("test_2_pass") else "FAIL"),
@@ -2463,7 +2463,7 @@ class ComplianceReportPDF(BaseReportPDF):
             # Bottom summary rows
             rows_bottom = [
                 ("Total Assets", f"{calculations.get('total_assets', 0):,.0f}"),
-                ("Max Ownership %", f"{calculations.get('max_ownership_pct', 0):.2%}"),
+                ("Max Ownership %", f"{calculations.get('max_ownership_pct', 0):.6%}"),
                 ("Max Weight", f"{calculations.get('max_weight', 0):.2%}"),
             ]
             self._draw_two_column_table(rows_bottom)

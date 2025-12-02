@@ -884,3 +884,14 @@
 2025-12-02 05:44:45,062 - compliance_report - ERROR - PDF generation failed: 'ComplianceReportPDF' object has no attribute '_get_vehicle_wrapper'
 2025-12-02 06:10:05,751 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-03.pdf
 2025-12-02 06:28:51,020 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-03.pdf
+2025-12-02 06:35:09,592 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-03.pdf
+2025-12-02 06:35:21,905 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-04.pdf
+2025-12-02 06:38:33,208 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-03.pdf
+2025-12-02 06:39:49,118 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-04.pdf
+2025-12-02 06:55:04,871 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-03.pdf
+2025-12-02 06:55:17,218 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-04.pdf
+2025-12-02 06:56:18,894 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-03.pdf
+2025-12-02 07:00:10,452 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-03.pdf
+2025-12-02 07:00:21,536 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-04.pdf
+2025-12-02 07:01:41,292 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-03.pdf
+2025-12-02 07:01:53,583 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-04.pdf

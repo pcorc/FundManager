@@ -277,6 +277,7 @@ def run_time_series(
 def run_configuration_batch(
         config_names: List[str],
         base_date: str | date,
+        base_date_range: Optional[tuple[str | date, str | date]] = None,
         overrides: Optional[Dict[str, Dict[str, object]]] = None,
 ) -> int:
     """
@@ -285,6 +286,8 @@ def run_configuration_batch(
     Args:
         config_names: List of configuration names to execute
         base_date: Base date for all runs (T date, used to calculate T-1, T-2)
+        base_date_range: Optional tuple of (start_date, end_date) to iterate over
+            business days instead of a single base_date
         overrides: Optional per-config overrides dict {config_name: {param: value}}
 
     Returns:
@@ -305,18 +308,22 @@ def run_configuration_batch(
     )
     logger = logging.getLogger("fund_manager.batch")
 
-    # Validate and convert base_date
-    if isinstance(base_date, str):
-        base_date = helper_coerce_date(base_date, "base_date")
-
-    # Calculate date offsets
-    date_offsets = calculate_date_offsets(base_date)
-    logger.info(
-        "Base date configuration: T=%s, T-1=%s, T-2=%s",
-        date_offsets["t"],
-        date_offsets["t1"],
-        date_offsets["t2"],
-    )
+    if base_date_range:
+        start_date, end_date = base_date_range
+        start_date = helper_coerce_date(start_date, "base_date_range.start")
+        end_date = helper_coerce_date(end_date, "base_date_range.end")
+        business_dates = generate_business_date_range(start_date, end_date)
+        logger.info(
+            "Expanding base_date_range %s -> %s into %d business dates: %s",
+            start_date,
+            end_date,
+            len(business_dates),
+            ", ".join(str(d) for d in business_dates),
+        )
+    else:
+        if isinstance(base_date, str):
+            base_date = helper_coerce_date(base_date, "base_date")
+        business_dates = [base_date]
 
     # Validate all configs exist before starting
     logger.info("Validating %d configurations...", len(config_names))
@@ -327,51 +334,87 @@ def run_configuration_batch(
             logger.error("Configuration validation failed: %s", e)
             return 1
 
-    # Execute each configuration
+    # Execute each configuration for each base date
     results = []
-    logger.info("Starting batch execution of %d configurations", len(config_names))
+    logger.info(
+        "Starting batch execution of %d configurations across %d base date(s)",
+        len(config_names),
+        len(business_dates),
+    )
 
-    for idx, config_name in enumerate(config_names, 1):
-        logger.info("=" * 80)
-        logger.info("Executing configuration %d/%d: %s", idx, len(config_names), config_name)
-        logger.info("=" * 80)
+    for base_date_value in business_dates:
+        # Calculate date offsets
+        date_offsets = calculate_date_offsets(base_date_value)
+        logger.info(
+            "Base date configuration: T=%s, T-1=%s, T-2=%s",
+            date_offsets["t"],
+            date_offsets["t1"],
+            date_offsets["t2"],
+        )
 
-        try:
-            # Load base config
-            config = get_config(config_name)
+        for idx, config_name in enumerate(config_names, 1):
+            logger.info("=" * 80)
+            logger.info(
+                "Executing configuration %d/%d for base date %s: %s",
+                idx,
+                len(config_names),
+                date_offsets["t"],
+                config_name,
+            )
+            logger.info("=" * 80)
 
-            # Apply any user overrides for this specific config
-            if overrides and config_name in overrides:
-                config = merge_overrides(config, overrides[config_name])
+            try:
+                # Load base config
+                config = get_config(config_name)
 
-            # Execute based on date_mode
-            date_mode = config.get("date_mode", "single")
+                # Apply any user overrides for this specific config
+                if overrides and config_name in overrides:
+                    config = merge_overrides(config, overrides[config_name])
 
-            if date_mode == "single":
-                exit_code = _execute_single_date_config(config, date_offsets, logger)
-            elif date_mode == "range":
-                exit_code = _execute_range_date_config(config, date_offsets, logger)
-            else:
-                raise ValueError(f"Unknown date_mode: {date_mode}")
+                # Execute based on date_mode
+                date_mode = config.get("date_mode", "single")
 
-            results.append({
-                "config": config_name,
-                "status": "success" if exit_code == 0 else "failed",
-                "exit_code": exit_code,
-            })
+                if date_mode == "single":
+                    exit_code = _execute_single_date_config(config, date_offsets, logger)
+                elif date_mode == "range":
+                    exit_code = _execute_range_date_config(config, date_offsets, logger)
+                else:
+                    raise ValueError(f"Unknown date_mode: {date_mode}")
 
-            if exit_code != 0:
-                logger.error("Configuration '%s' failed with exit code %d", config_name, exit_code)
-            else:
-                logger.info("Configuration '%s' completed successfully", config_name)
+                results.append({
+                    "base_date": date_offsets["t"],
+                    "config": config_name,
+                    "status": "success" if exit_code == 0 else "failed",
+                    "exit_code": exit_code,
+                })
 
-        except Exception as exc:
-            logger.exception("Configuration '%s' raised exception: %s", config_name, exc)
-            results.append({
-                "config": config_name,
-                "status": "error",
-                "error": str(exc),
-            })
+                if exit_code != 0:
+                    logger.error(
+                        "Configuration '%s' failed with exit code %d for base date %s",
+                        config_name,
+                        exit_code,
+                        date_offsets["t"],
+                    )
+                else:
+                    logger.info(
+                        "Configuration '%s' completed successfully for base date %s",
+                        config_name,
+                        date_offsets["t"],
+                    )
+
+            except Exception as exc:
+                logger.exception(
+                    "Configuration '%s' raised exception for base date %s: %s",
+                    config_name,
+                    date_offsets["t"],
+                    exc,
+                )
+                results.append({
+                    "base_date": date_offsets["t"],
+                    "config": config_name,
+                    "status": "error",
+                    "error": str(exc),
+                })
 
     # Report summary
     logger.info("=" * 80)
@@ -381,7 +424,7 @@ def run_configuration_batch(
     successes = [r for r in results if r["status"] == "success"]
     failures = [r for r in results if r["status"] in ("failed", "error")]
 
-    logger.info("Total configurations: %d", len(results))
+    logger.info("Total configuration runs: %d", len(results))
     logger.info("Successful: %d", len(successes))
     logger.info("Failed: %d", len(failures))
 
@@ -389,12 +432,16 @@ def run_configuration_batch(
         logger.error("Failed configurations:")
         for result in failures:
             error_detail = result.get("error", f"exit code {result.get('exit_code', 'unknown')}")
-            logger.error("  - %s: %s", result["config"], error_detail)
+            logger.error(
+                "  - %s (base date %s): %s",
+                result["config"],
+                result.get("base_date", "unknown"),
+                error_detail,
+            )
         return 1
 
     logger.info("All configurations completed successfully!")
     return 0
-
 
 def _execute_single_date_config(
         config: Dict[str, object],
@@ -476,6 +523,7 @@ if __name__ == "__main__":
     # Base date: All date offsets (T, T-1, T-2) are calculated from this
     BASE_DATE = "2025-11-03"
     BASE_DATE_RANGE: Optional[tuple[str, str]] = None
+    BASE_DATE_RANGE = ("2025-11-03", "2025-11-04")
 
     # ------------------------------------------------------------------------
     # Example 1: Run predefined configurations
@@ -492,8 +540,8 @@ if __name__ == "__main__":
         #     "output_tag": "cef",  # Custom tag for file names
         # },
         "eod_compliance_etfs": {
-            "funds": build_fund_list("TDVI"),
-            "output_tag": "etfs",  # Custom tag for file names
+            "funds": build_fund_list("R21126"),
+            "output_tag": "cefs",
             "compliance_tests": [
                         "summary_metrics",
                         "gics_compliance",
