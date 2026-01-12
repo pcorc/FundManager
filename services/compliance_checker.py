@@ -530,7 +530,6 @@ class ComplianceChecker:
                 holdings_df = vest_eqy_holdings.copy()
                 holdings_df["option_market_value"] = 0.0
                 holdings_df["net_market_value"] = holdings_df["equity_market_value"]
-            # we want another condition that
             else:
                 holdings_df = pd.merge(
                     vest_eqy_holdings,
@@ -550,32 +549,44 @@ class ComplianceChecker:
                 else False
             )
 
+            # Calculate thresholds
+            five_pct_threshold = ACT_40_ISSUER_LIMIT * total_assets  # 5% threshold
+            max_excluded_bucket = 0.25 * total_assets  # 25% bucket cap
+
+            # Identify issuers with 5%+ exposure
             sorted_df = holdings_df.sort_values(by="net_market_value", ascending=False)
-            cumulative_sum = sorted_df["net_market_value"].cumsum()
-            threshold = 0.25 * total_assets if total_assets > 0 else 0.0
-            within_25_percent = sorted_df[cumulative_sum <= threshold].copy()
+            five_pct_plus_issuers = sorted_df[sorted_df["net_market_value"] > five_pct_threshold].copy()
 
-            if within_25_percent.empty and not sorted_df.empty:
-                within_25_percent = sorted_df.head(1).copy()
+            # Allocate 5%+ issuers to the 25% bucket until we hit the cap
+            excluded_securities = []
+            excluded_bucket_total = 0.0
+            violating_issuers = []
 
-            excluded_securities = (
-                within_25_percent["eqyticker"].tolist()
-                if "eqyticker" in within_25_percent.columns
-                else []
-            )
+            for idx, row in five_pct_plus_issuers.iterrows():
+                issuer_value = row["net_market_value"]
 
-            remaining_securities = (
-                sorted_df[~sorted_df["eqyticker"].isin(excluded_securities)].copy()
-                if excluded_securities
-                else sorted_df.copy()
-            )
+                # Check if adding this issuer would exceed the 25% cap
+                if excluded_bucket_total + issuer_value <= max_excluded_bucket:
+                    # Fits in the 25% bucket
+                    excluded_securities.append(row["eqyticker"])
+                    excluded_bucket_total += issuer_value
+                else:
+                    # Doesn't fit - this is a violation
+                    violating_issuers.append({
+                        "ticker": row["eqyticker"],
+                        "value": issuer_value,
+                        "pct_of_assets": (issuer_value / total_assets * 100) if total_assets > 0 else 0.0
+                    })
+
+            # Remaining securities (< 5% and violating 5%+ issuers) go to 75% bucket
+            remaining_securities = sorted_df[~sorted_df["eqyticker"].isin(excluded_securities)].copy()
 
             five_pct_threshold = ACT_40_ISSUER_LIMIT * total_assets
             issuer_limited = remaining_securities[
                 remaining_securities["net_market_value"] > five_pct_threshold
             ].copy()
-            issuer_limited_sum = float(issuer_limited["net_market_value"].sum()) if not issuer_limited.empty else 0.0
-            condition_2a_met = issuer_limited_sum == 0.0
+            issuer_limited_sum = sum(issuer["value"] for issuer in violating_issuers)
+            condition_2a_met = len(violating_issuers) == 0
 
             occ_weight_mkt_val = abs(float(vest_opt_holdings["option_market_value"].sum()))
             condition_2a_occ_met = (
@@ -618,8 +629,8 @@ class ComplianceChecker:
             condition_2b_met = bool(issuer_compliance_2b.all())
 
             cumulative_weight_excluded = (
-                within_25_percent["net_market_value"].sum() / total_net_assets
-                if (not within_25_percent.empty and total_net_assets)
+                excluded_bucket_total / total_net_assets
+                if (excluded_bucket_total and total_net_assets)
                 else 0.0
             )
             cumulative_weight_remaining = 1 - cumulative_weight_excluded

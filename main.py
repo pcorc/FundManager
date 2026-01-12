@@ -543,18 +543,18 @@ if __name__ == "__main__":
             "funds": build_fund_list(CLOSED_END_FUNDS), #
             "output_tag": "cefs",
             "compliance_tests": [
-                        "summary_metrics",
-                        "gics_compliance",
-                        "prospectus_80pct_policy",
+                        # "summary_metrics",
+                        # "gics_compliance",
+                        # "prospectus_80pct_policy",
                         "diversification_40act_check",
-                        "diversification_IRS_check",
-                        "diversification_IRC_check",
-                        "max_15pct_illiquid_sai",
-                        "real_estate_check",
-                        "commodities_check",
-                        "twelve_d1a_other_inv_cos",
-                        "twelve_d2_insurance_cos",
-                        "twelve_d3_sec_biz"
+                        # "diversification_IRS_check",
+                        # "diversification_IRC_check",
+                        # "max_15pct_illiquid_sai",
+                        # "real_estate_check",
+                        # "commodities_check",
+                        # "twelve_d1a_other_inv_cos",
+                        # "twelve_d2_insurance_cos",
+                        # "twelve_d3_sec_biz"
                     ],
         },
         # "eod_recon_custom": {

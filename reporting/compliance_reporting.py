@@ -603,7 +603,7 @@ class ComplianceReport:
                         ),
                         (
                             "Condition 40 Act 2b",
-                            f'=IF(T{excel_row}="","",IF(T{excel_row}<=0.1,"PASS","FAIL"))',
+                            f'=IF(VALUE(T{excel_row})="","",IF(VALUE(T{excel_row})<=0.1,"PASS","FAIL"))',
                         ),
                         (
                             "Condition 2a OCC",
