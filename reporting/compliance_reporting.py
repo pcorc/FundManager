@@ -703,7 +703,7 @@ class ComplianceReport:
                         ("condition_IRS_1", "PASS" if irs.get("condition_IRS_1") else "FAIL"),
                         (
                             "condition_IRS_2_a_50",
-                            f'=IF(I{excel_row}/H{excel_row}>=0.5,"PASS","FAIL")',
+                            f'=IF((I{excel_row}+S{excel_row})/H{excel_row}>=0.5,"PASS","FAIL")',
                         ),
                         (
                             "condition_IRS_2_a_5",
@@ -740,6 +740,7 @@ class ComplianceReport:
                             "bottom_50_second_largest_holding",
                             f"{second.get('eqyticker', 'N/A')} ({float(second.get('tna_wgt', 0) or 0):.2%})",
                         ),
+                        ("total_tbill_value", float(calculations.get("total_tbill_value", 0.0) or 0.0)),
                     ]
                 )
 
@@ -2246,6 +2247,7 @@ class ComplianceReportPDF(BaseReportPDF):
                 "Large Securities",
                 large_securities_str,
             ),
+            ("Total Treasury", f"{calculations.get('total_tbill_value', 0):,.0f}"),
         ]
 
         self._draw_two_column_table(rows)

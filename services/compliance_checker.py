@@ -177,7 +177,6 @@ class ComplianceChecker:
 
             total_assets, total_net_assets, _, total_cash_value = self._get_current_totals(fund)
             total_equity_market_value = float(fund.data.current.total_equity_value)
-            total_equity_market_value = float(fund.data.current.total_equity_value)
             total_opt_market_value = float(fund.data.current.total_option_value)
             total_tbill_value = float(fund.data.current.total_treasury_value)
             total_opt_delta_notional_value = float(
@@ -309,7 +308,8 @@ class ComplianceChecker:
         try:
             vest_eqy_holdings = fund.data.current.vest.equity
             vest_opt_holdings = fund.data.current.vest.options
-
+            vest_flex_holdings = fund.data.current.vest.flex_options
+            total_tbill_value = float(fund.data.current.total_treasury_value)
             total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
             overlap_df = fund.data.current.overlap
 
@@ -331,6 +331,8 @@ class ComplianceChecker:
             else:
                 holdings_df = vest_eqy_holdings
 
+
+
             overlap_details_df = pd.DataFrame(
                 columns=["security_ticker", "security_weight", "overlap_market_value", "overlap_weight"]
             )
@@ -348,6 +350,22 @@ class ComplianceChecker:
                 )
             else:
                 holdings_df["net_market_value"] = holdings_df["equity_market_value"] + holdings_df["option_market_value"]
+
+            has_single_stock_flex = fund.has_flex_option and (
+                (fund.flex_option_type or "").lower() == "single_stock"
+            )
+
+            if has_single_stock_flex:
+                df_flex_calls = vest_flex_holdings[vest_flex_holdings["option_notional_value"] > 0]
+                holdings_df = pd.merge(
+                    holdings_df,
+                    df_flex_calls[["equity_underlying_ticker", "option_notional_value"]],
+                    left_on="eqyticker",
+                    right_on="equity_underlying_ticker",
+                    how="outer",
+                    suffixes=("", "_flex"),
+                )
+                holdings_df["net_market_value"] = holdings_df["net_market_value"] + holdings_df["option_notional_value_flex"]
 
             if total_assets:
                 holdings_df["weight"] = holdings_df["net_market_value"] / total_assets
@@ -368,35 +386,35 @@ class ComplianceChecker:
             top_50_df = holdings_df[~bottom_50_mask].copy()
 
             qualifying_assets_value = float(holdings_df["net_market_value"].sum())
-
             overlap_weight_sum = float(overlap_details_df.get("overlap_weight", pd.Series()).sum())
 
-            if fund.name in {"DOGG"}:
-                tmp_df = vest_eqy_holdings.copy()
-                tmp_df["net_market_value"] = tmp_df["equity_market_value"]
-                if total_net_assets:
-                    tmp_df["tna_wgt"] = tmp_df["equity_market_value"] / total_net_assets
-                else:
-                    tmp_df["tna_wgt"] = 0.0
+            # if fund.name in {"DOGG"}:
+            #     tmp_df = vest_eqy_holdings.copy()
+            #     tmp_df["net_market_value"] = tmp_df["equity_market_value"]
+            #     if total_net_assets:
+            #         # need to join on vest_flex_holdings and holidngs_df and left_join equity_underlying_ticker and right_join on eqyticker
+            #         tmp_df["tna_wgt"] = tmp_df["equity_market_value"] / total_net_assets
+            #     else:
+            #         tmp_df["tna_wgt"] = 0.0
+            #     condition_IRS_2_a_50 = (
+            #         (total_net_assets - expenses) / total_net_assets >= IRS_QUALIFYING_ASSETS_MIN
+            #         if total_net_assets
+            #         else False
+            #     )
+            # else:
+            if qualifying_assets_value > total_assets and total_net_assets:
                 condition_IRS_2_a_50 = (
                     (total_net_assets - expenses) / total_net_assets >= IRS_QUALIFYING_ASSETS_MIN
+                )
+            else:
+                condition_IRS_2_a_50 = (
+                    qualifying_assets_value >= IRS_QUALIFYING_ASSETS_MIN * total_net_assets
                     if total_net_assets
                     else False
                 )
-            else:
-                if qualifying_assets_value > total_assets and total_net_assets:
-                    condition_IRS_2_a_50 = (
-                        (total_net_assets - expenses) / total_net_assets >= IRS_QUALIFYING_ASSETS_MIN
-                    )
-                else:
-                    condition_IRS_2_a_50 = (
-                        qualifying_assets_value >= IRS_QUALIFYING_ASSETS_MIN * total_net_assets
-                        if total_net_assets
-                        else False
-                    )
 
             five_pct_gross_assets = total_assets * 0.05
-            large_securities = holdings_df[holdings_df["net_market_value"] >= five_pct_gross_assets]
+            large_securities = holdings_df[holdings_df["equity_market_value"] >= five_pct_gross_assets]
             sum_large_securities_weights = float(large_securities["tna_wgt"].sum())
             condition_IRS_2_a_5_new = sum_large_securities_weights <= 0.5
 
@@ -430,6 +448,7 @@ class ComplianceChecker:
             calculations = {
                 "total_assets": total_assets,
                 "total_net_assets": total_net_assets,
+                "total_tbill_value": total_tbill_value,
                 "qualifying_assets_value": qualifying_assets_value,
                 "five_pct_gross_assets": five_pct_gross_assets,
                 "sum_large_securities_weights": sum_large_securities_weights,
