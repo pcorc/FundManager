@@ -895,3 +895,817 @@
 2025-12-02 07:00:21,536 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-04.pdf
 2025-12-02 07:01:41,292 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-03.pdf
 2025-12-02 07:01:53,583 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-04.pdf
+2025-12-02 07:10:59,348 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-01.pdf
+2025-12-02 07:12:25,885 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-01.pdf
+2025-12-02 07:15:51,438 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-03.pdf
+2025-12-02 07:16:33,174 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-04.pdf
+2025-12-02 07:17:16,396 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-05.pdf
+2025-12-02 07:17:58,933 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-06.pdf
+2025-12-02 07:18:44,037 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-07.pdf
+2025-12-02 07:19:27,459 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-10.pdf
+2025-12-02 07:20:12,409 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-11.pdf
+2025-12-02 07:20:59,912 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-12.pdf
+2025-12-02 07:21:49,028 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-13.pdf
+2025-12-02 07:22:35,247 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-14.pdf
+2025-12-02 07:23:20,724 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-17.pdf
+2025-12-02 07:24:09,488 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-18.pdf
+2025-12-02 07:24:58,587 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-19.pdf
+2025-12-02 07:25:47,928 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-20.pdf
+2025-12-02 07:26:36,596 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-21.pdf
+2025-12-02 07:27:33,677 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-24.pdf
+2025-12-02 07:28:14,119 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-25.pdf
+2025-12-02 07:28:54,102 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-26.pdf
+2025-12-02 07:29:32,796 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-27.pdf
+2025-12-02 07:30:13,147 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-11-28.pdf
+2025-12-02 07:32:20,752 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-06.pdf
+2025-12-02 07:33:25,470 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-07.pdf
+2025-12-02 07:34:29,278 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-08.pdf
+2025-12-02 07:35:32,537 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-09.pdf
+2025-12-02 07:36:38,308 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-10.pdf
+2025-12-02 07:37:42,969 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-13.pdf
+2025-12-02 07:38:52,709 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-14.pdf
+2025-12-02 07:39:57,667 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-15.pdf
+2025-12-02 07:41:00,754 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-16.pdf
+2025-12-02 07:42:03,742 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-17.pdf
+2025-12-02 07:43:06,311 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-20.pdf
+2025-12-02 07:44:09,081 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-21.pdf
+2025-12-02 07:45:11,050 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-22.pdf
+2025-12-02 07:46:13,363 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-23.pdf
+2025-12-02 07:47:18,935 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-24.pdf
+2025-12-02 07:48:20,915 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-27.pdf
+2025-12-02 07:49:23,978 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-28.pdf
+2025-12-02 07:50:26,947 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-29.pdf
+2025-12-02 07:51:27,086 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-30.pdf
+2025-12-02 07:52:26,036 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-31.pdf
+2025-12-02 07:53:28,045 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-03.pdf
+2025-12-02 07:54:30,966 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-04.pdf
+2025-12-02 07:55:30,686 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-05.pdf
+2025-12-02 07:56:29,870 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-06.pdf
+2025-12-02 07:57:25,746 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-07.pdf
+2025-12-02 07:58:23,169 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-10.pdf
+2025-12-02 07:59:20,306 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-11.pdf
+2025-12-02 08:00:20,705 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-12.pdf
+2025-12-02 08:01:20,223 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-13.pdf
+2025-12-02 08:02:19,351 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-14.pdf
+2025-12-02 08:03:16,812 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-17.pdf
+2025-12-02 08:04:16,408 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-18.pdf
+2025-12-02 08:05:13,380 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-19.pdf
+2025-12-02 08:06:10,497 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-20.pdf
+2025-12-02 08:07:09,739 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-21.pdf
+2025-12-02 08:08:16,206 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-24.pdf
+2025-12-02 08:09:21,194 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-25.pdf
+2025-12-02 08:10:21,507 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-26.pdf
+2025-12-02 08:11:21,553 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-27.pdf
+2025-12-02 08:12:19,629 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-11-28.pdf
+2025-12-02 08:14:18,617 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-06.pdf
+2025-12-02 08:14:52,670 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-07.pdf
+2025-12-02 08:15:27,219 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-08.pdf
+2025-12-02 08:17:58,830 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-09.pdf
+2025-12-02 08:18:36,046 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-10.pdf
+2025-12-02 08:19:12,920 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-13.pdf
+2025-12-02 08:19:51,311 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-14.pdf
+2025-12-02 08:20:30,485 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-15.pdf
+2025-12-02 08:21:11,027 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-16.pdf
+2025-12-02 08:21:49,301 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-17.pdf
+2025-12-02 08:22:29,656 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-20.pdf
+2025-12-02 08:23:07,345 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-21.pdf
+2025-12-02 08:23:43,697 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-22.pdf
+2025-12-02 08:24:20,590 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-23.pdf
+2025-12-02 08:24:56,144 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-24.pdf
+2025-12-02 08:25:33,437 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-27.pdf
+2025-12-02 08:26:10,504 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-28.pdf
+2025-12-02 08:26:47,478 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-29.pdf
+2025-12-02 08:27:25,302 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-30.pdf
+2025-12-02 08:28:02,158 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-31.pdf
+2025-12-02 08:38:43,841 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-22.pdf
+2025-12-02 08:39:20,890 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-23.pdf
+2025-12-02 08:39:58,482 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-24.pdf
+2025-12-02 08:40:35,760 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-25.pdf
+2025-12-02 08:41:12,813 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-26.pdf
+2025-12-02 08:41:50,189 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-29.pdf
+2025-12-02 08:42:27,509 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-30.pdf
+2025-12-02 08:43:03,967 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-01.pdf
+2025-12-02 08:43:40,673 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-02.pdf
+2025-12-02 08:44:17,014 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-03.pdf
+2025-12-02 08:44:53,411 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-06.pdf
+2025-12-02 08:45:30,788 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-07.pdf
+2025-12-02 08:46:08,077 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-10-08.pdf
+2025-12-02 09:04:46,608 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-09-22.pdf
+2025-12-02 09:05:48,462 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-09-23.pdf
+2025-12-02 09:06:50,850 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-09-24.pdf
+2025-12-02 09:07:55,193 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-09-25.pdf
+2025-12-02 09:09:04,301 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-09-26.pdf
+2025-12-02 09:10:22,856 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-09-29.pdf
+2025-12-02 09:11:29,037 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-09-30.pdf
+2025-12-02 09:12:36,532 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-01.pdf
+2025-12-02 09:13:56,639 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-02.pdf
+2025-12-02 09:15:05,482 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-03.pdf
+2025-12-02 09:16:07,663 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-06.pdf
+2025-12-02 09:17:09,517 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-07.pdf
+2025-12-02 09:18:18,009 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-10-08.pdf
+2025-12-02 09:23:42,463 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-01.pdf
+2025-12-02 09:24:20,397 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-02.pdf
+2025-12-02 09:24:57,797 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-03.pdf
+2025-12-02 09:25:36,465 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-04.pdf
+2025-12-02 09:26:13,307 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-05.pdf
+2025-12-02 09:26:51,310 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-08.pdf
+2025-12-02 09:27:27,765 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-09.pdf
+2025-12-02 09:28:05,487 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-10.pdf
+2025-12-02 09:28:42,301 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-11.pdf
+2025-12-02 09:29:19,940 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-12.pdf
+2025-12-02 09:29:56,925 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-15.pdf
+2025-12-02 09:30:33,637 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-16.pdf
+2025-12-02 09:31:20,499 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-17.pdf
+2025-12-02 09:32:04,434 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-18.pdf
+2025-12-02 09:32:43,440 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-09-19.pdf
+2025-12-02 12:52:45,457 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-08-12.pdf
+2025-12-02 12:53:24,096 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-08-13.pdf
+2025-12-02 12:54:02,583 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-08-14.pdf
+2025-12-02 12:54:40,622 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-08-15.pdf
+2025-12-02 12:55:18,951 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-08-18.pdf
+2025-12-02 12:55:57,418 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-08-19.pdf
+2025-12-02 12:56:37,325 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-08-20.pdf
+2025-12-02 12:57:18,320 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-08-21.pdf
+2025-12-02 12:57:57,291 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-08-22.pdf
+2025-12-02 12:58:35,768 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-08-25.pdf
+2025-12-02 12:59:15,202 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-08-26.pdf
+2025-12-02 12:59:54,164 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-08-27.pdf
+2025-12-02 13:00:34,890 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-08-28.pdf
+2025-12-02 13:01:13,826 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-08-29.pdf
+2025-12-02 14:45:59,204 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-12.pdf
+2025-12-02 14:49:18,558 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-12.pdf
+2025-12-02 14:50:19,164 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-13.pdf
+2025-12-02 14:51:19,408 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-14.pdf
+2025-12-02 14:52:21,675 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-15.pdf
+2025-12-02 14:53:25,397 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-18.pdf
+2025-12-02 14:54:26,765 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-19.pdf
+2025-12-02 14:55:32,939 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-20.pdf
+2025-12-02 14:56:36,474 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-21.pdf
+2025-12-02 14:57:35,453 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-22.pdf
+2025-12-02 14:58:37,643 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-25.pdf
+2025-12-02 14:59:44,970 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-26.pdf
+2025-12-02 15:00:45,292 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-27.pdf
+2025-12-02 15:01:47,910 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-28.pdf
+2025-12-02 15:02:48,679 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-08-29.pdf
+2025-12-04 12:19:21,754 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-03.pdf
+2025-12-04 12:20:32,101 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-04.pdf
+2025-12-04 12:24:35,431 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-03.pdf
+2025-12-04 12:25:24,006 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-04.pdf
+2025-12-08 16:46:41,262 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-05.pdf
+2025-12-10 05:32:13,855 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-05.pdf
+2025-12-10 05:33:59,183 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-08.pdf
+2025-12-10 05:35:02,520 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-09.pdf
+2025-12-10 05:36:08,992 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-08.pdf
+2025-12-10 05:36:51,684 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-09.pdf
+2025-12-11 12:50:36,191 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-10.pdf
+2025-12-11 13:07:02,394 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-10.pdf
+2025-12-13 17:18:23,432 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-11.pdf
+2025-12-13 17:19:47,576 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-12.pdf
+2025-12-13 17:21:06,437 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-11.pdf
+2025-12-13 17:21:55,814 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-12.pdf
+2025-12-18 10:39:21,498 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-15.pdf
+2025-12-18 10:39:45,866 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-16.pdf
+2025-12-18 10:40:10,127 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-17.pdf
+2025-12-18 10:41:16,773 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-15.pdf
+2025-12-18 10:41:55,752 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-16.pdf
+2025-12-18 10:42:34,052 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-17.pdf
+2025-12-23 07:23:33,666 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-19.pdf
+2025-12-23 07:23:56,960 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-22.pdf
+2025-12-23 08:08:50,592 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-19.pdf
+2025-12-23 08:09:15,274 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-22.pdf
+2025-12-26 08:18:29,599 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-23.pdf
+2025-12-26 08:18:52,313 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-24.pdf
+2025-12-26 08:29:30,901 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-23.pdf
+2025-12-26 08:30:14,405 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-24.pdf
+2025-12-30 09:09:06,408 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-26.pdf
+2025-12-30 09:09:41,111 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-29.pdf
+2025-12-30 09:10:33,837 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-26.pdf
+2025-12-30 09:10:56,876 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-29.pdf
+2026-01-07 09:27:10,987 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-30.pdf
+2026-01-07 09:27:30,704 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2025-12-31.pdf
+2026-01-07 09:27:51,021 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-01.pdf
+2026-01-07 09:28:11,806 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-02.pdf
+2026-01-07 09:28:33,104 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-05.pdf
+2026-01-07 09:28:52,457 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-06.pdf
+2026-01-07 09:29:41,264 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-30.pdf
+2026-01-07 09:30:10,289 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2025-12-31.pdf
+2026-01-07 09:30:35,302 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-01.pdf
+2026-01-07 09:31:03,196 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-02.pdf
+2026-01-07 09:31:31,096 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-05.pdf
+2026-01-07 09:32:00,136 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-06.pdf
+2026-01-10 08:55:27,779 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-06.pdf
+2026-01-10 08:55:55,698 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-07.pdf
+2026-01-10 08:56:23,231 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-08.pdf
+2026-01-10 08:56:49,858 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-09.pdf
+2026-01-10 08:58:18,827 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-06.pdf
+2026-01-10 08:58:37,854 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-07.pdf
+2026-01-10 08:58:56,903 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-08.pdf
+2026-01-10 08:59:16,078 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-09.pdf
+2026-01-12 10:54:07,751 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_dogg_2026-01-06.pdf
+2026-01-12 10:54:13,113 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_dogg_2026-01-07.pdf
+2026-01-12 10:54:18,657 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_dogg_2026-01-08.pdf
+2026-01-12 10:54:24,833 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_dogg_2026-01-09.pdf
+2026-01-12 10:55:43,680 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_dogg_2026-01-06.pdf
+2026-01-12 10:55:53,520 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_dogg_2026-01-07.pdf
+2026-01-12 10:56:08,421 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_dogg_2026-01-08.pdf
+2026-01-12 10:57:09,150 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_dogg_2026-01-06.pdf
+2026-01-12 10:57:14,447 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_dogg_2026-01-07.pdf
+2026-01-12 11:23:27,296 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-09.pdf
+2026-01-12 11:38:47,129 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-09.pdf
+2026-01-12 11:42:20,525 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-09.pdf
+2026-01-12 12:47:09,337 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-09.pdf
+2026-01-12 12:55:16,427 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-09.pdf
+2026-01-12 14:42:38,211 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-09.pdf
+2026-01-14 13:07:34,278 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-12.pdf
+2026-01-14 13:07:47,177 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-13.pdf
+2026-01-14 13:13:59,475 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-12.pdf
+2026-01-14 13:14:16,011 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-13.pdf
+2026-01-15 16:53:42,268 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-14.pdf
+2026-01-15 17:08:45,329 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-14.pdf
+2026-01-16 15:27:52,404 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-15.pdf
+2026-01-16 15:28:48,350 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-15.pdf
+2026-01-22 13:38:17,056 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-16.pdf
+2026-01-22 13:38:41,887 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-19.pdf
+2026-01-22 13:39:09,345 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-20.pdf
+2026-01-22 13:39:46,064 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_cefs_2026-01-21.pdf
+2026-01-22 13:55:16,449 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-16.pdf
+2026-01-22 13:55:34,848 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-19.pdf
+2026-01-22 13:55:53,095 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-20.pdf
+2026-01-22 13:56:12,341 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-21.pdf
+2026-01-27 09:02:15,695 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-21.pdf
+2026-01-27 09:02:36,127 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-22.pdf
+2026-01-27 09:02:58,263 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-23.pdf
+2026-01-27 09:03:30,137 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_etfs_2026-01-26.pdf
+2026-01-27 09:06:14,836 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_efs_2026-01-21.pdf
+2026-01-27 09:06:46,246 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_efs_2026-01-22.pdf
+2026-01-27 09:07:16,740 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_efs_2026-01-23.pdf
+2026-01-27 09:07:48,523 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_efs_2026-01-26.pdf
+2026-01-28 23:15:31,464 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_efs_2026-01-26.pdf
+2026-01-28 23:16:00,547 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_efs_2026-01-27.pdf
+2026-01-28 23:16:28,779 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_efs_2026-01-28.pdf
+2026-01-28 23:17:55,893 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_efs_2026-01-26.pdf
+2026-01-28 23:18:15,405 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_efs_2026-01-27.pdf
+2026-01-28 23:18:35,411 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_efs_2026-01-28.pdf
+2026-01-28 23:19:23,336 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-01-26.pdf
+2026-01-28 23:19:52,135 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-01-27.pdf
+2026-01-28 23:20:17,806 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-01-28.pdf
+2026-01-30 07:13:05,821 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-01-29.pdf
+2026-01-30 07:13:54,967 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-01-29.pdf
+2026-01-30 11:19:55,646 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-01-29.pdf
+2026-02-04 13:52:53,572 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-01-30.pdf
+2026-02-04 13:53:12,963 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-02.pdf
+2026-02-04 13:53:33,172 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-03.pdf
+2026-02-04 14:10:01,191 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-01-30.pdf
+2026-02-04 14:10:19,805 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-02.pdf
+2026-02-04 14:10:38,695 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-03.pdf
+2026-02-09 18:26:28,744 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-04.pdf
+2026-02-09 18:26:49,697 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-05.pdf
+2026-02-09 18:27:11,057 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-06.pdf
+2026-02-09 21:56:22,913 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-04.pdf
+2026-02-09 21:56:50,019 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-05.pdf
+2026-02-09 21:57:18,271 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-06.pdf
+2026-02-09 21:57:44,558 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-09.pdf
+2026-02-11 09:57:55,069 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-04.pdf
+2026-02-11 09:58:22,198 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-05.pdf
+2026-02-11 09:58:49,378 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-06.pdf
+2026-02-11 09:59:21,426 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-09.pdf
+2026-02-11 09:59:48,052 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-10.pdf
+2026-02-11 10:00:37,150 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-10.pdf
+2026-02-17 09:40:08,977 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-11.pdf
+2026-02-17 09:40:29,455 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-12.pdf
+2026-02-17 09:40:51,751 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-13.pdf
+2026-02-17 09:45:16,900 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-11.pdf
+2026-02-17 09:45:43,279 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-12.pdf
+2026-02-17 09:46:10,864 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-13.pdf
+2026-02-19 22:57:08,908 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-17.pdf
+2026-02-19 22:57:35,149 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-18.pdf
+2026-02-19 22:58:01,680 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-19.pdf
+2026-02-19 23:25:46,338 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-17.pdf
+2026-02-19 23:26:11,775 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-18.pdf
+2026-02-19 23:26:38,299 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-19.pdf
+2026-02-19 23:32:21,519 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-18.pdf
+2026-02-19 23:34:02,333 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-18.pdf
+2026-02-19 23:37:25,469 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-18.pdf
+2026-02-19 23:39:49,683 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-18.pdf
+2026-02-19 23:41:26,102 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-18.pdf
+2026-02-19 23:42:31,583 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-18.pdf
+2026-02-19 23:43:20,125 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-18.pdf
+2026-02-19 23:44:21,256 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-17.pdf
+2026-02-19 23:44:53,416 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-18.pdf
+2026-02-24 14:40:27,896 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-20.pdf
+2026-02-24 14:41:05,161 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-23.pdf
+2026-02-24 14:42:00,471 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-20.pdf
+2026-02-24 14:42:24,335 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-23.pdf
+2026-03-03 04:37:21,726 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-25.pdf
+2026-03-03 04:37:50,545 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-26.pdf
+2026-03-03 04:38:18,073 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-02-27.pdf
+2026-03-03 04:38:44,714 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-02.pdf
+2026-03-03 04:41:02,972 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-25.pdf
+2026-03-03 04:41:38,308 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-26.pdf
+2026-03-03 04:42:13,905 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-02-27.pdf
+2026-03-03 04:42:46,135 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-02.pdf
+2026-03-13 09:21:16,275 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-02.pdf
+2026-03-13 09:21:43,486 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-03.pdf
+2026-03-13 09:22:11,335 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-04.pdf
+2026-03-13 09:22:38,673 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-05.pdf
+2026-03-13 09:23:06,242 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-06.pdf
+2026-03-13 09:23:33,705 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-09.pdf
+2026-03-13 09:24:00,589 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-10.pdf
+2026-03-13 09:24:27,696 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-11.pdf
+2026-03-13 09:24:54,896 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-12.pdf
+2026-03-13 09:26:51,385 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-02.pdf
+2026-03-13 09:27:10,834 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-03.pdf
+2026-03-13 09:27:30,218 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-04.pdf
+2026-03-13 09:27:49,571 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-05.pdf
+2026-03-13 09:28:08,317 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-06.pdf
+2026-03-13 09:28:27,845 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-09.pdf
+2026-03-13 09:28:47,269 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-10.pdf
+2026-03-13 09:29:07,152 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-11.pdf
+2026-03-13 09:29:26,126 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-12.pdf
+2026-03-20 11:12:38,270 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-12.pdf
+2026-03-20 11:13:06,431 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-13.pdf
+2026-03-20 11:13:32,482 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-16.pdf
+2026-03-20 11:13:55,158 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-17.pdf
+2026-03-20 11:14:15,605 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-18.pdf
+2026-03-20 11:14:39,180 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-19.pdf
+2026-03-23 11:46:38,069 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-12.pdf
+2026-03-23 11:47:10,575 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-13.pdf
+2026-03-23 11:47:42,904 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-16.pdf
+2026-03-23 11:48:13,202 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-17.pdf
+2026-03-23 11:48:46,067 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-18.pdf
+2026-03-23 11:49:16,916 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-19.pdf
+2026-03-23 11:49:47,036 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-20.pdf
+2026-04-01 04:53:55,482 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-20.pdf
+2026-04-01 04:54:23,827 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-23.pdf
+2026-04-01 04:54:50,856 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-24.pdf
+2026-04-01 04:55:17,822 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-25.pdf
+2026-04-01 04:55:45,313 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-26.pdf
+2026-04-01 04:56:50,151 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-27.pdf
+2026-04-01 05:00:23,760 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-30.pdf
+2026-04-01 05:00:51,400 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-31.pdf
+2026-04-01 05:02:40,401 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-20.pdf
+2026-04-01 05:03:00,800 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-23.pdf
+2026-04-01 05:03:21,495 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-24.pdf
+2026-04-01 05:03:42,114 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-25.pdf
+2026-04-01 05:04:03,257 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-26.pdf
+2026-04-01 05:04:24,174 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-27.pdf
+2026-04-01 05:04:45,054 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-30.pdf
+2026-04-01 05:05:06,557 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-31.pdf
+2026-04-07 11:00:37,349 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-03-31.pdf
+2026-04-07 11:01:02,494 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-01.pdf
+2026-04-07 11:01:26,015 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-02.pdf
+2026-04-07 11:01:47,721 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-03.pdf
+2026-04-07 11:02:11,779 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-06.pdf
+2026-04-07 11:06:31,592 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-03-31.pdf
+2026-04-07 11:07:06,619 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-01.pdf
+2026-04-07 11:07:41,157 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-02.pdf
+2026-04-07 11:08:11,218 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-03.pdf
+2026-04-07 11:08:43,819 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-06.pdf
+2026-04-09 09:07:20,697 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-06.pdf
+2026-04-09 09:07:52,305 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-07.pdf
+2026-04-09 09:08:23,998 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-08.pdf
+2026-04-09 09:19:41,357 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-06.pdf
+2026-04-09 09:20:06,293 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-07.pdf
+2026-04-09 09:20:34,642 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-08.pdf
+2026-04-10 08:07:13,104 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-08.pdf
+2026-04-10 08:07:33,065 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-09.pdf
+2026-04-10 08:08:17,473 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-08.pdf
+2026-04-10 08:08:43,875 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-09.pdf
+2026-04-10 08:41:58,504 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-10 08:42:05,331 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-10 09:45:36,527 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-10 09:46:30,644 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-10 09:53:55,826 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-10 18:33:44,195 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-10 18:33:50,945 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-10 20:15:11,497 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-10 20:15:18,277 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-11 16:53:52,107 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-11 16:54:00,019 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-11 16:59:16,980 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-11 16:59:23,748 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-11 17:36:08,379 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-11 18:24:15,822 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-11 18:24:43,430 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-11 18:36:14,218 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-11 18:36:22,649 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-11 18:51:38,223 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-11 18:51:46,321 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-11 19:00:05,725 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-11 19:00:13,619 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 10:33:19,478 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-12 10:33:26,469 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 15:01:47,559 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-12 15:01:55,682 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 15:02:57,706 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-12 15:03:04,405 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 15:33:33,425 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-12 15:33:39,914 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 16:06:12,807 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-12 16:06:19,369 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 16:08:39,790 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-12 16:08:46,354 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 16:11:21,087 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-12 16:11:27,591 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 16:14:47,549 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-12 16:14:53,996 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 16:30:38,912 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-12 16:30:50,865 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 16:50:31,685 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-12 16:50:38,136 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 17:12:13,209 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-12 17:12:19,798 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 17:16:13,889 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-12 17:16:20,440 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 17:26:21,316 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-12 17:26:27,844 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 17:34:52,140 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-12 17:34:59,271 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-12 18:05:08,218 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-12 18:05:14,641 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-12 18:22:32,586 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-12 18:22:38,910 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-12 18:28:32,469 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-12 18:28:41,446 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-12 18:36:45,782 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-12 18:36:55,122 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-12 18:38:57,137 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-12 18:39:03,510 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-12 18:43:52,010 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-12 18:43:58,237 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-12 18:54:59,961 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-12 18:58:10,771 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-12 18:58:17,663 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-13 13:35:47,133 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-13 13:35:52,927 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-13 17:11:09,747 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-13 17:11:15,941 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-13 17:21:56,788 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-13 17:22:33,931 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-13 17:22:38,914 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-13 18:14:08,148 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-13 18:14:32,419 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-13 19:13:16,687 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-13 19:13:21,923 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-13 19:32:52,455 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-13 19:32:58,180 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-13 20:01:00,700 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-13 20:01:06,763 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-13 20:07:41,905 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-13 20:07:47,035 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-13 20:29:53,314 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-13 20:29:58,343 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-13 21:09:16,608 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-13 21:09:22,000 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-13 22:39:30,826 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-01.pdf
+2026-04-13 22:39:38,026 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-02.pdf
+2026-04-13 22:39:45,190 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-03.pdf
+2026-04-13 22:39:52,556 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-04.pdf
+2026-04-13 22:39:59,704 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-05.pdf
+2026-04-13 22:40:06,799 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-08.pdf
+2026-04-13 22:40:14,516 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-09.pdf
+2026-04-13 22:40:21,924 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-10.pdf
+2026-04-13 22:40:28,924 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-11.pdf
+2026-04-13 22:40:36,071 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-12.pdf
+2026-04-13 22:40:43,170 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-15.pdf
+2026-04-13 22:40:50,349 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-16.pdf
+2026-04-13 22:40:57,496 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-17.pdf
+2026-04-13 22:41:04,590 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-18.pdf
+2026-04-13 22:41:11,798 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-19.pdf
+2026-04-13 22:41:18,974 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-22.pdf
+2026-04-13 22:41:26,064 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-23.pdf
+2026-04-13 22:41:33,091 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-24.pdf
+2026-04-13 22:41:40,144 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-25.pdf
+2026-04-13 22:41:47,032 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-26.pdf
+2026-04-13 22:41:54,399 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-29.pdf
+2026-04-13 22:42:01,500 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-09-30.pdf
+2026-04-13 22:42:08,467 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-01.pdf
+2026-04-13 22:42:15,473 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-02.pdf
+2026-04-13 22:42:22,891 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-03.pdf
+2026-04-13 22:42:29,885 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-06.pdf
+2026-04-13 22:42:36,906 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-07.pdf
+2026-04-13 22:42:43,976 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-08.pdf
+2026-04-13 22:42:51,246 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-09.pdf
+2026-04-13 22:42:58,401 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-10.pdf
+2026-04-13 22:43:05,459 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-13.pdf
+2026-04-13 22:43:12,399 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-14.pdf
+2026-04-13 22:43:19,461 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-15.pdf
+2026-04-13 22:43:26,536 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-16.pdf
+2026-04-13 22:43:33,658 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-17.pdf
+2026-04-13 22:43:40,753 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-20.pdf
+2026-04-13 22:43:47,938 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-21.pdf
+2026-04-13 22:43:55,128 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-22.pdf
+2026-04-13 22:44:02,221 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-23.pdf
+2026-04-13 22:44:09,402 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-24.pdf
+2026-04-13 22:44:16,487 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-27.pdf
+2026-04-13 22:44:23,750 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-28.pdf
+2026-04-13 22:44:30,756 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-29.pdf
+2026-04-13 22:44:37,973 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-30.pdf
+2026-04-13 22:44:44,957 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-10-31.pdf
+2026-04-13 22:44:52,189 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-03.pdf
+2026-04-13 22:44:59,325 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-04.pdf
+2026-04-13 22:45:06,377 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-05.pdf
+2026-04-13 22:45:14,052 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-06.pdf
+2026-04-13 22:45:21,485 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-07.pdf
+2026-04-13 22:45:28,717 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-10.pdf
+2026-04-13 22:45:35,871 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-11.pdf
+2026-04-13 22:45:42,872 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-12.pdf
+2026-04-13 22:45:50,183 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-13.pdf
+2026-04-13 22:45:57,326 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-14.pdf
+2026-04-13 22:46:04,352 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-17.pdf
+2026-04-13 22:46:11,440 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-18.pdf
+2026-04-13 22:46:18,758 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-19.pdf
+2026-04-13 22:46:25,746 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-20.pdf
+2026-04-13 22:46:32,792 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-21.pdf
+2026-04-13 22:46:39,786 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-24.pdf
+2026-04-13 22:46:46,725 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-25.pdf
+2026-04-13 22:46:53,677 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-26.pdf
+2026-04-13 22:46:58,427 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-27.pdf
+2026-04-13 22:47:05,241 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-11-28.pdf
+2026-04-13 22:47:12,265 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-01.pdf
+2026-04-13 22:47:19,315 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-02.pdf
+2026-04-13 22:47:26,155 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-03.pdf
+2026-04-13 22:47:33,114 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-04.pdf
+2026-04-13 22:47:40,014 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-05.pdf
+2026-04-13 22:47:46,888 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-08.pdf
+2026-04-13 22:47:54,110 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-09.pdf
+2026-04-13 22:48:00,969 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-10.pdf
+2026-04-13 22:48:08,002 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-11.pdf
+2026-04-13 22:48:14,876 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-12.pdf
+2026-04-13 22:48:22,035 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-15.pdf
+2026-04-13 22:48:28,758 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-16.pdf
+2026-04-13 22:48:35,606 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-17.pdf
+2026-04-13 22:48:42,436 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-18.pdf
+2026-04-13 22:48:49,235 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-19.pdf
+2026-04-13 22:48:56,131 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-22.pdf
+2026-04-13 22:49:03,087 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-23.pdf
+2026-04-13 22:49:09,961 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-24.pdf
+2026-04-13 22:49:16,628 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-25.pdf
+2026-04-13 22:49:23,610 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-26.pdf
+2026-04-13 22:49:30,452 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-29.pdf
+2026-04-13 22:49:37,316 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-30.pdf
+2026-04-13 22:49:44,166 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2025-12-31.pdf
+2026-04-13 22:49:50,806 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-01.pdf
+2026-04-13 22:49:57,445 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-02.pdf
+2026-04-13 22:50:04,432 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-05.pdf
+2026-04-13 22:50:11,443 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-06.pdf
+2026-04-13 22:50:18,271 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-07.pdf
+2026-04-13 22:50:25,350 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-08.pdf
+2026-04-13 22:50:32,253 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-09.pdf
+2026-04-13 22:50:39,191 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-12.pdf
+2026-04-13 22:50:45,985 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-13.pdf
+2026-04-13 22:50:53,106 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-14.pdf
+2026-04-13 22:50:59,948 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-15.pdf
+2026-04-13 22:51:06,839 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-16.pdf
+2026-04-13 22:51:13,482 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-19.pdf
+2026-04-13 22:51:20,510 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-20.pdf
+2026-04-13 22:51:27,357 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-21.pdf
+2026-04-13 22:51:34,317 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-22.pdf
+2026-04-13 22:51:41,144 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-23.pdf
+2026-04-13 22:51:47,993 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-26.pdf
+2026-04-13 22:51:54,886 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-27.pdf
+2026-04-13 22:52:01,859 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-28.pdf
+2026-04-13 22:52:08,691 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-29.pdf
+2026-04-13 22:52:15,335 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-01-30.pdf
+2026-04-13 22:52:22,421 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-02.pdf
+2026-04-13 22:52:29,279 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-03.pdf
+2026-04-13 22:52:36,220 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-04.pdf
+2026-04-13 22:52:43,171 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-05.pdf
+2026-04-13 22:52:50,136 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-06.pdf
+2026-04-13 22:52:56,997 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-09.pdf
+2026-04-13 22:53:03,881 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-10.pdf
+2026-04-13 22:53:10,681 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-11.pdf
+2026-04-13 22:53:17,455 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-12.pdf
+2026-04-13 22:53:24,445 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-13.pdf
+2026-04-13 22:53:31,108 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-16.pdf
+2026-04-13 22:53:37,952 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-17.pdf
+2026-04-13 22:53:44,556 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-18.pdf
+2026-04-13 22:53:51,530 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-19.pdf
+2026-04-13 22:53:58,468 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-20.pdf
+2026-04-13 22:54:05,271 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-23.pdf
+2026-04-13 22:54:12,025 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-24.pdf
+2026-04-13 22:54:18,883 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-25.pdf
+2026-04-13 22:54:25,655 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-26.pdf
+2026-04-13 22:54:32,536 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-02-27.pdf
+2026-04-13 22:54:39,382 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-02.pdf
+2026-04-13 22:54:46,264 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-03.pdf
+2026-04-13 22:54:53,178 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-04.pdf
+2026-04-13 22:55:00,009 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-05.pdf
+2026-04-13 22:55:06,823 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-06.pdf
+2026-04-13 22:55:13,991 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-09.pdf
+2026-04-13 22:55:20,967 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-10.pdf
+2026-04-13 22:55:27,728 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-11.pdf
+2026-04-13 22:55:34,555 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-12.pdf
+2026-04-13 22:55:41,325 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-13.pdf
+2026-04-13 22:55:48,043 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-16.pdf
+2026-04-13 22:55:54,793 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-17.pdf
+2026-04-13 22:56:01,556 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-18.pdf
+2026-04-13 22:56:08,361 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-19.pdf
+2026-04-13 22:56:15,102 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-20.pdf
+2026-04-13 22:56:22,078 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-23.pdf
+2026-04-13 22:56:28,933 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-24.pdf
+2026-04-13 22:56:35,735 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-25.pdf
+2026-04-13 22:56:42,574 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-26.pdf
+2026-04-13 22:56:49,414 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-27.pdf
+2026-04-13 22:56:56,144 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-30.pdf
+2026-04-13 22:57:02,902 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-03-31.pdf
+2026-04-13 22:57:09,586 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-01.pdf
+2026-04-13 22:57:16,337 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-02.pdf
+2026-04-13 22:57:23,072 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-03.pdf
+2026-04-13 22:57:29,773 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-06.pdf
+2026-04-13 22:57:36,509 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-07.pdf
+2026-04-13 22:57:43,209 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-08.pdf
+2026-04-13 22:57:49,971 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-09.pdf
+2026-04-13 22:57:56,718 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_dogg_2026-04-10.pdf
+2026-04-14 06:32:26,158 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-01.pdf
+2026-04-14 06:32:31,621 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-02.pdf
+2026-04-14 06:32:37,158 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-03.pdf
+2026-04-14 06:32:42,591 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-04.pdf
+2026-04-14 06:32:48,061 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-05.pdf
+2026-04-14 06:32:53,872 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-08.pdf
+2026-04-14 06:32:59,335 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-09.pdf
+2026-04-14 06:33:04,810 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-10.pdf
+2026-04-14 06:33:10,380 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-11.pdf
+2026-04-14 06:33:15,868 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-12.pdf
+2026-04-14 06:33:21,435 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-15.pdf
+2026-04-14 06:33:26,904 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-16.pdf
+2026-04-14 06:33:32,406 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-17.pdf
+2026-04-14 06:33:37,816 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-18.pdf
+2026-04-14 06:33:43,312 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-19.pdf
+2026-04-14 06:33:48,851 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-22.pdf
+2026-04-14 06:33:54,411 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-23.pdf
+2026-04-14 06:33:59,851 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-24.pdf
+2026-04-14 06:34:05,501 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-25.pdf
+2026-04-14 06:34:10,996 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-26.pdf
+2026-04-14 06:34:16,366 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-29.pdf
+2026-04-14 06:34:22,052 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-09-30.pdf
+2026-04-14 06:34:27,384 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-01.pdf
+2026-04-14 06:34:32,825 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-02.pdf
+2026-04-14 06:34:38,315 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-03.pdf
+2026-04-14 06:34:43,623 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-06.pdf
+2026-04-14 06:34:49,037 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-07.pdf
+2026-04-14 06:34:54,512 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-08.pdf
+2026-04-14 06:34:59,912 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-09.pdf
+2026-04-14 06:35:05,315 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-10.pdf
+2026-04-14 06:35:11,212 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-13.pdf
+2026-04-14 06:35:16,666 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-14.pdf
+2026-04-14 06:35:22,346 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-15.pdf
+2026-04-14 06:35:27,720 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-16.pdf
+2026-04-14 06:35:33,207 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-17.pdf
+2026-04-14 06:35:38,697 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-20.pdf
+2026-04-14 06:35:44,257 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-21.pdf
+2026-04-14 06:35:49,954 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-22.pdf
+2026-04-14 06:35:55,466 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-23.pdf
+2026-04-14 06:36:01,043 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-24.pdf
+2026-04-14 06:36:06,616 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-27.pdf
+2026-04-14 06:36:12,163 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-28.pdf
+2026-04-14 06:36:17,572 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-29.pdf
+2026-04-14 06:36:23,107 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-30.pdf
+2026-04-14 06:36:28,538 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-10-31.pdf
+2026-04-14 06:36:34,008 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-03.pdf
+2026-04-14 06:36:39,568 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-04.pdf
+2026-04-14 06:36:45,072 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-05.pdf
+2026-04-14 06:36:50,823 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-06.pdf
+2026-04-14 06:36:56,353 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-07.pdf
+2026-04-14 06:37:01,963 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-10.pdf
+2026-04-14 06:37:07,548 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-11.pdf
+2026-04-14 06:37:13,153 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-12.pdf
+2026-04-14 06:37:18,729 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-13.pdf
+2026-04-14 06:37:24,348 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-14.pdf
+2026-04-14 06:37:29,764 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-17.pdf
+2026-04-14 06:37:35,350 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-18.pdf
+2026-04-14 06:37:40,849 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-19.pdf
+2026-04-14 06:37:46,500 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-20.pdf
+2026-04-14 06:37:52,232 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-21.pdf
+2026-04-14 06:37:57,776 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-24.pdf
+2026-04-14 06:38:03,357 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-25.pdf
+2026-04-14 06:38:08,907 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-26.pdf
+2026-04-14 06:38:14,293 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-27.pdf
+2026-04-14 06:38:19,889 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-11-28.pdf
+2026-04-14 06:38:25,359 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-01.pdf
+2026-04-14 06:38:30,949 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-02.pdf
+2026-04-14 06:38:36,573 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-03.pdf
+2026-04-14 06:38:42,049 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-04.pdf
+2026-04-14 06:38:47,565 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-05.pdf
+2026-04-14 06:38:53,244 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-08.pdf
+2026-04-14 06:38:58,747 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-09.pdf
+2026-04-14 06:39:04,288 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-10.pdf
+2026-04-14 06:39:09,782 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-11.pdf
+2026-04-14 06:39:15,289 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-12.pdf
+2026-04-14 06:39:20,985 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-15.pdf
+2026-04-14 06:39:26,296 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-16.pdf
+2026-04-14 06:39:31,839 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-17.pdf
+2026-04-14 06:39:37,355 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-18.pdf
+2026-04-14 06:39:42,637 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-19.pdf
+2026-04-14 06:39:48,129 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-22.pdf
+2026-04-14 06:39:53,860 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-23.pdf
+2026-04-14 06:39:59,378 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-24.pdf
+2026-04-14 06:40:04,679 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-25.pdf
+2026-04-14 06:40:10,113 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-26.pdf
+2026-04-14 06:40:15,558 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-29.pdf
+2026-04-14 06:40:21,167 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-30.pdf
+2026-04-14 06:40:26,698 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2025-12-31.pdf
+2026-04-14 06:40:31,955 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-01.pdf
+2026-04-14 06:40:37,379 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-02.pdf
+2026-04-14 06:40:43,082 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-05.pdf
+2026-04-14 06:40:48,513 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-06.pdf
+2026-04-14 06:40:54,022 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-07.pdf
+2026-04-14 06:40:59,379 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-08.pdf
+2026-04-14 06:41:04,773 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-09.pdf
+2026-04-14 06:41:10,134 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-12.pdf
+2026-04-14 06:41:15,486 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-13.pdf
+2026-04-14 06:41:20,922 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-14.pdf
+2026-04-14 06:41:26,312 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-15.pdf
+2026-04-14 06:41:31,711 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-16.pdf
+2026-04-14 06:41:37,277 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-19.pdf
+2026-04-14 06:41:42,645 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-20.pdf
+2026-04-14 06:41:47,985 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-21.pdf
+2026-04-14 06:41:53,672 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-22.pdf
+2026-04-14 06:41:58,989 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-23.pdf
+2026-04-14 06:42:04,332 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-26.pdf
+2026-04-14 06:42:09,683 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-27.pdf
+2026-04-14 06:42:15,034 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-28.pdf
+2026-04-14 06:42:20,559 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-29.pdf
+2026-04-14 06:42:25,893 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-01-30.pdf
+2026-04-14 06:42:31,388 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-02.pdf
+2026-04-14 06:42:36,806 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-03.pdf
+2026-04-14 06:42:42,172 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-04.pdf
+2026-04-14 06:42:47,554 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-05.pdf
+2026-04-14 06:42:53,188 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-06.pdf
+2026-04-14 06:42:58,554 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-09.pdf
+2026-04-14 06:43:03,824 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-10.pdf
+2026-04-14 06:43:09,203 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-11.pdf
+2026-04-14 06:43:14,521 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-12.pdf
+2026-04-14 06:43:19,909 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-13.pdf
+2026-04-14 06:43:25,154 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-16.pdf
+2026-04-14 06:43:30,487 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-17.pdf
+2026-04-14 06:43:35,972 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-18.pdf
+2026-04-14 06:43:41,149 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-19.pdf
+2026-04-14 06:43:46,538 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-20.pdf
+2026-04-14 06:43:52,077 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-23.pdf
+2026-04-14 06:43:57,387 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-24.pdf
+2026-04-14 06:44:02,735 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-25.pdf
+2026-04-14 06:44:08,109 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-26.pdf
+2026-04-14 06:44:13,670 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-02-27.pdf
+2026-04-14 06:44:19,116 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-02.pdf
+2026-04-14 06:44:24,515 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-03.pdf
+2026-04-14 06:44:29,981 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-04.pdf
+2026-04-14 06:44:35,478 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-05.pdf
+2026-04-14 06:44:40,832 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-06.pdf
+2026-04-14 06:44:46,247 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-09.pdf
+2026-04-14 06:44:51,711 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-10.pdf
+2026-04-14 06:44:57,074 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-11.pdf
+2026-04-14 06:45:02,562 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-12.pdf
+2026-04-14 06:45:08,034 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-13.pdf
+2026-04-14 06:45:13,528 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-16.pdf
+2026-04-14 06:45:18,899 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-17.pdf
+2026-04-14 06:45:24,424 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-18.pdf
+2026-04-14 06:45:29,900 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-19.pdf
+2026-04-14 06:45:35,547 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-20.pdf
+2026-04-14 06:45:40,996 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-23.pdf
+2026-04-14 06:45:46,328 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-24.pdf
+2026-04-14 06:45:51,972 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-25.pdf
+2026-04-14 06:45:57,419 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-26.pdf
+2026-04-14 06:46:02,975 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-27.pdf
+2026-04-14 06:46:08,463 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-30.pdf
+2026-04-14 06:46:13,946 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-03-31.pdf
+2026-04-14 06:46:19,356 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-01.pdf
+2026-04-14 06:46:24,929 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-02.pdf
+2026-04-14 06:46:30,245 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-03.pdf
+2026-04-14 06:46:35,791 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-06.pdf
+2026-04-14 06:46:41,703 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-07.pdf
+2026-04-14 06:46:47,384 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-08.pdf
+2026-04-14 06:46:53,077 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-09.pdf
+2026-04-14 06:46:58,717 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kngix_2026-04-10.pdf
+2026-04-15 11:25:14,733 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-10.pdf
+2026-04-15 11:25:45,866 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-13.pdf
+2026-04-15 11:26:16,745 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-14.pdf
+2026-04-15 11:27:24,112 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-10.pdf
+2026-04-15 11:27:50,246 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-13.pdf
+2026-04-15 11:28:16,010 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-14.pdf
+2026-04-17 17:44:31,291 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_P2726_2026-01-02.pdf
+2026-04-17 18:02:18,449 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-01-02.pdf
+2026-04-17 18:44:44,592 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-01-05.pdf
+2026-04-20 14:51:32,339 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-14.pdf
+2026-04-20 14:52:10,133 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-15.pdf
+2026-04-20 14:52:46,534 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-16.pdf
+2026-04-20 14:53:17,692 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-17.pdf
+2026-04-20 15:10:45,158 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-14.pdf
+2026-04-20 15:11:20,286 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-15.pdf
+2026-04-20 15:11:50,572 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-16.pdf
+2026-04-20 15:12:19,419 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-17.pdf
+2026-04-22 21:20:25,737 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-17.pdf
+2026-04-22 21:20:50,828 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-20.pdf
+2026-04-22 21:21:16,454 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-21.pdf
+2026-04-23 06:49:46,480 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-17.pdf
+2026-04-23 06:50:17,412 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-20.pdf
+2026-04-23 06:50:48,483 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-21.pdf
+2026-04-23 06:51:18,823 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-22.pdf
+2026-04-27 08:23:37,947 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-23.pdf
+2026-04-27 08:24:09,693 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-24.pdf
+2026-04-27 08:40:38,351 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-23.pdf
+2026-04-27 08:41:04,151 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-24.pdf
+2026-04-29 10:18:36,472 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-27.pdf
+2026-04-29 10:19:02,641 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-04-28.pdf
+2026-04-29 10:34:10,152 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-27.pdf
+2026-04-29 10:34:39,028 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-04-28.pdf

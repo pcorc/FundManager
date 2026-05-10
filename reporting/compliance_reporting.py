@@ -292,14 +292,14 @@ class ComplianceReport:
 
         for date_str, funds in self.results.items():
             report_date = pd.to_datetime(date_str).date()
+
             for fund_name, compliance_dict in funds.items():
                 gics_data = compliance_dict.get("gics_compliance", {})
-                if fund_name == "DOGG" or not gics_data:
-                    continue
+
                 if not isinstance(gics_data, Mapping):
                     continue
 
-                can_exceed = "Yes" if fund_name in {"KNG", "FDND"} else "No"
+                can_exceed = "Yes" if fund_name in {"KNG", "FDND", "KNGIX"} else "No"
                 exceptions = "Information Technology Sector" if fund_name == "TDVI" else ""
 
                 exceeding_index = gics_data.get("exceeding_index_gics", {}) or {}
@@ -533,7 +533,7 @@ class ComplianceReport:
                 if issuer_limited:
                     issuer_limited_str = ", ".join(
                         "({ticker}, {shares:,.0f}, {value:,.2f})".format(
-                            ticker=sec.get("ticker"),
+                            ticker=sec.get("eqyticker"),
                             shares=self._extract_share_value(sec),
                             value=float(sec.get("net_market_value", 0.0) or 0.0),
                         )
@@ -589,54 +589,22 @@ class ComplianceReport:
                         ("Fund", fund_name),
                         ("Fund Registration", calculations.get("fund_registration")),
                         ("Fund Status Today", calculations.get("fund_status_today")),
-                        (
-                            "Registration Match",
-                            f'=IF(C{excel_row}=D{excel_row},"PASS","FAIL")',
-                        ),
-                        (
-                            "Condition 40 Act 1",
-                            f'=IF(L{excel_row}/J{excel_row}>=0.75,"PASS","FAIL")',
-                        ),
-                        (
-                            "Condition 40 Act 2a",
-                            f'=IF(O{excel_row}="None","PASS","FAIL")',
-                        ),
-                        (
-                            "Condition 40 Act 2b",
-                            f'=IF(VALUE(T{excel_row})="","",IF(VALUE(T{excel_row})<=0.1,"PASS","FAIL"))',
-                        ),
-                        (
-                            "Condition 2a OCC",
-                            f'=IF(U{excel_row}=0,"PASS",IF(U{excel_row}<=0.05*L{excel_row},"PASS","FAIL"))',
-                        ),
+                        ("Registration Match", f'=IF(C{excel_row}=D{excel_row},"PASS","FAIL")',),
+                        ("Condition 40 Act 1", f'=IF(L{excel_row}>=0.75,"PASS","FAIL")'),
+                        ("Condition 40 Act 2a", f'=IF(O{excel_row}=0,"PASS","FAIL")'),
+                        ("Condition 40 Act 2b", f'=IF(VALUE(U{excel_row})="","",IF(VALUE(U{excel_row})<=0.1,"PASS","FAIL"))'),
+                        ("Condition 2a OCC", f'=IF(V{excel_row}=0,"PASS",IF(V{excel_row}<=0.05*M{excel_row},"PASS","FAIL"))'),
                         ("Total Assets", float(calculations.get("total_assets", 0.0) or 0.0)),
-                        (
-                            "Non-Qualifying Assets Weight",
-                            float(calculations.get("non_qualifying_assets_weight", 0.0) or 0.0),
-                        ),
+                        ("Non-Qualifying Assets Weight", float(calculations.get("non_qualifying_assets_1_wgt", 0.0) or 0.0)),
+                        ("Qualifying Assets Pct", float(calculations.get("qualifying_assets_pct", 0.0) or 0.0)),
                         ("Net Assets", float(calculations.get("net_assets", 0.0) or 0.0)),
                         ("Expenses", abs(float(calculations.get("expenses", 0.0) or 0.0))),
-                        (
-                            "Issuer Limited Assets (Condition 2a) Sum",
-                            float(calculations.get("issuer_limited_sum", 0.0) or 0.0),
-                        ),
-                        (
-                            issuer_label,
-                            issuer_limited_str,
-                        ),
+                        ("Issuer Limited Assets (Condition 2a) Sum", float(calculations.get("issuer_limited_sum", 0.0) or 0.0),),
+                        (issuer_label, issuer_limited_str,),
                         ("Excluded Securities (25% Bucket)", excluded_str),
-                        (
-                            "Cumulative Weight of Excluded Securities",
-                            float(calculations.get("cumulative_weight_excluded", 0.0) or 0.0),
-                        ),
-                        (
-                            "Cumulative Weight of Remaining Securities",
-                            float(calculations.get("cumulative_weight_remaining", 0.0) or 0.0),
-                        ),
-                        (
-                            remaining_label,
-                            remaining_str,
-                        ),
+                        ("Cumulative Weight of Excluded Securities", float(calculations.get("cumulative_weight_excluded", 0.0) or 0.0),),
+                        ("Cumulative Weight of Remaining Securities", float(calculations.get("cumulative_weight_remaining", 0.0) or 0.0),),
+                        (remaining_label, remaining_str,),
                         ("Max Ownership % of Float in 75% bucket", f"{max_ownership_float:.5%}"),
                         ("OCC Market Value", occ_market_value),
                         ("OCC Weight", float(calculations.get("occ_weight", 0.0) or 0.0)),
@@ -669,7 +637,7 @@ class ComplianceReport:
                 large_securities = calculations.get("large_securities", []) or []
                 if large_securities:
                     large_securities_str = ", ".join(
-                        f"({sec.get('ticker', '')}, {float(sec.get('tna_wgt', 0) or 0):.2%})"
+                        f"({sec.get('eqyticker', '')}, {float(sec.get('tna_wgt', 0) or 0):.2%})"
                         for sec in large_securities
                     )
                 else:
@@ -718,7 +686,7 @@ class ComplianceReport:
                         ),
                         ("expenses", abs(float(calculations.get("expenses", 0.0) or 0.0))),
                         (
-                            "five_pct_gross_assets",
+                            "5% Gross Assets Threshold ($)",
                             float(calculations.get("five_pct_gross_assets", 0.0) or 0.0),
                         ),
                         (
@@ -943,7 +911,7 @@ class ComplianceReport:
                 sec_related = calculations.get("sec_related_businesses", []) or []
                 if sec_related:
                     sec_related_str = ", ".join(
-                        f"{biz.get('ticker')} ({(biz.get('ownership_pct') or 0)*100:.5f}%)"
+                        f"{biz.get('eqyticker')} ({(biz.get('ownership_pct') or 0) * 100:.5f}%)"
                         for biz in sec_related
                     )
                 else:
@@ -952,7 +920,7 @@ class ComplianceReport:
                 combined = calculations.get("combined_holdings", []) or []
                 if combined:
                     combined_str = ", ".join(
-                        f"{holding.get('ticker')} ({(holding.get('vest_weight') or 0)*100:.2f}%)"
+                        f"{holding.get('eqyticker')} ({(holding.get('vest_weight') or 0) * 100:.2f}%)"
                         for holding in combined
                     )
                 else:
@@ -985,7 +953,7 @@ class ComplianceReport:
                         ("SEC-Related Businesses (Shs Out %)", sec_related_str),
                         ("Combined Holdings (Portfolio %)", combined_str),
                         ("Total Assets", float(calculations.get("total_assets", 0.0) or 0.0)),
-                        ("Max Ownership %", float(calculations.get("max_ownership_pct", 0.0) or 0.0)),
+                        ("Max Ownership %", f"{float(calculations.get('max_ownership_pct', 0.0) or 0.0):.8%}"),
                         ("Max Weight", float(calculations.get("max_weight", 0.0) or 0.0)),
                         # (
                         #     "OCC Market Value",
@@ -1035,10 +1003,10 @@ class ComplianceReport:
                             "Max 15% Illiquid Compliance",
                             f'=IF(E{excel_row}<=0.15,"PASS","FAIL")',
                         ),
-                        (
-                            "Equity Holdings 85% Compliance",
-                            f'=IF(F{excel_row}>=0.85,"PASS","FAIL")',
-                        ),
+                        # (
+                        #     "Equity Holdings 85% Compliance",
+                        #     f'=IF(F{excel_row}>=0.85,"PASS","FAIL")',
+                        # ),
                     ]
                 )
 
@@ -2153,7 +2121,7 @@ class ComplianceReportPDF(BaseReportPDF):
         calculations = data.get("calculations", {})
 
         total_assets = calculations.get("total_assets", 0)
-        non_qual_weight = calculations.get("non_qualifying_assets_1_wgt", 0)
+        non_qual_weight = calculations.get("non_qualifying_assets_pct", 0)
         issuer_limited_sum = calculations.get("issuer_limited_sum", 0)
         cumulative_excluded = calculations.get("cumulative_weight_excluded", 0)
         cumulative_remaining = calculations.get("cumulative_weight_remaining", 0)
@@ -2502,7 +2470,7 @@ class ComplianceReportPDF(BaseReportPDF):
             index_industry_group_exceeds = len(exceeding_index.get("GICS_INDUSTRY_GROUP_NAME", {}) or {}) > 0
 
             fund_upper = str(fund_name).upper()
-            can_exceed = "Yes" if fund_upper in {"KNG", "FDND"} else "No"
+            can_exceed = "Yes" if fund_upper in {"KNG", "FDND", "KNGIX"} else "No"
             exceptions = "Information Technology Sector" if fund_upper == "TDVI" else ""
 
             try:

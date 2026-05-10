@@ -1086,3 +1086,10 @@ class Fund:
             return 0.0
 
         return float((equity['dividend'] * equity['quantity']).sum())
+
+def _get_value(self, attribute: str) -> float:
+    for source in (self.custodian, self.vest):
+        value = getattr(source, attribute, None)
+        if value is not None:
+            return float(value)
+    return float(getattr(self, f"_{attribute}", 0.0))

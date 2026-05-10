@@ -145,78 +145,6 @@ class BulkDataLoader:
             )
         return df
 
-    def _bulk_load_custodian_holdings(
-        self,
-        data_store: BulkDataStore,
-        all_funds: Dict,
-        target_date: date,
-        previous_date: Optional[date],
-    ) -> None:
-        """Load ALL custodian holdings for ALL funds in one query per table."""
-        holdings_map = [
-            ('custodian_equity_holdings', 'custodian_equity', 'custodian_equity_t1', 'equity'),
-            ('custodian_option_holdings', 'custodian_option', 'custodian_option_t1', 'option'),
-            ('custodian_treasury_holdings', 'custodian_treasury', 'custodian_treasury_t1', 'treasury'),
-        ]
-
-        for config_key, payload_key, payload_key_t1, holdings_kind in holdings_map:
-            table_to_funds = self._group_funds_by_table(all_funds, config_key)
-
-            for table_name, funds in table_to_funds.items():
-                if not table_name or table_name == 'NULL':
-                    continue
-
-                try:
-                    all_data = self._query_custodian_holdings_table(
-                        table_name,
-                        holdings_kind,
-                        funds,
-                        target_date,
-                        previous_date,
-                    )
-                except Exception as exc:
-                    self.logger.warning(
-                        "Failed to load %s (%s holdings): %s",
-                        table_name,
-                        holdings_kind,
-                        exc,
-                    )
-                    continue
-
-                for fund in funds:
-                    fund_name = fund.name
-                    fund_data = all_data[all_data["fund"] == fund_name].copy()
-
-                    date_column = self._find_date_column(
-                        fund_data,
-                        'date',
-                        'process_date',
-                        'effective_date',
-                    )
-
-                    current, previous = self._split_current_previous(
-                        fund_data,
-                        date_column,
-                        target_date,
-                        previous_date,
-                    )
-
-                    self._store_fund_data(
-                        data_store,
-                        fund_name,
-                        payload_key,
-                        current,
-                    )
-
-                    if previous_date is not None:
-                        self._store_fund_data(
-                            data_store,
-                            fund_name,
-                            payload_key_t1,
-                            previous,
-                        )
-
-
     def _bulk_load_vest_holdings(
         self,
         data_store: BulkDataStore,
@@ -463,25 +391,6 @@ class BulkDataLoader:
                 bbg_equity_table, underlying_column == bbg_equity_table.TICKER
             )
 
-        # date_column = getattr(table, 'date', None)
-        # if date_column is not None:
-        #     query = self._apply_date_filter(
-        #         query, date_column, target_date, previous_date
-        #     )
-        #
-        # fund_column = getattr(table, 'fund', None)
-        # fund_aliases = self._collect_fund_aliases(funds)
-        # if fund_column is not None and fund_aliases:
-        #     query = query.filter(fund_column.in_(fund_aliases))
-        #
-        # if analysis_type:
-        #     analysis_column = getattr(table, 'analysis_type', None)
-        #     if analysis_column is not None:
-        #         query = query.filter(
-        #             func.lower(func.trim(analysis_column))
-        #             == analysis_type.lower()
-        #         )
-
         # Simple date filter - we know there's always a 'date' column
         if previous_date is not None:
             query = query.filter(
@@ -545,16 +454,16 @@ class BulkDataLoader:
 
         shares_series = self._resolve_shares_series(df, analysis_type=analysis_type)
         price_series = pd.to_numeric(df['price'], errors='coerce').fillna(0.0)
-        df['treasury_market_value'] = shares_series * price_series
+        df['treasury_market_value'] = shares_series * price_series / 100
 
         return df
 
     def _resolve_shares_series(
-        self,
-        df: pd.DataFrame,
-        *,
-        analysis_type: Optional[str] = None,
-        candidates: Tuple[str, ...] = (),
+            self,
+            df: pd.DataFrame,
+            *,
+            analysis_type: Optional[str] = None,
+            candidates: Tuple[str, ...] = (),
     ) -> pd.Series:
         if df.empty:
             return pd.Series(0.0, index=df.index, dtype=float)
@@ -575,10 +484,93 @@ class BulkDataLoader:
             if fallback not in priority:
                 priority.append(fallback)
 
-        series, found = self._get_numeric_series(df, *priority)
-        if not found:
-            return series
-        return series.fillna(0.0)
+        # Row-level coalesce: start with NaN and fill from each column in priority order.
+        # This handles mixed-column cases (e.g. flex options use nav_shares while
+        # listed options in the same DataFrame use iiv_shares).
+        result = pd.Series(float("nan"), index=df.index, dtype=float)
+        for col in priority:
+            if col in df.columns:
+                candidate_series = pd.to_numeric(df[col], errors="coerce")
+                result = result.where(result.notna(), other=candidate_series)
+
+        return result.fillna(0.0)
+
+
+    def _bulk_load_custodian_holdings(
+        self,
+        data_store: BulkDataStore,
+        all_funds: Dict,
+        target_date: date,
+        previous_date: Optional[date],
+    ) -> None:
+        """Load ALL custodian holdings for ALL funds in one query per table."""
+        holdings_map = [
+            ('custodian_equity_holdings', 'custodian_equity', 'custodian_equity_t1', 'equity'),
+            ('custodian_option_holdings', 'custodian_option', 'custodian_option_t1', 'option'),
+            ('custodian_treasury_holdings', 'custodian_treasury', 'custodian_treasury_t1', 'treasury'),
+        ]
+
+        for config_key, payload_key, payload_key_t1, holdings_kind in holdings_map:
+            table_to_funds = self._group_funds_by_table(all_funds, config_key)
+
+            for table_name, funds in table_to_funds.items():
+                if not table_name or table_name == 'NULL':
+                    continue
+
+                try:
+                    all_data = self._query_custodian_holdings_table(
+                        table_name,
+                        holdings_kind,
+                        funds,
+                        target_date,
+                        previous_date,
+                    )
+                except Exception as exc:
+                    self.logger.warning(
+                        "Failed to load %s (%s holdings): %s",
+                        table_name,
+                        holdings_kind,
+                        exc,
+                    )
+                    continue
+
+                for fund in funds:
+                    fund_name = fund.name
+
+                    # ccva already filtered and labeled with fund name — skip generic filter
+                    if 'fund' not in all_data.columns:
+                        fund_data = all_data.copy()
+                    else:
+                        fund_data = all_data[all_data["fund"] == fund_name].copy()
+
+                    date_column = self._find_date_column(
+                        fund_data,
+                        'date',
+                        'process_date',
+                        'effective_date',
+                    )
+
+                    current, previous = self._split_current_previous(
+                        fund_data,
+                        date_column,
+                        target_date,
+                        previous_date,
+                    )
+
+                    self._store_fund_data(
+                        data_store,
+                        fund_name,
+                        payload_key,
+                        current,
+                    )
+
+                    if previous_date is not None:
+                        self._store_fund_data(
+                            data_store,
+                            fund_name,
+                            payload_key_t1,
+                            previous,
+                        )
 
 
     def _bulk_load_nav_data(
@@ -608,8 +600,6 @@ class BulkDataLoader:
                     )
                     continue
 
-                table = getattr(self.base_cls.classes, table_name)
-
                 if table_name == 'umb_cef_nav':
                     for fund in funds:
                         fund_name = fund.name
@@ -628,6 +618,19 @@ class BulkDataLoader:
                             self._store_fund_data(
                                 data_store, fund_name, 'nav_t1', previous
                             )
+                    continue
+
+                if table_name == 'ccva_nav':
+                    for fund in funds:
+                        current = self._get_ccva_nav(fund.name, target_date)
+                        previous = (
+                            self._get_ccva_nav(fund.name, previous_date)
+                            if previous_date is not None
+                            else pd.DataFrame()
+                        )
+                        self._store_fund_data(data_store, fund.name, 'nav', current)
+                        if previous_date is not None:
+                            self._store_fund_data(data_store, fund.name, 'nav_t1', previous)
                     continue
 
                 table = getattr(self.base_cls.classes, table_name)
@@ -651,9 +654,6 @@ class BulkDataLoader:
                         self._find_date_column(
                             fund_nav,
                             'date',
-                            'nav_date',
-                            'business_date',
-                            'effective_date',
                         ),
                         target_date,
                         previous_date,
@@ -704,6 +704,18 @@ class BulkDataLoader:
                             self._store_fund_data(
                                 data_store, fund_name, 'cash_t1', previous
                             )
+                    continue
+                if table_name == 'ccva_cash':
+                    for fund in funds:
+                        current = self._get_ccva_cash(fund.name, target_date)
+                        previous = (
+                            self._get_ccva_cash(fund.name, previous_date)
+                            if previous_date is not None
+                            else pd.DataFrame()
+                        )
+                        self._store_fund_data(data_store, fund.name, 'cash', current)
+                        if previous_date is not None:
+                            self._store_fund_data(data_store, fund.name, 'cash_t1', previous)
                     continue
 
                 table = getattr(self.base_cls.classes, table_name)
@@ -1366,6 +1378,106 @@ class BulkDataLoader:
             if not previous.empty:
                 self._store_fund_data(data_store, fund_name, 'overlap_t1', previous)
 
+    def _get_ccva_nav(
+            self,
+            fund_name: str,
+            nav_date: Optional[date],
+    ) -> pd.DataFrame:
+        if nav_date is None:
+            return pd.DataFrame()
+
+        table = getattr(self.base_cls.classes, 'ccva_nav', None)
+        if table is None:
+            raise AttributeError('ccva_nav table is not reflected')
+
+        query = self.session.query(
+            table.date.label('date'),
+            literal(fund_name).label('fund'),
+            table.nav.label('nav'),
+            table.revised_tna.label('total_net_assets'),
+            table.revised_tna.label('total_assets'),
+            table.tso.label('shares_outstanding'),
+            literal(0.0).label('expenses'),
+        ).filter(
+            table.fund_number == 980,
+            table.share_class == 'Fund Total',
+            table.date == nav_date,
+        )
+
+        return pd.read_sql(query.statement, self.session.bind)
+
+    def _get_ccva_cash(
+            self,
+            fund_name: str,
+            cash_date: Optional[date],
+    ) -> pd.DataFrame:
+        if cash_date is None:
+            return pd.DataFrame()
+
+        table = getattr(self.base_cls.classes, 'ccva_holdings', None)
+        if table is None:
+            raise AttributeError('ccva_holdings table is not reflected')
+
+        query = self.session.query(
+            table.date.label('date'),
+            literal(fund_name).label('fund'),
+            func.sum(table.market_val_b).label('cash_value'),
+        ).filter(
+            table.fund_id == 980,
+            table.asset_class == 'Cash Management Vehicle',
+            table.date == cash_date,
+        ).group_by(table.date)
+
+        return pd.read_sql(query.statement, self.session.bind)
+
+    def _build_ccva_holdings_query(
+            self,
+            table,
+            holdings_kind: str,
+            target_date: date,
+            previous_date: Optional[date],
+    ):
+        min_date = target_date if previous_date is None else min(target_date, previous_date)
+
+        if holdings_kind == 'equity':
+            query = self.session.query(
+                table.date.label('date'),
+                literal('KNGIX').label('fund'),
+                table.ticker.label('eqyticker'),
+                table.quantity.label('shares_cust'),
+                table.quantity.label('quantity'),
+                table.to_price_l.label('price'),
+                table.market_val_b.label('market_value'),
+                table.asset_class.label('category_description'),
+                table.cusip.label('cusip'),
+            ).filter(
+                table.fund_id == 980,
+                table.asset_class.in_(['Equity', 'EQUITY', 'EQ']),
+                table.date >= min_date,
+            )
+
+        elif holdings_kind == 'option':
+            query = self.session.query(
+                table.date.label('date'),
+                literal('KNGIX').label('fund'),
+                table.ticker.label('optticker'),
+                table.quantity.label('shares_cust'),
+                table.quantity.label('quantity'),
+                table.to_price_l.label('price'),
+                table.market_val_b.label('market_value'),
+                table.asset_class.label('category_description'),
+                table.cusip.label('cusip'),
+                table.maturity.label('maturity_date'),
+            ).filter(
+                table.fund_id == 980,
+                table.asset_class.in_(['Option', 'OPTION', 'OPT']),
+                table.date >= min_date,
+            )
+        else:
+            return pd.DataFrame()
+
+        return query
+
     def _query_overlap_table(self, fund, target_date: Optional[date]) -> pd.DataFrame:
         if not target_date:
             return pd.DataFrame()
@@ -1723,6 +1835,14 @@ class BulkDataLoader:
                 table, holdings_kind, target_date, previous_date
             )
 
+        elif 'ccva_holdings' in lower_name:
+            query = self._build_ccva_holdings_query(
+                table, holdings_kind, target_date, previous_date
+            )
+            if isinstance(query, pd.DataFrame):
+                return query
+            return pd.read_sql(query.statement, self.session.bind)
+
         else:
             query = self.session.query(table)
             date_column = self._get_table_column(
@@ -1740,6 +1860,7 @@ class BulkDataLoader:
             'fund',
             'fund_ticker',
             'account',
+            'fund_id'
         )
         fund_values = self._collect_fund_aliases(funds)
         if fund_values:
@@ -1986,7 +2107,6 @@ class BulkDataLoader:
         treasury_trades = all_trades[treasury_mask].copy()
         return treasury_trades
 
-
     def _split_flex_trades(self, fund, option_trades: pd.DataFrame) -> pd.DataFrame:
         """Split option trades into flex vs regular based on fund configuration."""
         if not isinstance(option_trades, pd.DataFrame) or option_trades.empty:
@@ -2070,6 +2190,7 @@ class BulkDataLoader:
                 'portfolio',
                 'account',
                 'account_number',
+                'fund_number'
             ):
                 value = mapping.get(key)
                 if isinstance(value, str) and value and value != 'NULL':

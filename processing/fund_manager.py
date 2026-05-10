@@ -420,7 +420,6 @@ class FundManager:
                     return nav_source[col].iloc[0] if len(nav_source) > 0 else 0.0
         return 0.0
 
-
     def _extract_expense_value(self, nav_df):
         """Extract expense value"""
         if isinstance(nav_df, pd.DataFrame) and not nav_df.empty:

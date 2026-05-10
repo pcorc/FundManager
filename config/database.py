@@ -16,7 +16,7 @@ Base = automap_base(metadata=metadata)
 
 # Table schemas to reflect
 schemas = {
-    'accounts_mapping': ['account_numbers', 'funds', 'fund_service_providers', 'fund_recon_mappings'],
+    'accounts_mapping': ['account_numbers', 'funds', 'fund_service_providers'], #fund_recon_mappings
     'first_trust_vit': ['bny_vit_holdings', 'bny_vit_nav', 'bny_vit_cash'],
     'first_trust_usa': ['bny_us_holdings_v2', 'bny_us_nav_v2', 'socgen_holdings_statement', 'tif_frwd_data',
                         'master_accounts', 'etf_flows', 'socgen_equity_statement', 'bny_us_cash'],

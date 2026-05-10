@@ -20,6 +20,10 @@ from config.run_configurations import (
     get_config,
     list_available_configs,
     merge_overrides,
+    build_fund_list,
+    CLOSED_END_FUNDS,
+    ETF_FUNDS,
+    PRIVATE_FUNDS,
 )
 from processing.run_modes import (
     fetch_data_stores,
@@ -48,14 +52,6 @@ from utilities.main_helpers import (
 # Optional runtime overrides for quick local tweaking without CLI arguments.
 RUNTIME_OVERRIDES: Optional[Mapping[str, object]] = None
 
-# Import fund groups and helper functions
-from config.fund_definitions import (
-    ETF_FUNDS,
-    CLOSED_END_FUNDS,
-    PRIVATE_FUNDS,
-    ALL_FUNDS,
-)
-from config.run_configurations import build_fund_list, exclude_funds
 
 def main(
         argv: Optional[Sequence[str]] = None,
@@ -270,15 +266,11 @@ def run_time_series(
     return 0
 
 
-# ============================================================================
-# NEW: BATCH CONFIGURATION ORCHESTRATOR
-# ============================================================================
-
 def run_configuration_batch(
-        config_names: List[str],
-        base_date: str | date,
-        base_date_range: Optional[tuple[str | date, str | date]] = None,
-        overrides: Optional[Dict[str, Dict[str, object]]] = None,
+    config_names: List[str],
+    base_date: Optional[str | date] = None,
+    base_date_range: Optional[tuple[str | date, str | date]] = None,
+    overrides: Optional[Dict[str, Dict[str, object]]] = None,
 ) -> int:
     """
     Execute multiple run configurations in sequence.
@@ -307,6 +299,9 @@ def run_configuration_batch(
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
     logger = logging.getLogger("fund_manager.batch")
+
+    if base_date_range is None and base_date is None:
+        raise ValueError("Either base_date or base_date_range must be provided")
 
     if base_date_range:
         start_date, end_date = base_date_range
@@ -443,6 +438,7 @@ def run_configuration_batch(
     logger.info("All configurations completed successfully!")
     return 0
 
+
 def _execute_single_date_config(
         config: Dict[str, object],
         date_offsets: Dict[str, date],
@@ -458,7 +454,8 @@ def _execute_single_date_config(
         "as_of_date": date_offsets["t"],
         "funds": config.get("funds", []),
         "create_pdf": config.get("create_pdf", True),
-        "output_dir": config.get("output_dir", "./outputs"),
+        #"output_dir": config.get("output_dir", "./outputs"),
+        "output_dir": "G:\\Shared drives\\Portfolio Management\\Funds\\Archive\\Daily_Compliance",
         "output_tag": config.get("output_tag"),
     }
 
@@ -508,7 +505,8 @@ def _execute_range_date_config(
         "eod_reports": config.get("eod_reports", []),
         "compliance_tests": config.get("compliance_tests", []),
         "create_pdf": config.get("create_pdf", False),
-        "output_dir": config.get("output_dir", "./outputs"),
+        # "output_dir": config.get("output_dir", "./outputs"),
+        "output_dir": "G:\\Shared drives\\Portfolio Management\\Funds\\Archive\\Daily_Compliance",
         "generate_daily_reports": config.get("generate_daily_reports", False),
     }
 
@@ -520,14 +518,15 @@ def _execute_range_date_config(
 
 if __name__ == "__main__":
 
-    # Base date: All date offsets (T, T-1, T-2) are calculated from this
-    BASE_DATE = "2026-01-09"
-    BASE_DATE_RANGE: Optional[tuple[str, str]] = None
-    BASE_DATE_RANGE = ("2026-01-06", "2026-01-09")
-
     # ------------------------------------------------------------------------
     # Example 1: Run predefined configurations
     # ------------------------------------------------------------------------
+
+    # Base date: All date offsets (T, T-1, T-2) are calculated from this
+    BASE_DATE = "2026-05-09"
+    BASE_DATE_RANGE: Optional[tuple[str, str]] = None
+    BASE_DATE_RANGE = ("2026-04-28", BASE_DATE)
+
     ACTIVE_RUNS = [
         # "trading_compliance_etfs",
         "eod_compliance_custom",
@@ -536,25 +535,25 @@ if __name__ == "__main__":
 
     RUN_OVERRIDES = {
         # "trading_compliance_closed_end_private": {
-        #     "funds": build_fund_list(CLOSED_END_FUNDS, PRIVATE_FUNDS),
+        #     "funds": build_fund_list(CLOSED_END_FUNDS, PRIVATE_FUNDS, ETF_FUNDS),
         #     "output_tag": "cef",  # Custom tag for file names
         # },
         "eod_compliance_custom": {
             "funds": build_fund_list(CLOSED_END_FUNDS), #
             "output_tag": "cefs",
             "compliance_tests": [
-                        # "summary_metrics",
-                        # "gics_compliance",
-                        # "prospectus_80pct_policy",
+                        "summary_metrics",
+                        "gics_compliance",
+                        "prospectus_80pct_policy",
                         "diversification_40act_check",
-                        # "diversification_IRS_check",
-                        # "diversification_IRC_check",
-                        # "max_15pct_illiquid_sai",
-                        # "real_estate_check",
-                        # "commodities_check",
-                        # "twelve_d1a_other_inv_cos",
-                        # "twelve_d2_insurance_cos",
-                        # "twelve_d3_sec_biz"
+                        "diversification_IRS_check",
+                        "diversification_IRC_check",
+                        "max_15pct_illiquid_sai",
+                        "real_estate_check",
+                        "commodities_check",
+                        "twelve_d1a_other_inv_cos",
+                        "twelve_d2_insurance_cos",
+                        "twelve_d3_sec_biz"
                     ],
         },
         # "eod_recon_custom": {
@@ -566,8 +565,82 @@ if __name__ == "__main__":
     exit_code = run_configuration_batch(
         config_names=ACTIVE_RUNS,
         base_date=BASE_DATE,
-        # base_date_range=BASE_DATE_RANGE,
+        base_date_range=BASE_DATE_RANGE,
         overrides=RUN_OVERRIDES,
     )
-    raise SystemExit(exit_code)
+
+    # ------------------------------------------------------------------------
+    # Example 2: Run predefined configurations
+    # ------------------------------------------------------------------------
+    #
+    # BASE_DATE_RANGE = ("2026-01-02", "2026-01-02")
+    #
+    # ACTIVE_RUNS = ["eod_compliance_custom"]
+    #
+    # RUN_OVERRIDES = {
+    #     "eod_compliance_custom": {
+    #         "funds": ["P2726",], #"KNGIX"
+    #         "output_tag": "P2726",
+    #         "compliance_tests": [
+    #                     # "summary_metrics",
+    #                     # "gics_compliance",
+    #                     # "prospectus_80pct_policy",
+    #                     "diversification_40act_check",
+    #                     "diversification_IRS_check",
+    #                     # "diversification_IRC_check",
+    #                     # "max_15pct_illiquid_sai",
+    #                     # "real_estate_check",
+    #                     # "commodities_check",
+    #                     # "twelve_d1a_other_inv_cos",
+    #                     # "twelve_d2_insurance_cos",
+    #                     # "twelve_d3_sec_biz"
+    #                 ],
+    #     },
+    # }
+    #
+    # exit_code = run_configuration_batch(
+    #     config_names=ACTIVE_RUNS,
+    #     base_date=BASE_DATE_RANGE[0],  # satisfies the required arg, effectively ignored
+    #     base_date_range=BASE_DATE_RANGE,
+    #     overrides=RUN_OVERRIDES,
+    # )
+
+    # ------------------------------------------------------------------------
+    # Example 3: Time series configuration for one fund
+    # ------------------------------------------------------------------------
+
+    # BASE_DATE_RANGE = ("2026-01-02", "2026-03-31")
+    # ACTIVE_RUNS = ["time_series_full_compliance"]
+    #
+    # RUN_OVERRIDES = {
+    #     "time_series_full_compliance": {
+    #          "funds": build_fund_list(CLOSED_END_FUNDS), #
+    #         "output_tag": "cefs",
+    #         "start_date": "2026-01-02",
+    #         "end_date": "2026-03-31",
+    #         "compliance_tests": [
+    #             # "summary_metrics",
+    #             # "gics_compliance",
+    #             # "prospectus_80pct_policy",
+    #             "diversification_40act_check",
+    #             "diversification_IRS_check",
+    #             # "diversification_IRC_check",
+    #             # "max_15pct_illiquid_sai",
+    #             # "real_estate_check",
+    #             # "commodities_check",
+    #             # "twelve_d1a_other_inv_cos",
+    #             # "twelve_d2_insurance_cos",
+    #             # "twelve_d3_sec_biz",
+    #         ],
+    #         "generate_daily_reports": False,
+    #     },
+    # }
+    #
+    # exit_code = run_configuration_batch(
+    #     config_names=ACTIVE_RUNS,
+    #     base_date="2026-03-31",  # required arg, effectively ignored for range mode
+    #     overrides=RUN_OVERRIDES,
+    # )
+    #
+    # raise SystemExit(exit_code)
 

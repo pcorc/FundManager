@@ -634,6 +634,18 @@ RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
         "output_tag": "full_compliance",  # Tag for output file names
         "description": "Time series full compliance for closed-end funds",
     },
+    "custom1": {
+        "analysis_type": "eod",
+        "date_mode": "range",
+        "funds": ["FDND", "DOGG"],
+        "eod_reports": ["compliance"],
+        "compliance_tests": ["diversification_IRS_check"],
+        "create_pdf": False,
+        "output_dir": "./outputs",
+        "generate_daily_reports": False,
+        "output_tag": "jan31_irs_compliance",  # Tag for output file names
+        "description": "Time series full compliance for closed-end funds",
+    },
 }
 
 

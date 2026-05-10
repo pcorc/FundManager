@@ -288,6 +288,7 @@ def run_eod_range_mode(
     daily_artefacts: "OrderedDict[str, Mapping[str, object]]" = OrderedDict()
 
     latest_gics_mapping = None
+    stacked_report = None
 
     def _build_prefix(base: str) -> str:
         return f"{base}_{output_tag}" if output_tag else base
@@ -345,16 +346,15 @@ def run_eod_range_mode(
 
         daily_artefacts[trade_date.isoformat()] = artefacts
 
-        stacked_report = None
-        if "compliance" in operations and results_by_date:
-            stacked_report = build_compliance_reports_for_range(
-                results_by_date.items(),
-                output_dir=str(output_dir),
-                output_tag=output_tag,
-                test_functions=compliance_tests or None,
-                gics_mapping=latest_gics_mapping,
-                create_pdf=create_pdf,
-            )
+    if "compliance" in operations and results_by_date:
+        stacked_report = build_compliance_reports_for_range(
+            results_by_date.items(),
+            output_dir=str(output_dir),
+            output_tag=output_tag,
+            test_functions=compliance_tests or None,
+            gics_mapping=latest_gics_mapping,
+            create_pdf=create_pdf,
+        )
 
     return RangeRunResults(
         results_by_date=results_by_date,
