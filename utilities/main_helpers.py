@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping as MappingABC, Sequence as Sequenc
 from datetime import date, datetime, timedelta
 from typing import Mapping, Sequence
 
-from config.fund_registry import FundRegistry
+from processing.fund import FundRegistry
 
 
 def filter_registry(registry: FundRegistry, funds: Sequence[str]) -> FundRegistry:
@@ -14,13 +14,11 @@ def filter_registry(registry: FundRegistry, funds: Sequence[str]) -> FundRegistr
     if not funds:
         return registry
 
-    missing = [fund for fund in funds if fund not in registry.funds]
+    missing = [fund for fund in funds if fund not in registry]
     if missing:
         raise ValueError(f"Requested funds not in registry: {', '.join(sorted(missing))}")
 
-    filtered = FundRegistry()
-    filtered.funds = {fund: registry.funds[fund] for fund in funds}
-    return filtered
+    return {fund: registry[fund] for fund in funds}
 
 
 def log_processing_summary(logger: logging.Logger, label: str, summary: Mapping[str, object]) -> None:

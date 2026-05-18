@@ -1,205 +1,168 @@
-from typing import Dict, Optional, Sequence, Set
-import pandas as pd
-import re
-from typing import Any  # Add to existing typing imports
+"""Fund, FundData, FundSnapshot, FundHoldings — the in-memory model.
+
+Also exposes the fund-registry factory that replaces the old FundRegistry/FundClass
+classes: a registry is just a `Dict[str, Fund]`, built once at startup via
+:func:`build_fund_registry`.
+"""
+
+from __future__ import annotations
 
 from datetime import date
+from typing import Any, Dict, List, Optional, Sequence, Set
+
+import pandas as pd
+
+from config.fund_definitions import FUND_DEFINITIONS
+
+
+FundRegistry = Dict[str, "Fund"]
+
+
+_NUMERIC_COLUMNS = {
+    "equity": [
+        "equity_market_value", "market_value", "net_market_value",
+        "quantity", "nav_shares", "iiv_shares", "shares",
+        "price", "EQY_SH_OUT_million",
+    ],
+    "options": [
+        "option_market_value", "market_value", "net_market_value",
+        "option_delta_adjusted_notional", "delta_adjusted_notional",
+        "quantity", "nav_shares_option", "price", "delta",
+    ],
+    "flex_options": [
+        "flex_option_market_value", "option_market_value",
+        "market_value", "net_market_value",
+        "flex_option_delta_adjusted_notional",
+        "option_delta_adjusted_notional", "delta_adjusted_notional",
+        "quantity", "nav_shares_option", "price", "delta",
+    ],
+    "treasury": [
+        "treasury_market_value", "market_value", "net_market_value",
+        "quantity", "price", "face_value",
+    ],
+}
+
+# Keys that point at DB tables the loader will need to query for a fund.
+_REQUIRED_TABLE_KEYS: tuple[str, ...] = (
+    "custodian_equity_holdings",
+    "custodian_option_holdings",
+    "custodian_treasury_holdings",
+    "custodian_navs",
+    "cash_table",
+    "vest_equity_holdings",
+    "vest_options_holdings",
+    "vest_treasury_holdings",
+    "basket",
+    "flows",
+    "sg_custodian_holdings",
+    "index_holdings",
+    "option_custodian_assignment",
+    "overlap_table",
+)
+
+
+def _coerce_numeric_columns(df: Optional[pd.DataFrame], holding_type: str) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame() if df is None else df
+    df = df.copy()
+    for col in _NUMERIC_COLUMNS.get(holding_type, []):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+    return df
+
+
+def _filter_frame_by_fund(frame: pd.DataFrame, fund_name: Optional[str]) -> pd.DataFrame:
+    if frame.empty or not fund_name or "fund" not in frame.columns:
+        return frame
+    return frame[frame["fund"] == fund_name]
+
+
+def _frame_value_sum(
+    frame: pd.DataFrame, columns: Sequence[str], fund_name: Optional[str]
+) -> Optional[float]:
+    if frame.empty:
+        return None
+    filtered = _filter_frame_by_fund(frame, fund_name)
+    if filtered.empty:
+        return None
+    for column in columns:
+        if column in filtered.columns:
+            series = pd.to_numeric(filtered[column], errors="coerce").dropna()
+            if not series.empty:
+                return float(series.sum())
+    return None
+
+
+def _price_quantity_sum(
+    frame: pd.DataFrame, fund_name: Optional[str], multiplier: float = 1.0
+) -> Optional[float]:
+    if frame.empty or not {"price", "quantity"}.issubset(frame.columns):
+        return None
+    filtered = _filter_frame_by_fund(frame, fund_name)
+    if filtered.empty:
+        return None
+    price = pd.to_numeric(filtered["price"], errors="coerce").fillna(0.0)
+    quantity = pd.to_numeric(filtered["quantity"], errors="coerce").fillna(0.0)
+    return float((price * quantity * multiplier).sum())
+
+
+def _asset_class_value(
+    vest_frame: pd.DataFrame,
+    custodian_frame: pd.DataFrame,
+    value_columns: Sequence[str],
+    fund_name: Optional[str],
+    multiplier: float = 1.0,
+) -> float:
+    for frame in (vest_frame, custodian_frame):
+        value = _frame_value_sum(frame, value_columns, fund_name)
+        if value is not None:
+            return value
+        fallback = _price_quantity_sum(frame, fund_name, multiplier=multiplier)
+        if fallback is not None:
+            return fallback
+    return 0.0
+
+
+def _sum_columns(
+    vest_frame: pd.DataFrame,
+    custodian_frame: pd.DataFrame,
+    columns: Sequence[str],
+    fund_name: Optional[str],
+) -> float:
+    for frame in (vest_frame, custodian_frame):
+        value = _frame_value_sum(frame, columns, fund_name)
+        if value is not None:
+            return value
+    return 0.0
 
 
 class FundHoldings:
-    """Wrapper for holdings data for a specific source (e.g. Vest or custodian)."""
+    """Holdings for a single source (Vest, custodian, or index)."""
 
     def __init__(
         self,
         *,
         equity: Optional[pd.DataFrame] = None,
         options: Optional[pd.DataFrame] = None,
-        flex_options: Optional[pd.DataFrame] = None,  # NEW
+        flex_options: Optional[pd.DataFrame] = None,
         treasury: Optional[pd.DataFrame] = None,
-
     ) -> None:
-        self.equity = self._clean_holdings_dataframe(equity, holding_type='equity')
-        self.options = self._clean_holdings_dataframe(options, holding_type='options')
-        self.flex_options = self._clean_holdings_dataframe(flex_options, holding_type='flex_options')
-        self.treasury = self._clean_holdings_dataframe(treasury, holding_type='treasury')
-
-    def _clean_holdings_dataframe(self, df: Optional[pd.DataFrame], holding_type: str) -> pd.DataFrame:
-        """Clean and standardize holdings DataFrame with proper numeric types."""
-        if not isinstance(df, pd.DataFrame):
-            return pd.DataFrame()
-
-        if df.empty:
-            return df
-
-        # Make a copy to avoid modifying the original
-        df = df.copy()
-
-        # Define numeric columns by holding type
-        numeric_columns_map = {
-            'equity': [
-                'equity_market_value', 'market_value', 'net_market_value',
-                'quantity', 'nav_shares', 'iiv_shares', 'shares',
-                'price', 'EQY_SH_OUT_million'
-            ],
-            'options': [
-                'option_market_value', 'market_value', 'net_market_value',
-                'option_delta_adjusted_notional', 'delta_adjusted_notional',
-                'quantity', 'nav_shares_option', 'price', 'delta'
-            ],
-            'flex_options': [
-                'flex_option_market_value', 'option_market_value',
-                'market_value', 'net_market_value',
-                'flex_option_delta_adjusted_notional',
-                'option_delta_adjusted_notional', 'delta_adjusted_notional',
-                'quantity', 'nav_shares_option', 'price', 'delta'
-            ],
-            'treasury': [
-                'treasury_market_value', 'market_value', 'net_market_value',
-                'quantity', 'price', 'face_value'
-            ]
-        }
-
-        # Get the relevant numeric columns for this holding type
-        numeric_columns = numeric_columns_map.get(holding_type, [])
-
-        # Convert relevant columns to numeric
-        for col in numeric_columns:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
-
-        return df
+        self.equity = _coerce_numeric_columns(equity, "equity")
+        self.options = _coerce_numeric_columns(options, "options")
+        self.flex_options = _coerce_numeric_columns(flex_options, "flex_options")
+        self.treasury = _coerce_numeric_columns(treasury, "treasury")
 
     def copy(self) -> "FundHoldings":
         return FundHoldings(
-            equity=self.equity.copy() if isinstance(self.equity, pd.DataFrame) else pd.DataFrame(),
-            options=self.options.copy() if isinstance(self.options, pd.DataFrame) else pd.DataFrame(),
-            flex_options=self.flex_options.copy() if isinstance(self.flex_options, pd.DataFrame) else pd.DataFrame(),  # NEW
-            treasury=self.treasury.copy() if isinstance(self.treasury, pd.DataFrame) else pd.DataFrame(),
+            equity=self.equity.copy(),
+            options=self.options.copy(),
+            flex_options=self.flex_options.copy(),
+            treasury=self.treasury.copy(),
         )
-
-
-
-class FundMetrics:
-    """Computed metrics from holdings data."""
-    def __init__(self, snapshot: 'FundSnapshot'):
-        self.snapshot = snapshot
-
-    @property
-    def total_equity_value(self) -> float:
-        """Total equity market value computed from holdings."""
-        return self._compute_equity_value()
-
-    @property
-    def total_option_value(self) -> float:
-        """Total regular option market value computed from holdings."""
-        return self._compute_option_value()
-
-    @property
-    def total_flex_option_value(self) -> float:
-        """Total flex option market value computed from holdings."""
-        return self._compute_flex_option_value()
-
-    @property
-    def total_treasury_value(self) -> float:
-        """Total treasury market value computed from holdings."""
-        return self._compute_treasury_value()
-
-    @property
-    def total_option_delta_adjusted_notional(self) -> float:
-        """Total delta-adjusted notional for all options (regular + flex)."""
-        regular = self._compute_option_delta_adjusted_notional()
-        flex = self._compute_flex_option_delta_adjusted_notional()
-        return regular + flex
-
-    @property
-    def total_holdings_value(self) -> float:
-        """Total value of all holdings (equity + options + flex + treasury)."""
-        return (
-            self.total_equity_value +
-            self.total_option_value +
-            self.total_flex_option_value +
-            self.total_treasury_value
-        )
-
-    def _compute_equity_value(self) -> float:
-        """Calculate total equity value - uses Vest if available, otherwise Custodian."""
-        # Primary source: Vest (OMS data)
-        for frame in (self.snapshot.vest.equity, self.snapshot.custodian.equity):
-            value = self.snapshot._frame_value_sum(
-                frame, ["equity_market_value", "market_value", "net_market_value"]
-            )
-            if value is not None:
-                return value  # Return first available value (Vest preferred)
-            fallback = self.snapshot._price_quantity_sum(frame)
-            if fallback is not None:
-                return fallback
-        return 0.0
-
-    def _compute_option_value(self) -> float:
-        """Calculate total regular option value - uses Vest if available, otherwise Custodian."""
-        for frame in (self.snapshot.vest.options, self.snapshot.custodian.options):
-            value = self.snapshot._frame_value_sum(
-                frame, ["option_market_value", "market_value", "net_market_value"]
-            )
-            if value is not None:
-                return value  # Return first available value (Vest preferred)
-            fallback = self.snapshot._price_quantity_sum(frame, multiplier=100.0)
-            if fallback is not None:
-                return fallback
-        return 0.0
-
-    def _compute_flex_option_value(self) -> float:
-        """Calculate total flex option value - uses Vest if available, otherwise Custodian."""
-        for frame in (self.snapshot.vest.flex_options, self.snapshot.custodian.flex_options):
-            value = self.snapshot._frame_value_sum(
-                frame, ["flex_option_market_value", "option_market_value", "market_value", "net_market_value"]
-            )
-            if value is not None:
-                return value  # Return first available value (Vest preferred)
-            fallback = self.snapshot._price_quantity_sum(frame, multiplier=100.0)
-            if fallback is not None:
-                return fallback
-        return 0.0
-
-    def _compute_treasury_value(self) -> float:
-        """Calculate total treasury value - uses Vest if available, otherwise Custodian."""
-        for frame in (self.snapshot.vest.treasury, self.snapshot.custodian.treasury):
-            value = self.snapshot._frame_value_sum(
-                frame, ["treasury_market_value", "market_value", "net_market_value"]
-            )
-            if value is not None:
-                return value  # Return first available value (Vest preferred)
-            fallback = self.snapshot._price_quantity_sum(frame)
-            if fallback is not None:
-                return fallback
-        return 0.0
-
-    def _compute_option_delta_adjusted_notional(self) -> float:
-        """Calculate delta-adjusted notional for regular options - uses Vest if available, otherwise Custodian."""
-        for frame in (self.snapshot.vest.options, self.snapshot.custodian.options):
-            value = self.snapshot._frame_value_sum(
-                frame,
-                ["option_delta_adjusted_notional", "delta_adjusted_notional"],
-            )
-            if value is not None:
-                return value  # Return first available value (Vest preferred)
-        return 0.0
-
-    def _compute_flex_option_delta_adjusted_notional(self) -> float:
-        """Calculate delta-adjusted notional for flex options - uses Vest if available, otherwise Custodian."""
-        for frame in (self.snapshot.vest.flex_options, self.snapshot.custodian.flex_options):
-            value = self.snapshot._frame_value_sum(
-                frame,
-                ["flex_option_delta_adjusted_notional", "option_delta_adjusted_notional", "delta_adjusted_notional"],
-            )
-            if value is not None:
-                return value  # Return first available value (Vest preferred)
-        return 0.0
-
 
 
 class FundSnapshot:
-    """Container for all holdings data at a point in time."""
+    """All holdings + reported scalars for a single point in time."""
 
     def __init__(
         self,
@@ -208,10 +171,10 @@ class FundSnapshot:
         custodian: Optional[FundHoldings] = None,
         index: Optional[FundHoldings] = None,
         cash: float = 0.0,
-        nav: float = 0.0,  # NAV per share
-        tna: float = 0.0,  # Total Net Assets
-        ta: float = 0.0,  # Total Assets
-        expenses: float = 0.0,  # What custodian reports for expenses
+        nav: float = 0.0,
+        tna: float = 0.0,
+        ta: float = 0.0,
+        expenses: float = 0.0,
         shares_outstanding: float = 0.0,
         flows: float = 0.0,
         basket: Optional[pd.DataFrame] = None,
@@ -224,206 +187,63 @@ class FundSnapshot:
         flex_option_trades: Optional[pd.DataFrame] = None,
         treasury_trades: Optional[pd.DataFrame] = None,
     ) -> None:
-        self.vest = vest if isinstance(vest, FundHoldings) else FundHoldings()
-        self.custodian = custodian if isinstance(custodian, FundHoldings) else FundHoldings()
-        self.index = index if isinstance(index, FundHoldings) else FundHoldings()
+        self.vest = vest or FundHoldings()
+        self.custodian = custodian or FundHoldings()
+        self.index = index or FundHoldings()
 
-        # Store reported values from custodian/admin
-        self._cash = float(cash)
-        self._nav = float(nav)
-        self._ta = float(ta)
-        self._tna = float(tna)
-        self._expenses = float(expenses)
-        self._shares_outstanding = float(shares_outstanding)
-
-        # Other data
+        self.cash = float(cash)
+        self.nav = float(nav)
+        self.ta = float(ta)
+        self.tna = float(tna)
+        self.expenses = float(expenses)
+        self.shares_outstanding = float(shares_outstanding)
         self.flows = float(flows)
-        self.basket = basket if isinstance(basket, pd.DataFrame) else pd.DataFrame()
-        self.overlap = overlap if isinstance(overlap, pd.DataFrame) else pd.DataFrame()
+
+        self.basket = basket if basket is not None else pd.DataFrame()
+        self.overlap = overlap if overlap is not None else pd.DataFrame()
         self.fund_name = fund_name
-        self.equity_trades = equity_trades if isinstance(equity_trades, pd.DataFrame) else pd.DataFrame()
-        self.cr_rd_data = cr_rd_data if isinstance(cr_rd_data, pd.DataFrame) else pd.DataFrame()
-        self.assignments = assignments if isinstance(assignments, pd.DataFrame) else pd.DataFrame()
-        self.option_trades = option_trades if isinstance(option_trades, pd.DataFrame) else pd.DataFrame()
-        self.flex_option_trades = (
-            flex_option_trades if isinstance(flex_option_trades, pd.DataFrame) else pd.DataFrame()
+        self.equity_trades = equity_trades if equity_trades is not None else pd.DataFrame()
+        self.cr_rd_data = cr_rd_data if cr_rd_data is not None else pd.DataFrame()
+        self.assignments = assignments if assignments is not None else pd.DataFrame()
+        self.option_trades = option_trades if option_trades is not None else pd.DataFrame()
+        self.flex_option_trades = flex_option_trades if flex_option_trades is not None else pd.DataFrame()
+        self.treasury_trades = treasury_trades if treasury_trades is not None else pd.DataFrame()
+
+        # Computed totals — prefer Vest, fall back to custodian. Computed once.
+        self.total_equity_value = _asset_class_value(
+            self.vest.equity, self.custodian.equity,
+            ["equity_market_value", "market_value", "net_market_value"],
+            fund_name,
         )
-        self.treasury_trades = (
-            treasury_trades if isinstance(treasury_trades, pd.DataFrame) else pd.DataFrame()
+        self.total_option_value = _asset_class_value(
+            self.vest.options, self.custodian.options,
+            ["option_market_value", "market_value", "net_market_value"],
+            fund_name, multiplier=100.0,
         )
-
-        # Initialize metrics (computed from holdings)
-        self._metrics = None
-
-    @property
-    def cash(self) -> float:
-        return self._get_value("cash")
-
-    @property
-    def nav(self) -> float:
-        return self._get_value("nav")
-
-    @property
-    def tna(self) -> float:
-        return self._get_value("tna")
-
-    @property
-    def ta(self) -> float:
-        return self._get_value("ta")
-
-    @property
-    def expenses(self) -> float:
-        return self._get_value("expenses")
-
-    @property
-    def shares_outstanding(self) -> float:
-        return self._get_value("shares_outstanding")
-
-    @property
-    def metrics(self) -> FundMetrics:
-        """Lazy-loaded computed metrics from holdings."""
-        if self._metrics is None:
-            self._metrics = FundMetrics(self)
-        return self._metrics
-
-    # Alias properties for backward compatibility
-    @property
-    def reported_cash(self) -> float:
-        return self.cash
-
-    @property
-    def reported_nav(self) -> float:
-        return self.nav
-
-    @property
-    def reported_expenses(self) -> float:
-        return self.expenses
-
-    @property
-    def reported_ta(self) -> float:
-        return self.ta
-
-    @property
-    def reported_tna(self) -> float:
-        return self.tna
-
-    @property
-    def reported_shares_outstanding(self) -> float:
-        return self.shares_outstanding
-
-
-    @property
-    def total_assets(self) -> float:
-        return self.ta
-
-    @property
-    def total_net_assets(self) -> float:
-        return self.tna
-
-    # Computed value properties (from metrics)
-    @property
-    def total_equity_value(self) -> float:
-        """Total equity value from metrics."""
-        return self.metrics.total_equity_value
-
-    @property
-    def total_option_value(self) -> float:
-        """Total regular option value from metrics."""
-        return self.metrics.total_option_value
-
-    @property
-    def total_flex_option_value(self) -> float:
-        """Total flex option value from metrics."""
-        return self.metrics.total_flex_option_value
-
-    @property
-    def total_all_options_value(self) -> float:
-        """Total value of all options (regular + flex)."""
-        return self.metrics.total_option_value + self.metrics.total_flex_option_value
-
-    @property
-    def total_treasury_value(self) -> float:
-        """Total treasury value from metrics."""
-        return self.metrics.total_treasury_value
-
-    @property
-    def total_option_delta_adjusted_notional(self) -> float:
-        """Total option delta-adjusted notional from metrics."""
-        return self.metrics.total_option_delta_adjusted_notional
-
-    @property
-    def calculated_tna(self) -> float:
-        """Calculate TNA from holdings + cash."""
-        return self.metrics.total_holdings_value
-
-    def _get_reported_value(self, attribute: str) -> float:
-        for source in (self.custodian, self.vest):
-            value = getattr(source, attribute, None)
-            if value is not None:
-                return float(value)
-        return float(getattr(self, f"_{attribute}", 0.0))
-
-    def _get_value(self, attribute: str) -> float:
-        for source in (self.custodian, self.vest):
-            value = getattr(source, attribute, None)
-            if value is not None:
-                return float(value)
-        return float(getattr(self, f"_{attribute}", 0.0))
-
-    def _filter_frame_by_fund(self, frame: pd.DataFrame) -> pd.DataFrame:
-        """Filter DataFrame to only include rows for this fund."""
-        if not isinstance(frame, pd.DataFrame) or frame.empty:
-            return frame
-
-        # If no fund_name set, return as-is (backward compatibility)
-        if not self.fund_name:
-            return frame
-
-        # If fund column exists, filter by it
-        if 'fund' in frame.columns:
-            return frame[frame['fund'] == self.fund_name].copy()
-
-        # No fund column means data should already be filtered
-        return frame
-
-    def _frame_value_sum(self, frame: pd.DataFrame, columns: Sequence[str]) -> Optional[float]:
-        """Sum values from specified columns in dataframe."""
-        if not isinstance(frame, pd.DataFrame) or frame.empty:
-            return None
-
-        # Filter frame by fund if needed
-        filtered_frame = self._filter_frame_by_fund(frame)
-        if filtered_frame.empty:
-            return None
-
-        for column in columns:
-            if column in filtered_frame.columns:
-                series = pd.to_numeric(filtered_frame[column], errors="coerce").dropna()
-                if not series.empty:
-                    return float(series.sum())
-        return None
-
-    def _price_quantity_sum(self, frame: pd.DataFrame, multiplier: float = 1.0) -> Optional[float]:
-        """Calculate value from price * quantity."""
-        if not isinstance(frame, pd.DataFrame) or frame.empty:
-            return None
-
-        # Filter frame by fund if needed
-        filtered_frame = self._filter_frame_by_fund(frame)
-        if filtered_frame.empty:
-            return None
-
-        if {"price", "quantity"}.issubset(filtered_frame.columns):
-            price = pd.to_numeric(filtered_frame["price"], errors="coerce").fillna(0.0)
-            quantity = pd.to_numeric(filtered_frame["quantity"], errors="coerce").fillna(0.0)
-            if not price.empty and not quantity.empty:
-                return float((price * quantity * multiplier).sum())
-        return None
-
+        self.total_flex_option_value = _asset_class_value(
+            self.vest.flex_options, self.custodian.flex_options,
+            ["flex_option_market_value", "option_market_value", "market_value", "net_market_value"],
+            fund_name, multiplier=100.0,
+        )
+        self.total_treasury_value = _asset_class_value(
+            self.vest.treasury, self.custodian.treasury,
+            ["treasury_market_value", "market_value", "net_market_value"],
+            fund_name,
+        )
+        self.total_all_options_value = self.total_option_value + self.total_flex_option_value
+        self.total_option_delta_adjusted_notional = _sum_columns(
+            self.vest.options, self.custodian.options,
+            ["option_delta_adjusted_notional", "delta_adjusted_notional"],
+            fund_name,
+        ) + _sum_columns(
+            self.vest.flex_options, self.custodian.flex_options,
+            ["flex_option_delta_adjusted_notional", "option_delta_adjusted_notional", "delta_adjusted_notional"],
+            fund_name,
+        )
 
 
 class FundData:
-    """Complete fund data for current day (T) and prior day (T-1)."""
+    """Current (T) and previous (T-1) snapshots plus loose loader extras."""
 
     def __init__(
         self,
@@ -431,665 +251,331 @@ class FundData:
         current: Optional[FundSnapshot] = None,
         previous: Optional[FundSnapshot] = None,
     ) -> None:
-        self.current = current if isinstance(current, FundSnapshot) else FundSnapshot()
-        self.previous = previous if isinstance(previous, FundSnapshot) else FundSnapshot()
+        self.current = current or FundSnapshot()
+        self.previous = previous or FundSnapshot()
+        # Loader-supplied extras consumed by services:
+        self.price_breaks: Dict[str, pd.DataFrame] = {}
+        self.assignments: Optional[pd.DataFrame] = None
+        self.distributions: Optional[pd.DataFrame] = None
+        self.flows: Optional[pd.DataFrame] = None
+        self.other: float = 0.0
+
+
+def _str_or_none(value: Any) -> Optional[str]:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _custodian_type(config: Dict[str, Any]) -> Optional[str]:
+    for key in ("custodian_equity_holdings", "custodian_navs", "custodian_option_holdings"):
+        table = config.get(key)
+        if not isinstance(table, str) or not table:
+            continue
+        lowered = table.lower()
+        if "bny" in lowered:
+            return "bny"
+        if "umb" in lowered:
+            return "umb"
+        if "socgen" in lowered or "sg" in lowered:
+            return "socgen"
+        if "ccva" in lowered:
+            return "ccva"
+    return None
+
+
+def _required_tables(config: Dict[str, Any]) -> List[str]:
+    out: List[str] = []
+    for key in _REQUIRED_TABLE_KEYS:
+        value = config.get(key)
+        if isinstance(value, str) and value and value.upper() != "NULL":
+            out.append(value)
+    return out
+
+
+def _flex_option_pattern(has_flex: bool, flex_type: Optional[str]) -> str:
+    if not has_flex:
+        return "SPX|XSP"
+    return "^2" if flex_type == "single_stock" else "SPX|XSP"
 
 
 class Fund:
-    """Fund entity with configuration and data."""
+    """Fund entity: configuration + loaded data + typed accessors.
 
-    def __init__(self, name: str, config: Dict, base_cls=None):
+    All config-derived flags (is_etf, has_flex_option, custodian_type, …) are
+    computed once in __init__ and stored as plain attributes — there are no
+    @property descriptors, since config is fixed for the lifetime of a Fund.
+    """
+
+    def __init__(self, name: str, config: Dict[str, Any], base_cls: Any = None):
         self.name = name
         self.config = config or {}
         self.base_cls = base_cls
-        self._data: Optional[FundData] = None
+        self.data = FundData()
+
+        c = self.config
+        self.expense_ratio: float = float(c.get("expense_ratio") or 0.0)
+        self.index_identifier: Optional[str] = _str_or_none(c.get("index_identifier"))
+        self.index_ticker_join: Optional[str] = c.get("index_ticker_join")
+
+        vehicle = c.get("vehicle_wrapper")
+        self.vehicle: Optional[str] = vehicle if isinstance(vehicle, str) else None
+        vehicle_lower = (self.vehicle or "").lower()
+        self.is_private_fund: bool = vehicle_lower == "private_fund"
+        self.is_closed_end_fund: bool = vehicle_lower == "closed_end_fund"
+        self.is_etf: bool = vehicle_lower == "etf"
+
+        self.diversification_status: Optional[str] = _str_or_none(c.get("diversification_status"))
+        status_lower = (self.diversification_status or "").lower()
+        self.is_diversified: bool = status_lower == "diversified"
+        self.is_non_diversified: bool = status_lower == "non-diversified"
+
+        self.has_listed_option: bool = bool(c.get("has_listed_option"))
+        self.listed_option_type: Optional[str] = _str_or_none(c.get("listed_option_type"))
+        self.has_flex_option: bool = bool(c.get("has_flex_option"))
+        flex_type = c.get("flex_option_type")
+        self.flex_option_type: Optional[str] = flex_type if isinstance(flex_type, str) and flex_type else None
+        self.flex_option_pattern: str = _flex_option_pattern(self.has_flex_option, self.flex_option_type)
+        self.option_roll_tenor: Optional[str] = c.get("option_roll_tenor")
+        self.has_otc: bool = bool(c.get("has_otc"))
+        self.has_treasury: bool = bool(c.get("has_treasury"))
+
+        usage = c.get("index_flex_usage")
+        self.uses_index_flex: bool = (
+            isinstance(usage, str) and usage.lower() in ("true", "yes", "enabled", "1")
+        )
+
+        self.custodian_type: Optional[str] = _custodian_type(c)
+        self.required_tables: List[str] = _required_tables(c)
 
     # ------------------------------------------------------------------
-    # Data management
+    # Holdings accessors
     # ------------------------------------------------------------------
-    @property
-    def data(self) -> FundData:
-        """Fund processing data; always returns a valid FundData instance."""
-        if self._data is None:
-            self._data = FundData()
-        return self._data
+    def gather_all_tickers(self, asset_class: str, include_prior: bool = True) -> Set[str]:
+        ticker_col = {
+            "equity": "eqyticker",
+            "options": "optticker",
+            "flex_options": "optticker",
+            "treasury": "ticker",
+        }.get(asset_class)
+        if ticker_col is None:
+            return set()
 
-    @data.setter
-    def data(self, value: Optional[FundData]) -> None:
-        self._data = value if isinstance(value, FundData) else FundData()
-
-    # ------------------------------------------------------------------
-    # Configuration properties (from fund.config)
-    # ------------------------------------------------------------------
-    @property
-    def expense_ratio(self) -> float:
-        """Get expense ratio from config"""
-        return float(self.config.get("expense_ratio", 0.0) or 0.0)
-
-    @property
-    def index_identifier(self) -> Optional[str]:
-        """Index identifier from config"""
-        value = self.config.get("index_identifier")
-        if isinstance(value, str):
-            value = value.strip()
-        return value or None
-
-    @property
-    def vehicle(self) -> Optional[str]:
-        """Fund vehicle type from config."""
-        value = self.config.get("vehicle")
-        return value if isinstance(value, str) else None
-
-    @property
-    def is_private_fund(self) -> bool:
-        """Check if fund is private."""
-        vehicle = self.vehicle
-        if vehicle is None:
-            return False
-        return vehicle.lower() == "private_fund"
-
-    @property
-    def is_closed_end_fund(self) -> bool:
-        """Check if fund is closed-end."""
-        vehicle = self.vehicle
-        if vehicle is None:
-            return False
-        return vehicle.lower() == "closed_end_fund"
-
-    @property
-    def is_etf(self) -> bool:
-        """Check if fund is closed-end."""
-        vehicle = self.vehicle
-        if vehicle is None:
-            return False
-        return vehicle.lower() == "etf"
-
-    @property
-    def is_diversified(self) -> bool:
-        """Check if fund is closed-end."""
-        vehicle = self.vehicle
-        if vehicle is None:
-            return False
-        return vehicle.lower() == "diversification_status"
-
-    @property
-    def is_non_diversified(self) -> bool:
-        """Check if fund is non-diversified."""
-        status = self.diversification_status
-        if status is None:
-            return False
-        return status.lower() == "non_diversified"
-
-    @property
-    def index_flex_usage(self) -> Optional[str]:
-        """Fund index flex usage from config."""
-        value = self.config.get("index_flex_usage")
-        return value if isinstance(value, str) else None
-
-    @property
-    def uses_index_flex(self) -> bool:
-        """Check if fund uses index FLEX options."""
-        usage = self.index_flex_usage
-        if usage is None:
-            return False
-        return usage.lower() in ("true", "yes", "enabled", "1")
-
-    @property
-    def has_listed_option(self) -> bool:
-        """Check if fund has listed options."""
-        return bool(self.config.get("has_listed_option", False))
-
-    @property
-    def listed_option_type(self) -> Optional[str]:
-        """Type of listed options (e.g., 'index', 'single_stock')."""
-        value = self.config.get("listed_option_type")
-        if isinstance(value, str):
-            value = value.strip()
-        return value or None
-
-    @property
-    def flex_option_pattern(self) -> str:
-        """
-        Regex pattern to identify flex options.
-
-        Returns pattern based on flex_option_type:
-        - 'index': "SPX|XSP" (index flex options)
-        - 'single_stock': "^2" (options starting with "2")
-        - default: "SPX|XSP"
-        """
-        if not self.has_flex_option:
-            return "SPX|XSP"
-
-        flex_type = self.flex_option_type
-
-        if flex_type == "index":
-            return "SPX|XSP"
-        elif flex_type == "single_stock":
-            return "^2"
-        else:
-            return "SPX|XSP"
-
-    @property
-    def option_roll_tenor(self) -> Optional[str]:
-        """Option roll tenor ('weekly', 'monthly', 'quarterly')."""
-        return self.config.get("option_roll_tenor")
-
-    @property
-    def has_flex_option(self) -> bool:
-        """Check if fund has flex options."""
-        return bool(self.config.get("has_flex_option", False))
-
-    @property
-    def flex_option_type(self) -> Optional[str]:
-        """Type of flex options."""
-        value = self.config.get("flex_option_type")
-        return value if isinstance(value, str) and value else None
-
-    @property
-    def has_otc(self) -> bool:
-        """Check if fund has OTC positions."""
-        return bool(self.config.get("has_otc", False))
-
-    @property
-    def has_treasury(self) -> bool:
-        """Check if fund has treasury holdings."""
-        return bool(self.config.get("has_treasury", False))
-
-    @property
-    def diversification_status(self) -> Optional[str]:
-        """Fund's diversification status from config."""
-        value = self.config.get("diversification_status")
-        if isinstance(value, str):
-            value = value.strip()
-        return value or None
-
-    def get_flex_options(self, snapshot: str = 'current') -> pd.DataFrame:
-        """
-        Get flex options matching the fund's flex_option_pattern.
-
-        Args:
-            snapshot: 'current' or 'prior' to select which snapshot
-
-        Returns:
-            DataFrame with flex options from vest source (preferred)
-            Falls back to custodian if vest is empty
-
-        Example:
-            flex_opts = fund.get_flex_options('current')
-        """
-        if not self.config.get("has_flex_option"):
-            return pd.DataFrame()
-
-        # Get the snapshot
-        snap = self.data.current if snapshot == 'current' else self.data.previous
-        if snap is None:
-            return pd.DataFrame()
-
-        # Try vest first, then custodian
-        for source in (snap.vest, snap.custodian):
-            if source is None or source.options.empty:
-                continue
-
-            options_df = source.options.copy()
-
-            # Filter by pattern
-            if 'optticker' not in options_df.columns:
-                continue
-
-            pattern = self.config.get("flex_option_pattern") or "SPX|XSP"
-            mask = options_df['optticker'].str.contains(pattern, na=False, regex=True)
-            flex_opts = options_df[mask]
-
-            if not flex_opts.empty:
-                return flex_opts
-
-        return pd.DataFrame()
-
-    def get_regular_options(self, snapshot: str = 'current') -> pd.DataFrame:
-        """
-        Get regular (non-flex) options.
-
-        Args:
-            snapshot: 'current' or 'prior' to select which snapshot
-
-        Returns:
-            DataFrame with non-flex options from vest source (preferred)
-            Falls back to custodian if vest is empty
-
-        Example:
-            regular_opts = fund.get_regular_options('current')
-        """
-        # Get the snapshot
-        snap = self.data.current if snapshot == 'current' else self.data.previous
-        if snap is None:
-            return pd.DataFrame()
-
-        # Try vest first, then custodian
-        for source in (snap.vest, snap.custodian):
-            if source is None or source.options.empty:
-                continue
-
-            options_df = source.options.copy()
-
-            if 'optticker' not in options_df.columns:
-                continue
-
-            # If no flex options, return all
-            if not self.config.get("has_flex_option"):
-                return options_df
-
-            # Filter out flex pattern
-            pattern = self.config.get("flex_option_pattern") or "SPX|XSP"
-            mask = ~options_df['optticker'].str.contains(pattern, na=False, regex=True)
-            regular_opts = options_df[mask]
-
-            if not regular_opts.empty:
-                return regular_opts
-
-        return pd.DataFrame()
-
-    # ========================================================================
-    # TICKER GATHERING METHODS
-    # ========================================================================
-
-    def gather_all_tickers(
-            self,
-            asset_class: str,
-            include_prior: bool = True,
-    ) -> Set[str]:
-        """
-        Gather unique tickers from current and optionally prior snapshots.
-
-        Args:
-            asset_class: 'equity', 'options', 'flex_options', 'treasury'
-            include_prior: Whether to include prior snapshot tickers
-
-        Returns:
-            Set of unique ticker symbols from both vest and custodian sources
-            across current and (optionally) prior snapshots
-
-        Example:
-            all_tickers = fund.gather_all_tickers('equity', include_prior=True)
-        """
-        all_tickers: Set[str] = set()
-
-        # Map asset class to ticker column name
-        ticker_col_map = {
-            'equity': 'eqyticker',
-            'options': 'optticker',
-            'flex_options': 'optticker',
-            'treasury': 'ticker',
-        }
-
-        ticker_col = ticker_col_map.get(asset_class)
-        if not ticker_col:
-            return all_tickers
-
-        # Gather from current snapshot
-        if self.data.current:
-            for source in (self.data.current.vest, self.data.current.custodian):
-                if source is None:
-                    continue
-
-                df = self._get_asset_class_df(source, asset_class)
-                if not df.empty and ticker_col in df.columns:
-                    all_tickers.update(df[ticker_col].dropna().unique())
-
-        # Gather from prior snapshot if requested
-        if include_prior and self.data.previous:
-            for source in (self.data.previous.vest, self.data.previous.custodian):
-                if source is None:
-                    continue
-
-                df = self._get_asset_class_df(source, asset_class)
-                if not df.empty and ticker_col in df.columns:
-                    all_tickers.update(df[ticker_col].dropna().unique())
-
-        return all_tickers
-
-    def gather_option_tickers(
-            self,
-            include_flex: bool,
-            include_prior: bool = True,
-    ) -> Set[str]:
-        """
-        Gather option tickers with flex filtering.
-
-        Args:
-            include_flex: If True, include only flex options;
-                         if False, exclude flex options
-            include_prior: Whether to include prior snapshot tickers
-
-        Returns:
-            Set of option ticker symbols filtered by flex pattern
-
-        Example:
-            # Get only regular options
-            regular = fund.gather_option_tickers(include_flex=False)
-
-            # Get only flex options
-            flex = fund.gather_option_tickers(include_flex=True)
-        """
-        all_tickers: Set[str] = set()
-
-        # If no flex options, handle accordingly
-        if not self.has_flex_option:  # Changed from self.properties.has_flex_option
-            if include_flex:
-                return all_tickers  # No flex options exist
-            else:
-                return self.gather_all_tickers('options', include_prior)
-
-        pattern = self.config.get("flex_option_pattern") or "SPX|XSP"
         snapshots = [self.data.current]
-        if include_prior and self.data.previous:
+        if include_prior:
             snapshots.append(self.data.previous)
 
-        for snapshot in snapshots:
-            if not snapshot:
-                continue
+        tickers: Set[str] = set()
+        for snap in snapshots:
+            for source in (snap.vest, snap.custodian):
+                df = getattr(source, asset_class)
+                if not df.empty and ticker_col in df.columns:
+                    tickers.update(df[ticker_col].dropna().unique())
+        return tickers
 
-            for source in (snapshot.vest, snapshot.custodian):
-                if source is None or source.options.empty:
-                    continue
+    def gather_option_tickers(self, include_flex: bool, include_prior: bool = True) -> Set[str]:
+        if not self.has_flex_option:
+            return set() if include_flex else self.gather_all_tickers("options", include_prior)
 
+        snapshots = [self.data.current]
+        if include_prior:
+            snapshots.append(self.data.previous)
+
+        tickers: Set[str] = set()
+        for snap in snapshots:
+            for source in (snap.vest, snap.custodian):
                 df = source.options
-                if 'optticker' not in df.columns:
+                if df.empty or "optticker" not in df.columns:
                     continue
-
-                # Apply pattern filter
-                mask = df['optticker'].str.contains(pattern, na=False, regex=True)
-
-                # Include or exclude based on flag
+                mask = df["optticker"].str.contains(self.flex_option_pattern, na=False, regex=True)
                 filtered = df[mask if include_flex else ~mask]
-
-                all_tickers.update(filtered['optticker'].dropna().unique())
-
-        return all_tickers
-
-    def _get_asset_class_df(self, source, asset_class: str) -> pd.DataFrame:
-        """Helper to get DataFrame for an asset class from a source."""
-        if asset_class == 'equity':
-            return source.equity
-        elif asset_class == 'options':
-            return source.options
-        elif asset_class == 'flex_options':
-            return source.flex_options
-        elif asset_class == 'treasury':
-            return source.treasury
-        return pd.DataFrame()
-
+                tickers.update(filtered["optticker"].dropna().unique())
+        return tickers
 
     def get_price_breaks(self, asset_class: str) -> pd.DataFrame:
-        """
-        Get price breaks for an asset class.
+        breaks = self.data.price_breaks.get(asset_class)
+        return breaks if isinstance(breaks, pd.DataFrame) else pd.DataFrame()
 
-        Args:
-            asset_class: 'equity', 'option', 'treasury'
-
-        Returns:
-            DataFrame with price breaks indexed by ticker
-
-        Note: Price breaks should be stored in fund.data.price_breaks
-        as a dict with keys matching asset class names.
-
-        Example:
-            equity_breaks = fund.get_price_breaks('equity')
-            if 'AAPL' in equity_breaks.index:
-                cust_price = equity_breaks.loc['AAPL', 'price_cust']
-        """
-        if not hasattr(self.data, 'price_breaks'):
+    def get_assignments(self, filter_date: Optional[date | str] = None) -> pd.DataFrame:
+        assignments = self.data.assignments
+        if assignments is None or assignments.empty:
             return pd.DataFrame()
-
-        price_breaks = self.data.price_breaks
-        if not isinstance(price_breaks, dict):
-            return pd.DataFrame()
-
-        breaks = price_breaks.get(asset_class, pd.DataFrame())
-        if isinstance(breaks, pd.DataFrame):
-            return breaks
-
-        return pd.DataFrame()
-
-
-    def get_assignments(
-            self,
-            filter_date: Optional[date | str] = None,
-    ) -> pd.DataFrame:
-        """
-        Get option assignment data, optionally filtered by date.
-
-        Args:
-            filter_date: If provided, filter assignments to this date
-
-        Returns:
-            DataFrame with assignment records
-
-        Example:
-            assignments = fund.get_assignments(filter_date=analysis_date)
-            if not assignments.empty:
-                total_gl = assignments['pnl'].sum()
-        """
-        # Check for assignments in data
-        assignments = None
-        if hasattr(self.data, 'assignments'):
-            assignments = self.data.assignments
-        elif hasattr(self.data, 'option_assignments'):
-            assignments = self.data.option_assignments
-
-        if not isinstance(assignments, pd.DataFrame) or assignments.empty:
-            return pd.DataFrame()
-
-        # If no date filter, return all
         if filter_date is None:
             return assignments.copy()
 
-        # Filter by date
-        date_cols = [
-            col for col in assignments.columns
-            if 'date' in str(col).lower()
-        ]
-
+        date_cols = [c for c in assignments.columns if "date" in str(c).lower()]
         if not date_cols:
             return assignments.copy()
 
-        try:
-            df = assignments.copy()
-            df[date_cols[0]] = pd.to_datetime(df[date_cols[0]])
-            target = pd.Timestamp(filter_date).normalize()
-            filtered = df[df[date_cols[0]].dt.normalize() == target]
-            return filtered
-        except Exception:
-            return assignments.copy()
+        df = assignments.copy()
+        df[date_cols[0]] = pd.to_datetime(df[date_cols[0]], errors="coerce")
+        target = pd.Timestamp(filter_date).normalize()
+        return df[df[date_cols[0]].dt.normalize() == target]
 
-
-    def is_option_settlement_date(self, check_date: str) -> bool:
-        """
-        Determine if a date (with offset) matches the last option settlement date.
-
-        Args:
-            check_date: Date to check (date object or string)
-            offset_days: Days to offset from check_date (negative for prior days)
-                         If 0, checks if check_date itself is a settlement date
-                         If -1, checks if yesterday was the last settlement date
-
-        Returns:
-            True if (check_date + offset_days) equals the most recent settlement date
-
-        Example:
-            # Check if today is a settlement date
-            fund.is_option_settlement_date('2024-01-19')
-
-            # Check if yesterday was the last settlement (for using trade prices)
-            fund.is_option_settlement_date('2024-01-22', offset_days=-1)  # True if last roll was Jan 19
-        """
+    # ------------------------------------------------------------------
+    # Option-roll settlement helpers
+    # ------------------------------------------------------------------
+    def is_option_settlement_date(self, check_date: str | date) -> bool:
         check_ts = pd.Timestamp(check_date).normalize()
         target_date = pd.bdate_range(end=check_ts, periods=2)[0]
         last_settlement = self._find_last_settlement_date(check_ts)
-
         if last_settlement is None:
             return False
-
         return target_date.normalize() == last_settlement.normalize()
 
-    def _find_last_settlement_date(self, from_date: pd.Timestamp) -> pd.Timestamp:
-        """
-        Find the most recent option settlement date on or before from_date.
-
-        Args:
-            from_date: Date to search backwards from
-
-        Returns:
-            The most recent settlement date, or None if not found
-        """
-        # Get tenor from properties or config
-        tenor = ""
-        if hasattr(self.data, 'option_roll_tenor'):
-            tenor = str(self.data.option_roll_tenor or "").lower()
-        elif hasattr(self.data, 'config') and isinstance(self.data.config, dict):
-            tenor = str(self.data.config.get('option_roll_tenor', '')).lower()
-
+    def _find_last_settlement_date(self, from_date: pd.Timestamp) -> Optional[pd.Timestamp]:
+        tenor = (self.option_roll_tenor or "").lower()
         from_date = from_date.normalize()
 
-        # Weekly: find last Friday
-        if tenor == 'weekly':
+        if tenor == "weekly":
             days_since_friday = (from_date.weekday() - 4) % 7
-            last_friday = from_date - pd.Timedelta(days=days_since_friday)
-            return last_friday
+            return from_date - pd.Timedelta(days=days_since_friday)
 
-        # Monthly: find last 3rd Friday
-        elif tenor == 'monthly':
-            # Check current month first
+        if tenor == "monthly":
             month_start = from_date.replace(day=1)
-            third_fridays = pd.date_range(month_start, from_date, freq='WOM-3FRI')
-
+            third_fridays = pd.date_range(month_start, from_date, freq="WOM-3FRI")
             if len(third_fridays) > 0 and third_fridays[-1] <= from_date:
                 return third_fridays[-1]
-
-            # Look in previous month
-            prev_month = month_start - pd.Timedelta(days=1)
-            prev_month_start = prev_month.replace(day=1)
+            prev_month_start = (month_start - pd.Timedelta(days=1)).replace(day=1)
             prev_month_end = month_start - pd.Timedelta(days=1)
-            third_fridays = pd.date_range(prev_month_start, prev_month_end, freq='WOM-3FRI')
+            third_fridays = pd.date_range(prev_month_start, prev_month_end, freq="WOM-3FRI")
+            return third_fridays[-1] if len(third_fridays) > 0 else None
 
-            if len(third_fridays) > 0:
-                return third_fridays[-1]
-
-        # Quarterly: find last 3rd Friday in Mar/Jun/Sep/Dec
-        elif tenor == 'quarterly':
-            # Start from current date and work backwards
+        if tenor == "quarterly":
             search_date = from_date
-
-            for _ in range(12):  # Look back up to 12 months
+            for _ in range(12):
                 if search_date.month in (3, 6, 9, 12):
                     month_start = search_date.replace(day=1)
                     month_end = (month_start + pd.offsets.MonthEnd(0)).normalize()
-
-                    third_fridays = pd.date_range(month_start, month_end, freq='WOM-3FRI')
-
+                    third_fridays = pd.date_range(month_start, month_end, freq="WOM-3FRI")
                     if len(third_fridays) > 0 and third_fridays[0] <= from_date:
                         return third_fridays[0]
+                search_date = search_date.replace(day=1) - pd.Timedelta(days=1)
+            return None
 
-                # Move to previous month
-                search_date = (search_date.replace(day=1) - pd.Timedelta(days=1))
-
-        # Default: try to find last 3rd Friday
+        # Default: most recent third Friday in current or prior two months.
         for months_back in range(3):
             check_month = from_date - pd.offsets.MonthBegin(months_back)
             month_start = check_month.replace(day=1)
             month_end = (month_start + pd.offsets.MonthEnd(0)).normalize()
-
-            third_fridays = pd.date_range(month_start, month_end, freq='WOM-3FRI')
-
+            third_fridays = pd.date_range(month_start, month_end, freq="WOM-3FRI")
             if len(third_fridays) > 0 and third_fridays[0] <= from_date:
                 return third_fridays[0]
-
         return None
 
-
-    def get_nav_metric(
-            self,
-            metric: str,
-            snapshot: str = 'current',
-    ) -> float:
-        """
-        Get NAV-related metrics from fund data.
-
-        Args:
-            metric: One of 'total_net_assets', 'shares_outstanding', 'nav', etc.
-            snapshot: 'current' or 'prior'
-
-        Returns:
-            Float value of the metric, 0.0 if not found
-
-        Looks in:
-            - fund.data.{snapshot}.nav DataFrame
-            - fund.data.{snapshot}.custodian NAV fields
-
-        Example:
-            tna = fund.get_nav_metric('total_net_assets', 'current')
-            shares = fund.get_nav_metric('shares_outstanding', 'current')
-        """
-        snap = self.data.current if snapshot == 'current' else self.data.previous
-        if snap is None:
-            return 0.0
-
-        # Check if there's a nav DataFrame
-        if hasattr(snap, 'nav') and isinstance(snap.nav, pd.DataFrame):
-            nav_df = snap.nav
-            if not nav_df.empty and metric in nav_df.columns:
-                series = pd.to_numeric(nav_df[metric], errors='coerce').dropna()
-                if not series.empty:
-                    return float(series.iloc[0])
-
-        # Check custodian source
-        if snap.custodian and hasattr(snap.custodian, metric):
-            value = getattr(snap.custodian, metric)
-            if isinstance(value, (int, float)):
-                return float(value)
-
-        return 0.0
-
-
     def get_equity_dividends(self) -> float:
-        """
-        Calculate total dividend income from current equity holdings.
-
-        Returns:
-            Total dividends from dividend * quantity
-
-        Example:
-            div_income = fund.get_equity_dividends()
-        """
-        if not self.data.current or not self.data.current.vest:
-            return 0.0
-
         equity = self.data.current.vest.equity
-        if equity.empty:
+        if equity.empty or "dividend" not in equity.columns or "quantity" not in equity.columns:
             return 0.0
+        return float((equity["dividend"] * equity["quantity"]).sum())
 
-        # Check for dividend columns
-        if 'dividend' not in equity.columns or 'quantity' not in equity.columns:
-            # Try alternate column names
-            div_col = None
-            qty_col = None
 
-            for col in equity.columns:
-                col_lower = str(col).lower()
-                if 'dividend' in col_lower or 'div' in col_lower:
-                    div_col = col
-                if 'quantity' in col_lower or 'shares' in col_lower:
-                    qty_col = col
+# ----------------------------------------------------------------------
+# Registry factory (replaces the old FundRegistry class)
+# ----------------------------------------------------------------------
+def _load_account_numbers(session, base_cls) -> Dict[str, Dict[str, Any]]:
+    """Load per-fund custodian account numbers from the accounts_mapping schema."""
+    account_numbers_tbl = getattr(base_cls.classes, "account_numbers", None)
+    if account_numbers_tbl is None:
+        return {}
 
-            if div_col and qty_col:
-                return float((equity[div_col] * equity[qty_col]).sum())
+    query = session.query(
+        account_numbers_tbl.fund,
+        account_numbers_tbl.account_type,
+        account_numbers_tbl.service_provider,
+        account_numbers_tbl.account_number,
+    )
+    df = pd.read_sql(query.statement, session.bind)
 
-            return 0.0
+    mapping: Dict[str, Dict[str, Any]] = {}
+    for _, row in df.iterrows():
+        fund_key = (row.get("fund") or "").strip() if isinstance(row.get("fund"), str) else ""
+        if not fund_key:
+            continue
+        account_number = row.get("account_number")
+        if pd.isna(account_number):
+            continue
+        account_number = str(account_number).strip()
+        if not account_number:
+            continue
 
-        return float((equity['dividend'] * equity['quantity']).sum())
+        account_type = row.get("account_type")
+        service_provider = row.get("service_provider")
+        account_type_key = account_type.strip().lower() if isinstance(account_type, str) else None
+        provider_key = service_provider.strip().lower() if isinstance(service_provider, str) else None
 
-def _get_value(self, attribute: str) -> float:
-    for source in (self.custodian, self.vest):
-        value = getattr(source, attribute, None)
-        if value is not None:
-            return float(value)
-    return float(getattr(self, f"_{attribute}", 0.0))
+        fund_numbers = mapping.setdefault(fund_key, {})
+
+        if provider_key == "sg" and account_type_key != "collateral":
+            accounts = fund_numbers.setdefault("sg", [])
+            if account_number not in accounts:
+                accounts.append(account_number)
+            continue
+
+        key = account_type_key or provider_key or "other"
+        existing = fund_numbers.get(key)
+        if existing is None:
+            fund_numbers[key] = account_number
+        elif isinstance(existing, list):
+            if account_number not in existing:
+                existing.append(account_number)
+        elif existing != account_number:
+            fund_numbers[key] = [existing, account_number]
+
+    return mapping
+
+
+def _derive_custodian_account_number(numbers: Dict[str, Any]) -> Optional[str]:
+    if not numbers:
+        return None
+    for key in ("account_number_custodian", "custodian", "primary", "account"):
+        value = numbers.get(key)
+        if isinstance(value, str) and value:
+            return value
+        if isinstance(value, list) and value:
+            return value[0]
+    sg = numbers.get("sg")
+    if isinstance(sg, list) and sg:
+        return sg[0]
+    for key, value in numbers.items():
+        if key == "collateral":
+            continue
+        if isinstance(value, str) and value:
+            return value
+        if isinstance(value, list) and value:
+            return value[0]
+    return None
+
+
+def build_fund_registry(
+    session: Any = None,
+    base_cls: Any = None,
+    *,
+    definitions: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> FundRegistry:
+    """Build a {fund_name: Fund} registry from FUND_DEFINITIONS, enriched with
+    account numbers when a DB session is provided."""
+    definitions = definitions if definitions is not None else FUND_DEFINITIONS
+
+    account_numbers: Dict[str, Dict[str, Any]] = {}
+    if session is not None and base_cls is not None:
+        account_numbers = _load_account_numbers(session, base_cls)
+
+    registry: FundRegistry = {}
+    for fund_name, payload in definitions.items():
+        config = dict(payload)
+        config.setdefault("fund", fund_name)
+        numbers = account_numbers.get(fund_name)
+        if numbers:
+            config["account_numbers"] = numbers
+            config.setdefault("account_number_custodian", _derive_custodian_account_number(numbers))
+        registry[fund_name] = Fund(name=fund_name, config=config, base_cls=base_cls)
+    return registry
+
+
+__all__ = [
+    "Fund",
+    "FundData",
+    "FundSnapshot",
+    "FundHoldings",
+    "FundRegistry",
+    "build_fund_registry",
+]

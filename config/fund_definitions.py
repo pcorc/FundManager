@@ -1,4 +1,4 @@
-"""Static fund metadata used by :mod:`config.fund_registry`."""
+"""Static fund metadata consumed by :func:`processing.fund.build_fund_registry`."""
 from __future__ import annotations
 
 from typing import Any, Dict
