@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from config.fund_definitions import (
     CLOSED_END_FUNDS,
@@ -21,54 +21,20 @@ from config.fund_definitions import (
 # FUND GROUP UTILITIES
 # ============================================================================
 
-# Convenience: All funds
-ALL_FUNDS = set(FUND_DEFINITIONS.keys())
+ALL_FUNDS: Set[str] = set(FUND_DEFINITIONS.keys())
+ALL_REGISTERED_FUNDS: Set[str] = ETF_FUNDS | CLOSED_END_FUNDS | PRIVATE_FUNDS
 
-# Additional custom fund groups
-ALL_REGISTERED_FUNDS = ETF_FUNDS | CLOSED_END_FUNDS | PRIVATE_FUNDS
-
-# Wrapper-based groups
-MUTUAL_AND_VIT_WRAPPERS = {"mutual_fund", "vit"}
-MUTUAL_AND_VIT_FUNDS = {
+# Mutual-fund / VIT cohort + the three loose tickers historically run alongside.
+MUTUAL_AND_VIT_FUNDS: Set[str] = {
     ticker
     for ticker, metadata in FUND_DEFINITIONS.items()
-    if metadata.get("vehicle_wrapper") in MUTUAL_AND_VIT_WRAPPERS
+    if metadata.get("vehicle_wrapper") in {"mutual_fund", "vit"}
 }
+VITMF_COHORT: Set[str] = MUTUAL_AND_VIT_FUNDS | {"FTCSH", "FTMIX", "KNGIX"}
 
-# Convenience groups for daily runs
-DAILY_GROUP_1_CEF_PRIVATE = CLOSED_END_FUNDS | PRIVATE_FUNDS
-DAILY_GROUP_2_ETF = ETF_FUNDS
-DAILY_GROUP_3_VIT_AND_MF = MUTUAL_AND_VIT_FUNDS | {"FTCSH", "FTMIX", "KNGIX"}
-
-# Default batch definitions for common daily runs
-DAILY_EOD_AND_RECON_RUNS = [
-    "eod_compliance_daily_cef_private",
-    "eod_recon_daily_cef_private",
-    "eod_compliance_daily_etf",
-    "eod_recon_daily_etf",
-    "eod_compliance_daily_vitmf",
-    "eod_recon_daily_vitmf",
-]
-
-DAILY_TRADING_COMPLIANCE_RUNS = [
-    "trading_compliance_daily_cef_private",
-    "trading_compliance_daily_etf",
-    "trading_compliance_daily_vitmf",
-]
 
 def get_fund_group(group_name: str) -> Set[str]:
-    """
-    Retrieve a predefined fund group by name.
-
-    Args:
-        group_name: Name of the fund group (e.g., 'ETF_FUNDS', 'ALL_FUNDS')
-
-    Returns:
-        Set of fund tickers
-
-    Raises:
-        ValueError: If group_name is not recognized
-    """
+    """Retrieve a predefined fund group by name."""
     groups = {
         "ALL_FUNDS": ALL_FUNDS,
         "ETF_FUNDS": ETF_FUNDS,
@@ -81,87 +47,32 @@ def get_fund_group(group_name: str) -> Set[str]:
         "INDEX_FLEX_FUNDS": INDEX_FLEX_FUNDS,
         "SINGLE_STOCK_FLEX_FUNDS": SINGLE_STOCK_FLEX_FUNDS,
         "ALL_REGISTERED_FUNDS": ALL_REGISTERED_FUNDS,
+        "MUTUAL_AND_VIT_FUNDS": MUTUAL_AND_VIT_FUNDS,
+        "VITMF_COHORT": VITMF_COHORT,
     }
-
     if group_name not in groups:
         available = ", ".join(sorted(groups.keys()))
         raise ValueError(f"Unknown fund group '{group_name}'. Available groups: {available}")
-
     return groups[group_name]
 
 
 def build_fund_list(*items) -> List[str]:
-    """
-    Build a fund list by combining fund groups and individual tickers.
-
-    Args:
-        *items: Variable number of arguments that can be:
-            - Set[str]: A fund group (e.g., ETF_FUNDS, CLOSED_END_FUNDS)
-            - str: An individual fund ticker (e.g., "RDVI", "KNG")
-            - List[str]: A list of fund tickers
-
-    Returns:
-        Sorted list of unique fund tickers
-
-    Examples:
-        # Combine ETFs with a single fund
-        build_fund_list(ETF_FUNDS, "P20127")
-
-        # Combine multiple groups
-        build_fund_list(ETF_FUNDS, CLOSED_END_FUNDS, PRIVATE_FUNDS)
-
-        # Mix groups and individual tickers
-        build_fund_list(ETF_FUNDS, "P20127", "HE3B1")
-
-        # Combine groups with a list of tickers
-        build_fund_list(CLOSED_END_FUNDS, ["RDVI", "KNG"])
-    """
-    combined = set()
-
+    """Combine fund groups (sets), single tickers (str), or lists of tickers into a sorted list."""
+    combined: Set[str] = set()
     for item in items:
         if isinstance(item, set):
-            # It's a fund group
             combined.update(item)
         elif isinstance(item, str):
-            # It's a single ticker
             combined.add(item)
         elif isinstance(item, list):
-            # It's a list of tickers
             combined.update(item)
         else:
             raise TypeError(f"Unsupported type in build_fund_list: {type(item)}")
-
     return sorted(combined)
 
 
 def exclude_funds(base_funds, *exclude_items) -> List[str]:
-    """
-    Remove specific funds from a fund group or list.
-
-    Args:
-        base_funds: Starting fund group (Set) or list (List[str])
-        *exclude_items: Funds to exclude - can be:
-            - Set[str]: A fund group to exclude
-            - str: An individual fund ticker to exclude
-            - List[str]: A list of fund tickers to exclude
-
-    Returns:
-        Sorted list of fund tickers with exclusions removed
-
-    Examples:
-        # All funds except a few specific ones
-        exclude_funds(ALL_FUNDS, "RDVI", "KNG", "FTMIX")
-
-        # All funds except private funds
-        exclude_funds(ALL_FUNDS, PRIVATE_FUNDS)
-
-        # ETFs except specific ones
-        exclude_funds(ETF_FUNDS, ["RDVI", "KNG"])
-
-        # Complex: All funds except private and a few specific ETFs
-        exclude_funds(ALL_FUNDS, PRIVATE_FUNDS, "RDVI", "KNG")
-    """
-    # Convert base to set
+    """Return base_funds with the specified groups/tickers/lists removed (sorted)."""
     if isinstance(base_funds, set):
         result = base_funds.copy()
     elif isinstance(base_funds, list):
@@ -169,7 +80,6 @@ def exclude_funds(base_funds, *exclude_items) -> List[str]:
     else:
         raise TypeError(f"base_funds must be a set or list, got {type(base_funds)}")
 
-    # Remove excluded items
     for item in exclude_items:
         if isinstance(item, set):
             result -= item
@@ -179,7 +89,6 @@ def exclude_funds(base_funds, *exclude_items) -> List[str]:
             result -= set(item)
         else:
             raise TypeError(f"Unsupported type in exclude_funds: {type(item)}")
-
     return sorted(result)
 
 
@@ -188,114 +97,57 @@ def exclude_funds(base_funds, *exclude_items) -> List[str]:
 # ============================================================================
 
 def calculate_business_day_offset(base_date: date, offset: int) -> date:
-    """
-    Calculate a business day offset from base_date.
-
-    Args:
-        base_date: Starting date (must be a business day)
-        offset: Number of business days to offset (negative for past, positive for future)
-
-    Returns:
-        The resulting business day
-
-    Examples:
-        base_date = 2025-11-21 (Thursday)
-        offset = -1 -> 2025-11-20 (Wednesday)
-        offset = -2 -> 2025-11-19 (Tuesday)
-    """
+    """Calculate a business-day offset (positive=forward, negative=back) from base_date."""
     if offset == 0:
         return base_date
-
+    direction = 1 if offset > 0 else -1
+    target = abs(offset)
     current = base_date
     days_moved = 0
-    direction = 1 if offset > 0 else -1
-    target_days = abs(offset)
-
-    while days_moved < target_days:
+    while days_moved < target:
         current += timedelta(days=direction)
-        # Count only business days (Monday=0 to Friday=4)
         if current.weekday() < 5:
             days_moved += 1
-
     return current
 
 
 def ensure_business_day(input_date: date) -> date:
-    """
-    Ensure the given date is a business day. If weekend, return previous Friday.
-
-    Args:
-        input_date: Any date
-
-    Returns:
-        The same date if Mon-Fri, otherwise the previous Friday
-    """
+    """Return input_date if it's Mon-Fri; otherwise the previous Friday."""
     if input_date.weekday() < 5:
         return input_date
-
-    # Saturday (5) -> go back 1 day to Friday
-    # Sunday (6) -> go back 2 days to Friday
-    days_back = input_date.weekday() - 4
-    return input_date - timedelta(days=days_back)
+    return input_date - timedelta(days=input_date.weekday() - 4)
 
 
 def calculate_date_offsets(base_date: date) -> Dict[str, date]:
-    """
-    Calculate standard date offsets from a base date.
-
-    Args:
-        base_date: The base date (will be adjusted to business day if weekend)
-
-    Returns:
-        Dictionary with keys: 't', 't1', 't2' (T, T-1, T-2)
-    """
+    """Return {'t', 't1', 't2'} for T, T-1, T-2 business days from base_date."""
     t = ensure_business_day(base_date)
-    t1 = calculate_business_day_offset(t, -1)
-    t2 = calculate_business_day_offset(t, -2)
-
     return {
         "t": t,
-        "t1": t1,
-        "t2": t2,
+        "t1": calculate_business_day_offset(t, -1),
+        "t2": calculate_business_day_offset(t, -2),
     }
 
+
 def generate_business_date_range(start_date: date, end_date: date) -> List[date]:
-    """
-    Generate a list of business days (Mon-Fri) between two dates, inclusive.
-
-    Args:
-        start_date: Range start (will be adjusted to business day if weekend)
-        end_date: Range end (will be adjusted to business day if weekend)
-
-    Returns:
-        A list of business-day ``date`` objects between the start and end dates.
-
-    Raises:
-        ValueError: If ``start_date`` occurs after ``end_date``
-    """
-
+    """List of business days between start_date and end_date inclusive."""
     start_date = ensure_business_day(start_date)
     end_date = ensure_business_day(end_date)
-
     if start_date > end_date:
         raise ValueError("start_date must be on or before end_date")
-
-    business_days: List[date] = []
+    days: List[date] = []
     current = start_date
-
     while current <= end_date:
-        if current.weekday() < 5:  # Monday-Friday
-            business_days.append(current)
+        if current.weekday() < 5:
+            days.append(current)
         current += timedelta(days=1)
+    return days
 
-    return business_days
 
 # ============================================================================
-# RUN CONFIGURATION TEMPLATES
+# COMPLIANCE TEST SUITES
 # ============================================================================
 
-# Standard compliance test suite
-FULL_COMPLIANCE_TESTS = [
+FULL_COMPLIANCE_TESTS: List[str] = [
     "gics_compliance",
     "prospectus_80pct_policy",
     "diversification_40act_check",
@@ -309,395 +161,191 @@ FULL_COMPLIANCE_TESTS = [
     "twelve_d3_sec_biz",
 ]
 
-# Subset for diversification-focused testing
-DIVERSIFICATION_TESTS = [
+DIVERSIFICATION_TESTS: List[str] = [
     "diversification_40act_check",
     "diversification_IRS_check",
     "diversification_IRC_check",
 ]
 
 
-RUN_CONFIGS: Dict[str, Dict[str, Any]] = {
-    # ========================================================================
-    # TRADING COMPLIANCE CONFIGURATIONS (Single Date Mode)
-    # ========================================================================
+# ============================================================================
+# CONFIG GENERATION
+#
+# Every config has the same 8 fields. The only meaningful variation is
+# cohort (which funds + filename tag) × operation (compliance / recon / full /
+# trading_compliance). Configs are generated programmatically rather than
+# repeated as dict literals.
+# ============================================================================
 
-    "trading_compliance_etfs": {
+DEFAULT_OUTPUT_DIR = "./outputs"
+
+
+# (cohort_suffix, fund_set, output_tag, descriptive_phrase)
+# `cohort_suffix` is appended to config names; `output_tag` goes in filenames.
+# They differ historically — e.g. the `closed_end_private` cohort writes files
+# tagged `cefs_pfs`.
+_COHORTS: Sequence[Tuple[str, Set[str], str, str]] = (
+    ("etfs",               ETF_FUNDS,                          "etfs",      "ETF funds"),
+    ("closed_end_private", CLOSED_END_FUNDS | PRIVATE_FUNDS,   "cefs_pfs",  "closed-end and private funds"),
+    ("vitmf",              VITMF_COHORT,                       "vitmf",     "mutual fund and VIT accounts"),
+    ("all_funds",          ALL_FUNDS,                          "all_funds", "all funds"),
+    ("custom",             set(),                              "custom",    "custom fund list (must override 'funds')"),
+)
+
+# (op_suffix, eod_reports, descriptive_prefix)
+_EOD_OPERATIONS: Sequence[Tuple[str, List[str], str]] = (
+    ("compliance", ["compliance"],                          "EOD compliance checks for"),
+    ("recon",      ["reconciliation", "nav"],               "Holdings and NAV reconciliation for"),
+    ("full",       ["compliance", "reconciliation", "nav"], "Compliance + holdings recon + NAV recon for"),
+)
+
+
+def _eod_config(
+    funds: Set[str],
+    reports: List[str],
+    output_tag: str,
+    description: str,
+    *,
+    compliance_tests: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    return {
+        "analysis_type": "eod",
+        "date_mode": "single",
+        "funds": sorted(funds),
+        "eod_reports": reports,
+        "compliance_tests": compliance_tests if compliance_tests is not None else FULL_COMPLIANCE_TESTS,
+        "create_pdf": True,
+        "output_dir": DEFAULT_OUTPUT_DIR,
+        "output_tag": output_tag,
+        "description": description,
+    }
+
+
+def _trading_config(
+    funds: Set[str],
+    output_tag: str,
+    description: str,
+    *,
+    compliance_tests: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    return {
         "analysis_type": "trading_compliance",
         "date_mode": "single",
-        "funds": list(ETF_FUNDS),
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
+        "funds": sorted(funds),
+        "compliance_tests": compliance_tests if compliance_tests is not None else FULL_COMPLIANCE_TESTS,
         "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "etfs",  # Tag for output file names
-        "description": "Trading compliance for all ETF funds",
-    },
+        "output_dir": DEFAULT_OUTPUT_DIR,
+        "output_tag": output_tag,
+        "description": description,
+    }
 
-    "trading_compliance_closed_end_private": {
-        "analysis_type": "trading_compliance",
-        "date_mode": "single",
-        "funds": list(CLOSED_END_FUNDS | PRIVATE_FUNDS),
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "cefs_pfs",  # Tag for output file names
-        "description": "Trading compliance for closed-end and private funds",
-    },
 
-    "trading_compliance_all_funds": {
-        "analysis_type": "trading_compliance",
-        "date_mode": "single",
-        "funds": list(ALL_FUNDS),
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "all_funds",  # Tag for output file names
-        "description": "Trading compliance for all funds",
-    },
-
-    "trading_compliance_custom": {
-        "analysis_type": "trading_compliance",
-        "date_mode": "single",
-        "funds": [],  # Override this list when running
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "custom",  # Tag for output file names (override if needed)
-        "description": "Trading compliance for custom fund list (must override 'funds')",
-    },
-
-    "trading_compliance_all_except": {
-        "analysis_type": "trading_compliance",
-        "date_mode": "single",
-        "funds": [],  # Override with exclude_funds(ALL_FUNDS, ...)
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "all_except",  # Tag for output file names (override if needed)
-        "description": "Trading compliance for all funds except specified ones (must override 'funds')",
-    },
-
-    "trading_compliance_daily_cef_private": {
-        "analysis_type": "trading_compliance",
-        "date_mode": "single",
-        "funds": sorted(DAILY_GROUP_1_CEF_PRIVATE),
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "cef",  # Tag for output file names
-        "description": "Daily trading compliance for closed-end and private funds",
-    },
-
-    "trading_compliance_daily_etf": {
-        "analysis_type": "trading_compliance",
-        "date_mode": "single",
-        "funds": sorted(DAILY_GROUP_2_ETF),
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "etf",  # Tag for output file names
-        "description": "Daily trading compliance for ETF funds",
-    },
-
-    "trading_compliance_daily_vitmf": {
-        "analysis_type": "trading_compliance",
-        "date_mode": "single",
-        "funds": sorted(DAILY_GROUP_3_VIT_AND_MF),
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "vitmf",  # Tag for output file names
-        "description": "Daily trading compliance for mutual fund and VIT accounts",
-    },
-
-    # ========================================================================
-    # EOD COMPLIANCE CONFIGURATIONS (Single Date Mode)
-    # ========================================================================
-
-    "eod_compliance_etfs": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": list(ETF_FUNDS),
-        "eod_reports": ["compliance"],
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "etfs",  # Tag for output file names
-        "description": "EOD compliance checks for all ETF funds",
-    },
-
-    "eod_compliance_closed_end_private": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": list(CLOSED_END_FUNDS | PRIVATE_FUNDS),
-        "eod_reports": ["compliance"],
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "cefs_pfs",  # Tag for output file names
-        "description": "EOD compliance checks for closed-end and private funds",
-    },
-
-    "eod_compliance_all_funds": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": list(ALL_FUNDS),
-        "eod_reports": ["compliance"],
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "all_funds",  # Tag for output file names
-        "description": "EOD compliance checks for all funds",
-    },
-
-    "eod_compliance_custom": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": [],  # Override this list when running
-        "eod_reports": ["compliance"],
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "custom",  # Tag for output file names (override if needed)
-        "description": "EOD compliance checks for custom fund list (must override 'funds')",
-    },
-
-    "eod_compliance_all_except": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": [],  # Override with exclude_funds(ALL_FUNDS, ...)
-        "eod_reports": ["compliance"],
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "all_except",  # Tag for output file names (override if needed)
-        "description": "EOD compliance checks for all funds except specified ones (must override 'funds')",
-    },
-
-    # ========================================================================
-    # EOD RECONCILIATION CONFIGURATIONS (Single Date Mode)
-    # ========================================================================
-
-    "eod_recon_etfs": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": list(ETF_FUNDS),
-        "eod_reports": ["reconciliation", "nav"],
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "etfs",  # Tag for output file names
-        "description": "Holdings and NAV reconciliation for all ETF funds",
-    },
-
-    "eod_recon_closed_end_private": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": list(CLOSED_END_FUNDS | PRIVATE_FUNDS),
-        "eod_reports": ["reconciliation", "nav"],
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "cefs_pfs",  # Tag for output file names
-        "description": "Holdings and NAV reconciliation for closed-end and private funds",
-    },
-
-    "eod_recon_all_funds": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": list(ALL_FUNDS),
-        "eod_reports": ["reconciliation", "nav"],
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "all_funds",  # Tag for output file names
-        "description": "Holdings and NAV reconciliation for all funds",
-    },
-
-    "eod_recon_custom": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": [],  # Override this list when running
-        "eod_reports": ["reconciliation", "nav"],
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "custom",  # Tag for output file names (override if needed)
-        "description": "Holdings and NAV reconciliation for custom fund list (must override 'funds')",
-    },
-
-    "eod_recon_all_except": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": [],  # Override with exclude_funds(ALL_FUNDS, ...)
-        "eod_reports": ["reconciliation", "nav"],
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "all_except",  # Tag for output file names (override if needed)
-        "description": "Holdings and NAV reconciliation for all funds except specified ones (must override 'funds')",
-    },
-
-    "eod_compliance_daily_cef_private": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": sorted(DAILY_GROUP_1_CEF_PRIVATE),
-        "eod_reports": ["compliance"],
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "cef",  # Tag for output file names
-        "description": "Daily EOD compliance for closed-end and private funds",
-    },
-
-    "eod_compliance_daily_etf": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": sorted(DAILY_GROUP_2_ETF),
-        "eod_reports": ["compliance"],
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "etf",  # Tag for output file names
-        "description": "Daily EOD compliance for ETF funds",
-    },
-
-    "eod_compliance_daily_vitmf": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": sorted(DAILY_GROUP_3_VIT_AND_MF),
-        "eod_reports": ["compliance"],
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "vitmf",  # Tag for output file names
-        "description": "Daily EOD compliance for mutual fund and VIT accounts",
-    },
-
-    "eod_recon_daily_cef_private": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": sorted(DAILY_GROUP_1_CEF_PRIVATE),
-        "eod_reports": ["reconciliation", "nav"],
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "cef",  # Tag for output file names
-        "description": "Daily holdings and NAV reconciliation for closed-end and private funds",
-    },
-
-    "eod_recon_daily_etf": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": sorted(DAILY_GROUP_2_ETF),
-        "eod_reports": ["reconciliation", "nav"],
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "etf",  # Tag for output file names
-        "description": "Daily holdings and NAV reconciliation for ETF funds",
-    },
-
-    "eod_recon_daily_vitmf": {
-        "analysis_type": "eod",
-        "date_mode": "single",
-        "funds": sorted(DAILY_GROUP_3_VIT_AND_MF),
-        "eod_reports": ["reconciliation", "nav"],
-        "create_pdf": True,
-        "output_dir": "./outputs",
-        "output_tag": "vitmf",  # Tag for output file names
-        "description": "Daily holdings and NAV reconciliation for mutual fund and VIT accounts",
-    },
-
-    # ========================================================================
-    # TIME SERIES CONFIGURATIONS (Range Date Mode)
-    # ========================================================================
-
-    "time_series_diversification": {
+def _time_series_config(
+    funds: List[str],
+    output_tag: str,
+    description: str,
+    *,
+    compliance_tests: List[str],
+) -> Dict[str, Any]:
+    return {
         "analysis_type": "eod",
         "date_mode": "range",
-        "funds": [
-            "P20127", "P21026", "P2726", "P30128", "P31027", "P3727",
-            "R21126", "HE3B1", "HE3B2", "TR2B1", "TR2B2"
-        ],
+        "funds": funds,
         "eod_reports": ["compliance"],
-        "compliance_tests": DIVERSIFICATION_TESTS,
+        "compliance_tests": compliance_tests,
         "create_pdf": False,
-        "output_dir": "./outputs",
+        "output_dir": DEFAULT_OUTPUT_DIR,
         "generate_daily_reports": False,
-        "output_tag": "diversification",  # Tag for output file names
-        "description": "Time series diversification testing for private funds",
-    },
+        "output_tag": output_tag,
+        "description": description,
+    }
 
-    "time_series_full_compliance": {
-        "analysis_type": "eod",
-        "date_mode": "range",
-        "funds": list(CLOSED_END_FUNDS),
-        "eod_reports": ["compliance"],
-        "compliance_tests": FULL_COMPLIANCE_TESTS,
-        "create_pdf": False,
-        "output_dir": "./outputs",
-        "generate_daily_reports": False,
-        "output_tag": "full_compliance",  # Tag for output file names
-        "description": "Time series full compliance for closed-end funds",
-    },
-    "custom1": {
-        "analysis_type": "eod",
-        "date_mode": "range",
-        "funds": ["FDND", "DOGG"],
-        "eod_reports": ["compliance"],
-        "compliance_tests": ["diversification_IRS_check"],
-        "create_pdf": False,
-        "output_dir": "./outputs",
-        "generate_daily_reports": False,
-        "output_tag": "jan31_irs_compliance",  # Tag for output file names
-        "description": "Time series full compliance for closed-end funds",
-    },
-}
+
+# Cohort × operation product: generates 5 × 3 = 15 EOD configs and 5 trading
+# configs. Names follow the pattern `eod_<op>_<cohort>` and `trading_compliance_<cohort>`:
+#   eod_compliance_etfs, eod_recon_etfs, eod_full_etfs, trading_compliance_etfs,
+#   eod_compliance_closed_end_private, …
+RUN_CONFIGS: Dict[str, Dict[str, Any]] = {}
+
+for _cohort_suffix, _funds, _tag, _label in _COHORTS:
+    for _op_suffix, _reports, _op_prefix in _EOD_OPERATIONS:
+        RUN_CONFIGS[f"eod_{_op_suffix}_{_cohort_suffix}"] = _eod_config(
+            _funds, _reports, _tag, f"{_op_prefix} {_label}",
+        )
+    RUN_CONFIGS[f"trading_compliance_{_cohort_suffix}"] = _trading_config(
+        _funds, _tag, f"Trading compliance for {_label}",
+    )
+
+# Bespoke time-series configs (range mode, hand-picked funds, no PDF).
+RUN_CONFIGS["time_series_diversification"] = _time_series_config(
+    funds=[
+        "P20127", "P21026", "P2726", "P30128", "P31027", "P3727",
+        "R21126", "HE3B1", "HE3B2", "TR2B1", "TR2B2",
+    ],
+    output_tag="diversification",
+    description="Time series diversification testing for private funds",
+    compliance_tests=DIVERSIFICATION_TESTS,
+)
+RUN_CONFIGS["time_series_full_compliance"] = _time_series_config(
+    funds=sorted(CLOSED_END_FUNDS),
+    output_tag="full_compliance",
+    description="Time series full compliance for closed-end funds",
+    compliance_tests=FULL_COMPLIANCE_TESTS,
+)
+RUN_CONFIGS["custom1"] = _time_series_config(
+    funds=["FDND", "DOGG"],
+    output_tag="jan31_irs_compliance",
+    description="Time series IRS diversification for FDND and DOGG",
+    compliance_tests=["diversification_IRS_check"],
+)
 
 
 # ============================================================================
-# CONFIGURATION HELPER FUNCTIONS
+# DAILY RUN BATCHES
+# ============================================================================
+
+DAILY_EOD_AND_RECON_RUNS: List[str] = [
+    "eod_compliance_closed_end_private",
+    "eod_recon_closed_end_private",
+    "eod_compliance_etfs",
+    "eod_recon_etfs",
+    "eod_compliance_vitmf",
+    "eod_recon_vitmf",
+]
+
+DAILY_TRADING_COMPLIANCE_RUNS: List[str] = [
+    "trading_compliance_closed_end_private",
+    "trading_compliance_etfs",
+    "trading_compliance_vitmf",
+]
+
+
+# ============================================================================
+# CONFIG HELPERS
 # ============================================================================
 
 def get_config(config_name: str) -> Dict[str, Any]:
-    """
-    Retrieve a run configuration by name.
-
-    Args:
-        config_name: Name of the configuration
-
-    Returns:
-        Configuration dictionary
-
-    Raises:
-        ValueError: If config_name is not found
-    """
+    """Return a copy of the named run configuration."""
     if config_name not in RUN_CONFIGS:
         available = ", ".join(sorted(RUN_CONFIGS.keys()))
         raise ValueError(f"Unknown configuration '{config_name}'. Available: {available}")
-
     return RUN_CONFIGS[config_name].copy()
 
 
 def list_available_configs() -> List[str]:
-    """Return list of all available configuration names."""
+    """Sorted list of every available configuration name."""
     return sorted(RUN_CONFIGS.keys())
 
 
 def get_config_description(config_name: str) -> str:
-    """Get the description for a specific configuration."""
-    config = get_config(config_name)
-    return config.get("description", "No description available")
+    """Human-readable description for a configuration."""
+    return get_config(config_name).get("description", "No description available")
 
 
 def merge_overrides(config: Dict[str, Any], overrides: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Merge user overrides into a configuration.
-
-    Args:
-        config: Base configuration
-        overrides: Override values (can be None)
-
-    Returns:
-        Merged configuration dictionary
-    """
+    """Return a shallow copy of config with overrides applied."""
     if not overrides:
         return config
-
     merged = config.copy()
     merged.update(overrides)
     return merged

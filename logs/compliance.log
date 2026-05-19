@@ -1,0 +1,41 @@
+2026-05-18 11:08:30,624 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 11:15:02,433 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 11:21:42,137 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 11:35:20,761 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 11:46:59,346 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 11:50:06,978 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 16:52:47,440 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 17:18:02,961 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 17:34:08,097 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 17:38:48,561 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 17:40:34,525 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 17:46:32,477 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 17:51:14,432 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 17:51:50,255 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 17:52:47,695 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 17:53:22,990 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+2026-05-18 18:16:14,953 - compliance_report - ERROR - PDF generation failed: Not enough horizontal space to render a single character
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\PycharmProjects\FundManager\reporting\compliance_reporting.py", line 2618, in generate_compliance_reports
+    pdf_report = ComplianceReportPDF(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\PycharmProjects\FundManager\reporting\compliance_reporting.py", line 1104, in __init__
+    self.generate_pdf()
+  File "C:\Users\PatrickCorcoran\PycharmProjects\FundManager\reporting\compliance_reporting.py", line 1574, in generate_pdf
+    self._render_metric_section(
+  File "C:\Users\PatrickCorcoran\PycharmProjects\FundManager\reporting\compliance_reporting.py", line 1651, in _render_metric_section
+    self._draw_footnotes_section(footnote_key)
+  File "C:\Users\PatrickCorcoran\PycharmProjects\FundManager\reporting\compliance_reporting.py", line 1976, in _draw_footnotes_section
+    self.pdf.multi_cell(0, 4.5, self._sanitize_text(f"* {note}"))
+  File "C:\Users\PatrickCorcoran\AppData\Local\Programs\Python\Python311\Lib\site-packages\fpdf\fpdf.py", line 281, in wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\AppData\Local\Programs\Python\Python311\Lib\site-packages\fpdf\deprecation.py", line 36, in wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\AppData\Local\Programs\Python\Python311\Lib\site-packages\fpdf\fpdf.py", line 4916, in multi_cell
+    text_line = multi_line_break.get_line()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\AppData\Local\Programs\Python\Python311\Lib\site-packages\fpdf\line_break.py", line 851, in get_line
+    raise FPDFException(
+fpdf.errors.FPDFException: Not enough horizontal space to render a single character

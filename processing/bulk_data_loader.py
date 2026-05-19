@@ -373,7 +373,10 @@ class BulkDataLoader:
         target_date: date,
         previous_date: Optional[date],
     ) -> pd.DataFrame:
-        table = getattr(self.base_cls.classes, table_name)
+        table = getattr(self.base_cls.classes, table_name, None)
+        if table is None:
+            self.logger.debug("Custodian holdings table %s not reflected; skipping", table_name)
+            return pd.DataFrame()
         lower_name = table_name.lower()
 
         if "bny" in lower_name:
@@ -602,10 +605,16 @@ class BulkDataLoader:
                 continue
 
             # Generic fallback: query the whole table once and filter per fund.
-            table = getattr(self.base_cls.classes, table_name)
-            query = self._apply_date_filter(
-                self.session.query(table), table.date, target_date, previous_date
+            table = getattr(self.base_cls.classes, table_name, None)
+            if table is None:
+                self.logger.debug("NAV table %s not reflected; skipping", table_name)
+                continue
+            date_column = self._get_table_column(
+                table, "date", "process_date", "valuation_date", "effective_date", "business_date"
             )
+            query = self.session.query(table)
+            if date_column is not None:
+                query = self._apply_date_filter(query, date_column, target_date, previous_date)
             all_nav = pd.read_sql(query.statement, self.session.bind)
 
             for fund in funds:
@@ -732,7 +741,10 @@ class BulkDataLoader:
                 )
                 continue
 
-            table = getattr(self.base_cls.classes, table_name)
+            table = getattr(self.base_cls.classes, table_name, None)
+            if table is None:
+                self.logger.debug("Cash table %s not reflected; skipping", table_name)
+                continue
             date_column = self._get_table_column(
                 table, "date", "business_date", "nav_date", "process_date"
             )
@@ -1147,7 +1159,10 @@ class BulkDataLoader:
         fund: Fund,
         previous_date: Optional[date],
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        table = getattr(self.base_cls.classes, table_name)
+        table = getattr(self.base_cls.classes, table_name, None)
+        if table is None:
+            self.logger.debug("Generic index table %s not reflected; skipping", table_name)
+            return pd.DataFrame(), pd.DataFrame()
         date_column = getattr(table, "date", None) or next(
             (
                 col

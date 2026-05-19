@@ -72,17 +72,24 @@ class CombinedReconciliationReport:
 
     def _build_links(self) -> Dict[str, int]:
         funds = sorted(self._get_all_funds())
-        links = {fund: self.pdf.add_link() for fund in funds}
+        links: Dict[str, int] = {}
+        for fund in funds:
+            link_id = self.pdf.add_link()
+            # Bind to a placeholder page so .link() doesn't error before the
+            # real target page is generated; overwritten later by set_link().
+            self.pdf.set_link(link_id, page=1)
+            links[fund] = link_id
         return links
 
     def _build_summary_links(self) -> Dict[str, int]:
-        links = {
-            "nav": self.pdf.add_link(),
-            "holdings": self.pdf.add_link(),
-            "gl": self.pdf.add_link(),
-        }
+        keys = ["nav", "holdings", "gl"]
         if self.compliance_results:
-            links["compliance"] = self.pdf.add_link()
+            keys.append("compliance")
+        links: Dict[str, int] = {}
+        for key in keys:
+            link_id = self.pdf.add_link()
+            self.pdf.set_link(link_id, page=1)
+            links[key] = link_id
         return links
 
     def _get_all_funds(self) -> set[str]:
@@ -575,22 +582,60 @@ class CombinedReconciliationReport:
             self.pdf.render_fund_holdings_section(fund_name, date_str or self.date, holdings_data)
 
     def _add_navigation_bar(self, current_fund: str) -> None:
+        """Show every fund in the navigation bar, wrapping to multiple rows so the
+        list always fits the page width regardless of fund count."""
         start_x = self.pdf.get_x()
         start_y = self.pdf.get_y()
         available_width = self.pdf.w - 2 * self.pdf.l_margin
+        row_height = 7
 
+        funds = sorted(self._get_all_funds())
+        summary_cell_w = 30.0
+        separator_w = 5.0
+
+        # Reserve width for "Summary | " on the first row, then size fund cells
+        # so all funds fit on (possibly multiple) rows of equal-width cells.
+        first_row_capacity = available_width - summary_cell_w - separator_w
+        fund_cell_w = 25.0
+        # Choose a width that lets at least 8 funds fit on the first row; otherwise
+        # narrow them down to whatever fits available_width / N per row.
+        max_first_row = max(int(first_row_capacity // fund_cell_w), 1)
+        if len(funds) > max_first_row:
+            # Pack as many per row as we can at the default cell width.
+            funds_per_row = max(int(available_width // fund_cell_w), 1)
+        else:
+            funds_per_row = max_first_row
+
+        # Background strip for the first row.
         self.pdf.set_fill_color(240, 240, 240)
-        self.pdf.rect(start_x, start_y, available_width, 8, "F")
+        self.pdf.rect(start_x, start_y, available_width, row_height, "F")
 
+        # "Summary" link
         self.pdf.set_font("Arial", "U", 9)
         self.pdf.set_text_color(0, 0, 200)
-        self.pdf.cell(30, 8, "Summary", ln=False, align="C")
-        self.pdf.link(start_x, start_y, 30, 8, self.pdf.top_link)
+        self.pdf.cell(summary_cell_w, row_height, "Summary", ln=False, align="C")
+        self.pdf.link(start_x, start_y, summary_cell_w, row_height, self.pdf.top_link)
         self.pdf.set_text_color(0, 0, 0)
-        self.pdf.cell(5, 8, "|", ln=False, align="C")
+        self.pdf.cell(separator_w, row_height, "|", ln=False, align="C")
 
-        funds = sorted(self._get_all_funds())[:5]  # Show first 5 funds
+        # First row: as many funds as fit alongside Summary
+        row_index = 0
+        col_index = 0
+        first_row_quota = max_first_row
+
         for fund in funds:
+            need_new_row = (
+                (row_index == 0 and col_index >= first_row_quota)
+                or (row_index > 0 and col_index >= funds_per_row)
+            )
+            if need_new_row:
+                self.pdf.ln(row_height)
+                row_index += 1
+                col_index = 0
+                row_y = self.pdf.get_y()
+                self.pdf.set_fill_color(240, 240, 240)
+                self.pdf.rect(start_x, row_y, available_width, row_height, "F")
+
             if fund == current_fund:
                 self.pdf.set_font("Arial", "B", 9)
                 self.pdf.set_text_color(0, 0, 0)
@@ -599,14 +644,17 @@ class CombinedReconciliationReport:
                 self.pdf.set_text_color(0, 0, 200)
 
             fund_x = self.pdf.get_x()
+            fund_y = self.pdf.get_y()
             display_name = fund[:8] if len(fund) > 8 else fund
-            self.pdf.cell(25, 8, display_name, ln=False, align="C")
+            self.pdf.cell(fund_cell_w, row_height, display_name, ln=False, align="C")
 
             if fund != current_fund and fund in self.fund_links:
-                self.pdf.link(fund_x, start_y, 25, 8, self.fund_links[fund])
+                self.pdf.link(fund_x, fund_y, fund_cell_w, row_height, self.fund_links[fund])
+
+            col_index += 1
 
         self.pdf.set_text_color(0, 0, 0)
-        self.pdf.ln(10)
+        self.pdf.ln(row_height + 3)
 
     def _add_nav_details(self, nav_data: Mapping[str, Any]) -> None:
         cols = [("Metric", 70), ("Value", 60)]

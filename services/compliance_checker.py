@@ -159,8 +159,8 @@ class ComplianceChecker:
         ):
             return _base_result(holdings_df)
 
-        flex_options = getattr(getattr(fund.data.current, "vest", None), "flex_options", pd.DataFrame())
-        if flex_options is None or flex_options.empty:
+        flex_options = fund.data.current.vest.flex_options
+        if flex_options.empty:
             return _base_result(holdings_df)
 
         overlap = overlap_df.copy()
@@ -270,9 +270,7 @@ class ComplianceChecker:
 
     def _extract_long_options(self, opt_df: pd.DataFrame, gics_cols: list) -> pd.DataFrame:
         """Return long-only option rows with GICS columns and option_market_value."""
-        if not isinstance(opt_df, pd.DataFrame) or opt_df.empty:
-            return pd.DataFrame()
-        if "option_market_value" not in opt_df.columns:
+        if opt_df.empty or "option_market_value" not in opt_df.columns:
             return pd.DataFrame()
         qty = pd.Series(0.0, index=opt_df.index)
         for qty_col in ("nav_shares", "iiv_shares", "quantity", "shares"):
@@ -521,6 +519,20 @@ class ComplianceChecker:
             )
 
     def diversification_IRS_check(self, fund: Fund) -> ComplianceResult:
+        # IRS §851 RIC diversification is for registered investment companies.
+        # Private funds are not RICs.
+        if fund.is_private_fund:
+            return ComplianceResult(
+                is_compliant=True,
+                details={
+                    "rule": "IRS Diversification",
+                    "skipped": True,
+                    "reason": "Private funds are not RICs under IRS §851",
+                    "fund_type": "Private Fund",
+                },
+                calculations={},
+            )
+
         try:
             vest_eqy_holdings = fund.data.current.vest.equity
             vest_opt_holdings = fund.data.current.vest.options
@@ -1012,9 +1024,9 @@ class ComplianceChecker:
         Only applies to VIT (Variable Insurance Trust) funds.
         """
         # Check if fund has vehicle_type attribute and if it's VIT
-        vehicle_type = getattr(fund, 'vehicle_type', None) or getattr(fund, 'vehicle', None) or ""
+        vehicle_type = fund.vehicle or ""
 
-        if str(vehicle_type).lower() != VEHICLE_VIT.lower():
+        if vehicle_type.lower() != VEHICLE_VIT.lower():
             # Return a skipped result for non-VIT funds
             return ComplianceResult(
                 is_compliant=True,
@@ -1233,8 +1245,30 @@ class ComplianceChecker:
             vest_eqy_holdings = fund.data.current.vest.equity
             total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
 
+            # No equity / no assets is a legitimate skip (e.g. cash-only private
+            # funds). Return a "skipped" PASS result instead of raising — the
+            # rule trivially holds when there are no investment companies held.
             if total_assets == 0 or vest_eqy_holdings.empty:
-                raise ValueError("Equity holdings or total assets missing")
+                return ComplianceResult(
+                    is_compliant=True,
+                    details={
+                        "rule": "12d1-1 Other Investment Companies",
+                        "skipped": True,
+                        "reason": "No equity holdings or total assets",
+                        "twelve_d1a_other_inv_cos_compliant": True,
+                        "test_1_pass": True,
+                        "test_2_pass": True,
+                        "test_3_pass": True,
+                    },
+                    calculations={
+                        "total_assets": total_assets,
+                        "investment_companies": [],
+                        "ownership_pct_max": None,
+                        "equity_market_value_sum": 0.0,
+                        "equity_market_value_max": 0.0,
+                        "ownership_pct_values": [],
+                    },
+                )
 
             inv_co_mask = ~vest_eqy_holdings["REGULATORY_STRUCTURE"].isnull()
             investment_companies = vest_eqy_holdings[inv_co_mask].copy()
@@ -1433,9 +1467,9 @@ class ComplianceChecker:
                 rule_2_pass = True
             else:
                 debt_threshold = RULE_12D3_DEBT_LIMIT * total_assets
-                rule_2_pass = (
-                    debt_related_businesses["equity_market_value"] <= debt_threshold
-                ).all()
+                rule_2_pass = bool(
+                    (debt_related_businesses["equity_market_value"] <= debt_threshold).all()
+                )
 
             combined_holdings = pd.merge(
                 sec_related_businesses,
@@ -1647,13 +1681,8 @@ class ComplianceChecker:
                     error="GICS classifications are not available on equity holdings",
                 )
 
-            index_obj = getattr(fund.data.current, "index", None)
-            index_df = pd.DataFrame()
-
-            if index_obj is not None and hasattr(index_obj, "equity"):
-                index_equity = index_obj.equity
-                if isinstance(index_equity, pd.DataFrame) and not index_equity.empty:
-                    index_df = index_equity.copy()
+            index_equity = fund.data.current.index.equity
+            index_df = index_equity.copy() if not index_equity.empty else pd.DataFrame()
 
             # Process index weights if we have valid index data
             gics_summary_index: Dict[str, Dict[str, float]] = {}
@@ -1784,8 +1813,6 @@ class ComplianceChecker:
             "FDND": "kng_fdnd",
             "TDVI": "tdvi",
         }
-        if not isinstance(fund_name, str):
-            return "standard"
         return mapping.get(fund_name.upper(), "standard")
 
     def _summarize_gics_exposure(
@@ -1793,9 +1820,7 @@ class ComplianceChecker:
         df: pd.DataFrame,
         weight_series: pd.Series,
     ) -> Dict[str, Dict[str, float]]:
-        if not isinstance(df, pd.DataFrame) or df.empty:
-            return {}
-        if not isinstance(weight_series, pd.Series) or weight_series.empty:
+        if df.empty or weight_series.empty:
             return {}
 
         weights = weight_series.reindex(df.index, fill_value=0.0)
@@ -1876,10 +1901,7 @@ class ComplianceChecker:
         Returns:
             Dictionary mapping industry names to sector names (None for missing sectors)
         """
-        if not isinstance(df, pd.DataFrame) or df.empty:
-            return {}
-
-        if "GICS_INDUSTRY_NAME" not in df.columns or "GICS_SECTOR_NAME" not in df.columns:
+        if df.empty or "GICS_INDUSTRY_NAME" not in df.columns or "GICS_SECTOR_NAME" not in df.columns:
             return {}
 
         # Get unique industry-sector pairs

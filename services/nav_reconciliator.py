@@ -289,7 +289,7 @@ class NAVReconciliator:
 
         # Roll days should source T-1 prices from execution data
         use_roll_trade_prices = self.fund.is_option_settlement_date(self.analysis_date)
-        trades_t1 = getattr(self.fund.data.previous, 'option_trades', pd.DataFrame())
+        trades_t1 = self.fund.data.previous.option_trades
 
         price_breaks = self.fund.get_price_breaks('option')
 
@@ -350,7 +350,7 @@ class NAVReconciliator:
         vest_prior = self.fund.data.previous.vest.options
 
         use_roll_trade_prices = self.fund.is_option_settlement_date(self.analysis_date)
-        trades_t1 = getattr(self.fund.data.previous, 'flex_option_trades', pd.DataFrame())
+        trades_t1 = self.fund.data.previous.flex_option_trades
 
         # Get price breaks
         price_breaks = self.fund.get_price_breaks('option')
@@ -461,10 +461,7 @@ class NAVReconciliator:
             trades: Optional[pd.DataFrame], ticker: str
     ) -> Optional[float]:
         """Return a weighted execution price for a ticker from the trades DataFrame."""
-        if not isinstance(trades, pd.DataFrame) or trades.empty:
-            return None
-
-        if 'optticker' not in trades.columns:
+        if trades.empty or 'optticker' not in trades.columns:
             return None
 
         ticker_trades = trades[trades['optticker'] == ticker]
@@ -531,50 +528,6 @@ class NAVReconciliator:
     # OTHER COMPONENT CALCULATIONS
     # ========================================================================
 
-    def _process_assignments_old(self) -> float:
-        """
-        Process option assignments on settlement days.
-
-        Extracts assignment G/L from fund.data.assignments.
-        """
-        # assignments = self.fund.get_assignments(
-        #     filter_date=self.analysis_date
-        # )
-
-        # we will comment out get_assignments for now and instead we will evaluate with t-1 option holdings
-
-
-        if not assignments.empty:
-            # Try to find P&L columns
-            value_cols = [
-                col for col in assignments.columns
-                if any(keyword in str(col).lower()
-                       for keyword in ('pnl', 'gl', 'gain', 'loss', 'amount'))
-            ]
-
-            for col in value_cols:
-                series = pd.to_numeric(assignments[col], errors='coerce').dropna()
-                if not series.empty:
-                    return float(series.sum())
-
-            # Fallback: calculate from quantity * price
-            quantity_cols = [
-                col for col in assignments.columns
-                if 'quantity' in str(col).lower() or 'contracts' in str(col).lower()
-            ]
-            price_cols = [
-                col for col in assignments.columns
-                if 'price' in str(col).lower() or 'premium' in str(col).lower()
-            ]
-
-            if quantity_cols and price_cols:
-                qty = pd.to_numeric(assignments[quantity_cols[0]], errors='coerce').fillna(0)
-                price = pd.to_numeric(assignments[price_cols[0]], errors='coerce').fillna(0)
-                return float((qty * price).sum())
-
-        # If explicit assignment records aren't present, derive from holdings
-        return self._calculate_assignment_gl_from_holdings()
-
     def _process_assignments(self) -> float:
         """Calculate assignment P&L using T-1 holdings and custodian prices."""
         try:
@@ -582,14 +535,14 @@ class NAVReconciliator:
         except Exception:
             return 0.0
 
-        t1_options = getattr(self.fund.data.previous, 'vest', FundHoldings()).options
-        t1_cust_options = getattr(self.fund.data.previous, 'custodian', FundHoldings()).options
+        t1_options = self.fund.data.previous.vest.options
+        t1_cust_options = self.fund.data.previous.custodian.options
 
-        if not isinstance(t1_cust_options, pd.DataFrame) or t1_cust_options.empty:
+        if t1_cust_options.empty:
             return 0.0
 
         # Merge T-1 custodian options with internal data for strike/equity_price info
-        if isinstance(t1_options, pd.DataFrame) and not t1_options.empty:
+        if not t1_options.empty:
             merged_options = t1_cust_options.merge(
                 t1_options[[col for col in ['optticker', 'strike', 'equity_underlying_price', 'maturity']
                             if col in t1_options.columns]],
@@ -619,7 +572,7 @@ class NAVReconciliator:
 
         # Apply price overrides from price breaks (enables T-1 price changes)
         price_breaks = self.fund.get_price_breaks('option')
-        if isinstance(price_breaks, pd.DataFrame) and not price_breaks.empty:
+        if not price_breaks.empty:
             if 'price_cust' in price_breaks.columns:
                 expiring_options['price'] = expiring_options['optticker'].map(
                     price_breaks['price_cust']
@@ -678,7 +631,7 @@ class NAVReconciliator:
         Formula: TNA * expense_ratio * (days / 365)
         """
         expense_ratio = self.fund.expense_ratio
-        tna = self.fund.get_nav_metric('total_net_assets', 'current')
+        tna = self.fund.data.current.tna
 
         # Check if Friday (3-day accrual)
         analysis_dt = datetime.strptime(self.analysis_date, "%Y-%m-%d").date()
@@ -692,11 +645,8 @@ class NAVReconciliator:
 
         Returns distribution amount if ex_date matches analysis_date.
         """
-        distributions = getattr(self.fund.data, 'distributions', None)
-        if not isinstance(distributions, pd.DataFrame) or distributions.empty:
-            return 0.0
-
-        if 'ex_date' not in distributions.columns:
+        distributions = self.fund.data.distributions
+        if distributions is None or distributions.empty or 'ex_date' not in distributions.columns:
             return 0.0
 
         distributions = distributions.copy()
@@ -739,17 +689,13 @@ class NAVReconciliator:
 
         Returns adjusted beginning TNA that accounts for flows.
         """
-        if not hasattr(self.fund.data, 'flows'):
-            return 0.0
-
         flows = self.fund.data.flows
-
-        if not isinstance(flows, pd.DataFrame) or flows.empty:
+        if flows is None or flows.empty:
             return 0.0
 
         # Get beginning TNA and shares
-        beg_tna = self.fund.get_nav_metric('total_net_assets', 'prior')
-        beg_shares = self.fund.get_nav_metric('shares_outstanding', 'prior')
+        beg_tna = self.fund.data.previous.tna
+        beg_shares = self.fund.data.previous.shares_outstanding
 
         if beg_shares == 0:
             return 0.0
@@ -771,10 +717,8 @@ class NAVReconciliator:
         return beg_tna + tna_adjustment
 
     def _calculate_other(self) -> float:
-        """Extract 'other' impact from fund data if present."""
-        if hasattr(self.fund.data, 'other'):
-            return float(self.fund.data.other or 0.0)
-        return 0.0
+        """Extract 'other' impact from fund data."""
+        return float(self.fund.data.other or 0.0)
 
     # ========================================================================
     # NAV SUMMARY CALCULATION
@@ -790,7 +734,7 @@ class NAVReconciliator:
         Combines all G/L components to calculate expected vs actual NAV.
         """
         # Get TNA metrics
-        beginning_tna = self.fund.get_nav_metric('total_net_assets', 'prior')
+        beginning_tna = self.fund.data.previous.tna
         adjusted_beg_tna = beginning_tna + components.flows_adjustment
 
         # Calculate expected TNA
@@ -803,15 +747,15 @@ class NAVReconciliator:
         )
 
         # Get custodian TNA
-        custodian_tna = self.fund.get_nav_metric('total_net_assets', 'current')
+        custodian_tna = self.fund.data.current.tna
         tna_difference = custodian_tna - expected_tna
 
         # Get shares
-        shares = self.fund.get_nav_metric('shares_outstanding', 'current')
+        shares = self.fund.data.current.shares_outstanding
 
         # Calculate NAV
         expected_nav = expected_tna / shares if shares > 0 else 0.0
-        custodian_nav = self.fund.get_nav_metric('nav', 'current')
+        custodian_nav = self.fund.data.current.nav
         nav_difference = custodian_nav - expected_nav
 
         # Calculate validation flags

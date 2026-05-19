@@ -1,6 +1,7 @@
 """Generate Excel and PDF summaries for compliance results."""
 
 from __future__ import annotations
+from functools import lru_cache
 from numbers import Real
 
 import os
@@ -10,7 +11,6 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
-import numbers
 import re
 import pandas as pd
 
@@ -27,6 +27,24 @@ from utilities.logger import setup_logger
 logger = setup_logger("compliance_report", "logs/compliance.log")
 _PERCENT_RE = re.compile(r"^\s*-?\d+(?:\.\d+)?%$")
 _IRS_DIVERSIFICATION_FUNDS = {"FTCSH"}
+
+
+@lru_cache(maxsize=None)
+def _vehicle_wrapper(fund_name: str) -> str:
+    """Return the lowercase vehicle_wrapper for a fund. Cached for the process."""
+    return str(FUND_DEFINITIONS.get(fund_name, {}).get("vehicle_wrapper", "") or "").lower()
+
+
+def _is_vit_fund(fund_name: str) -> bool:
+    return _vehicle_wrapper(fund_name) == "vit"
+
+
+def _is_etf_fund(fund_name: str) -> bool:
+    return _vehicle_wrapper(fund_name) == "etf"
+
+
+def _is_closed_end_fund(fund_name: str) -> bool:
+    return _vehicle_wrapper(fund_name) == "closed_end_fund"
 
 
 @dataclass
@@ -110,19 +128,16 @@ class ComplianceReport:
 
     @staticmethod
     def _get_vehicle_wrapper(fund_name: str) -> str:
-        return (
-            str(FUND_DEFINITIONS.get(fund_name, {}).get("vehicle_wrapper", "") or "")
-            .lower()
-        )
+        return _vehicle_wrapper(fund_name)
 
     def _is_vit_fund(self, fund_name: str) -> bool:
-        return self._get_vehicle_wrapper(fund_name) == "vit"
+        return _is_vit_fund(fund_name)
 
     def _is_etf_fund(self, fund_name: str) -> bool:
-        return self._get_vehicle_wrapper(fund_name) == "etf"
+        return _is_etf_fund(fund_name)
 
     def _is_closed_end_fund(self, fund_name: str) -> bool:
-        return self._get_vehicle_wrapper(fund_name) == "closed_end_fund"
+        return _is_closed_end_fund(fund_name)
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -267,6 +282,22 @@ class ComplianceReport:
             mapping_df = mapping_df.map(
                 lambda value: str(value).strip() if value is not None else ""
             )
+
+        # Precompute industry-name -> sector-name lookup once, instead of
+        # filtering mapping_df per (fund, gics_class, category) inside the loop.
+        sector_lookup: Dict[str, Dict[str, str]] = {}
+        if not mapping_df.empty and "GICS_SECTOR_NAME" in mapping_df.columns:
+            for gics_class in ("GICS_INDUSTRY_GROUP_NAME", "GICS_INDUSTRY_NAME"):
+                if gics_class not in mapping_df.columns:
+                    continue
+                table: Dict[str, str] = {}
+                for category, sector in zip(mapping_df[gics_class], mapping_df["GICS_SECTOR_NAME"]):
+                    key = str(category).strip().upper()
+                    if not key:
+                        continue
+                    table.setdefault(key, str(sector).strip() or "N/A")
+                sector_lookup[gics_class] = table
+
         summary_columns = [
             "Date",
             "Fund",
@@ -351,19 +382,9 @@ class ComplianceReport:
                         except (TypeError, ValueError):
                             index_weight_value = 0.0
 
-                        sector_name = "N/A"
-                        if (
-                            not mapping_df.empty
-                            and gics_class in mapping_df.columns
-                            and "GICS_SECTOR_NAME" in mapping_df.columns
-                        ):
-                            category_key = str(category).strip()
-                            matches = mapping_df.loc[
-                                mapping_df[gics_class].str.upper() == category_key.upper(),
-                                "GICS_SECTOR_NAME",
-                            ]
-                            if not matches.empty:
-                                sector_name = str(matches.iloc[0]).strip() or "N/A"
+                        sector_name = sector_lookup.get(gics_class, {}).get(
+                            str(category).strip().upper(), "N/A"
+                        )
 
                         gics_calculations.append(
                             {
@@ -1029,8 +1050,6 @@ class ComplianceReport:
                 if not output_df.empty:
                     output_df = output_df.where(pd.notnull(output_df), None)
                 safe_sheet = sheet_name[:31]
-                if safe_sheet == "Prospectus_80pct":
-                    x=1
                 output_df.to_excel(writer, sheet_name=safe_sheet, index=False)
 
             workbook = writer.book
@@ -1087,17 +1106,13 @@ class ComplianceReportPDF(BaseReportPDF):
 
     @staticmethod
     def _get_vehicle_wrapper(fund_name: str) -> str:
-        """Get the vehicle wrapper type for a fund."""
-        return (
-            str(FUND_DEFINITIONS.get(fund_name, {}).get("vehicle_wrapper", "") or "")
-            .lower()
-        )
+        return _vehicle_wrapper(fund_name)
 
     def _is_vit_fund(self, fund_name: str) -> bool:
-        return self._get_vehicle_wrapper(fund_name) == "vit"
+        return _is_vit_fund(fund_name)
 
     def _is_etf_fund(self, fund_name: str) -> bool:
-        return self._get_vehicle_wrapper(fund_name) == "etf"
+        return _is_etf_fund(fund_name)
 
     def save_pdf(self) -> None:
         """Save the PDF to the specified output path."""
@@ -1182,9 +1197,7 @@ class ComplianceReportPDF(BaseReportPDF):
         forty_act_metrics = [
             (
                 "Overall Status",
-                lambda data: self._status_text(
-                    self._get_test_payload(data, "diversification_40act_check").get("is_compliant")
-                ),
+                lambda data: self._status_or_skip(data, "diversification_40act_check"),
             ),
             (
                 "Registered Status",
@@ -1260,9 +1273,7 @@ class ComplianceReportPDF(BaseReportPDF):
         irs_metrics = [
             (
                 "Overall Status",
-                lambda data: self._status_text(
-                    self._get_test_payload(data, "diversification_IRS_check").get("is_compliant")
-                ),
+                lambda data: self._status_or_skip(data, "diversification_IRS_check"),
             ),
             (
                 "Condition 1",
@@ -1796,6 +1807,21 @@ class ComplianceReportPDF(BaseReportPDF):
             return True
         return test_name in self.allowed_tests
 
+    def _is_test_skipped(self, fund_data: Mapping[str, Any], key: str) -> bool:
+        """True if the test was deliberately skipped (e.g. private fund + 40 Act / IRS)."""
+        payload = self._get_test_payload(fund_data, key)
+        details = payload.get("details") if isinstance(payload, Mapping) else None
+        if not isinstance(details, Mapping):
+            return False
+        return bool(details.get("skipped") or details.get("skip"))
+
+    def _status_or_skip(self, fund_data: Mapping[str, Any], key: str) -> str:
+        """Render N/A for skipped tests, otherwise PASS/FAIL from is_compliant."""
+        if self._is_test_skipped(fund_data, key):
+            return "N/A"
+        payload = self._get_test_payload(fund_data, key)
+        return self._status_text(payload.get("is_compliant"))
+
     def _get_test_payload(self, fund_data: Mapping[str, Any], key: str) -> Mapping[str, Any]:
         if not isinstance(fund_data, Mapping):
             return {}
@@ -1868,7 +1894,8 @@ class ComplianceReportPDF(BaseReportPDF):
             upper = value.strip().upper()
             if upper in {"PASS", "FAIL"}:
                 return upper
-        return "PASS"
+        # Unknown / missing test result: surface it rather than silently passing.
+        return ""
 
     @staticmethod
     def _yes_no(value: object) -> str:
@@ -1955,8 +1982,14 @@ class ComplianceReportPDF(BaseReportPDF):
 
         self.pdf.set_font("Arial", "I", 8)
         self.pdf.ln(1)
+        # Reset cursor X to the left margin before multi_cell(width=0). Previous
+        # cell rendering can leave the X near the right margin, which makes
+        # "available width" effectively zero and triggers fpdf2's
+        # "Not enough horizontal space to render a single character".
+        self.pdf.set_x(self.pdf.l_margin)
         self.pdf.multi_cell(0, 5, self._sanitize_text("Footnotes:"))
         for note in notes:
+            self.pdf.set_x(self.pdf.l_margin)
             self.pdf.multi_cell(0, 4.5, self._sanitize_text(f"* {note}"))
         self.pdf.ln(2)
 
@@ -2226,24 +2259,6 @@ class ComplianceReportPDF(BaseReportPDF):
 
         self._draw_footnotes_section("irs")
 
-    def print_irc_diversification(self, data: Mapping[str, object]) -> None:
-        calculations = data.get("calculations", {})
-
-        rows = [
-            ("Condition IRC 55", "PASS" if data.get("condition_IRC_55") else "FAIL"),
-            ("Condition IRC 70", "PASS" if data.get("condition_IRC_70") else "FAIL"),
-            ("Condition IRC 80", "PASS" if data.get("condition_IRC_80") else "FAIL"),
-            ("Condition IRC 90", "PASS" if data.get("condition_IRC_90") else "FAIL"),
-            ("Top 1 Exposure", f"{calculations.get('top_1', 0):.2%}"),
-            ("Top 2 Exposure", f"{calculations.get('top_2', 0):.2%}"),
-            ("Top 3 Exposure", f"{calculations.get('top_3', 0):.2%}"),
-            ("Top 4 Exposure", f"{calculations.get('top_4', 0):.2%}"),
-            ("Total Assets", f"{calculations.get('total_assets', 0):,.0f}"),
-        ]
-
-        self._draw_two_column_table(rows)
-        self._draw_footnotes_section("irc")
-
     def print_12d1_other_inv_cos(self, data: Mapping[str, object]) -> None:
         """Print Rule 12d1-1 Other Investment Companies."""
 
@@ -2506,15 +2521,29 @@ class ComplianceReportPDF(BaseReportPDF):
                 row_w[i] = max(row_w[i], self.pdf.get_string_width(str(val) if val is not None else ""))
 
         # Base width = max(header, row) + padding
-        PADDING = 8.0  # a little extra breathing room
-        MIN_W = 20.0  # don't go narrower than this
+        PADDING = 8.0
+        MIN_W = 20.0
         col_widths = [max(MIN_W, hw, rw) + PADDING for hw, rw in zip(hdr_w, row_w)]
 
         total = sum(col_widths)
         if total > usable:
-            # Too wide -> shrink proportionally (simple + robust)
-            scale = usable / total if total else 1.0
-            col_widths = [w * scale for w in col_widths]
+            # Two-pass shrink: reserve MIN_W per column first, then distribute the
+            # remaining width proportionally to each column's *desired excess* over
+            # MIN_W. A naive proportional scale would shrink narrow Yes/No columns
+            # below the minimum glyph width and trigger fpdf2's
+            # "Not enough horizontal space" error.
+            n = len(col_widths)
+            total_floor = MIN_W * n
+            if total_floor >= usable:
+                col_widths = [usable / n] * n
+            else:
+                extras = [max(w - MIN_W, 0.0) for w in col_widths]
+                extras_sum = sum(extras)
+                leftover = usable - total_floor
+                if extras_sum > 0:
+                    col_widths = [MIN_W + (e / extras_sum) * leftover for e in extras]
+                else:
+                    col_widths = [usable / n] * n
         else:
             # Extra room -> give remainder to the last column (Exceptions)
             col_widths[-1] += (usable - total)
@@ -2612,6 +2641,8 @@ def generate_compliance_reports(
         except RuntimeError as exc:  # pragma: no cover - optional dependency missing
             logger.warning("PDF generation skipped: %s", exc)
         except Exception as exc:
-            logger.error("PDF generation failed: %s", exc)
+            # exc_info=True so the actual fpdf2 stack trace surfaces in the log;
+            # otherwise "PDF generation failed: <msg>" hides where the layout broke.
+            logger.error("PDF generation failed: %s", exc, exc_info=True)
 
     return GeneratedComplianceReport(excel_path=str(report.file_path), pdf_path=pdf_file_path)

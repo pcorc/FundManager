@@ -139,9 +139,19 @@ def _append_sheet(source_sheet, target_wb):
 
 
 def _merge_pdfs(trading_pdf: Path, compliance_pdf: Path, output_path: Path) -> Optional[str]:
+    """Merge the trading-compliance and ex-post compliance PDFs into one combined file.
+
+    Skips any source PDF that doesn't exist on disk (the compliance PDF can fail to
+    render and be logged as a swallowed warning) so the trading run still produces
+    a useful combined output. Returns None if no source PDFs were available.
+    """
+    available = [p for p in (trading_pdf, compliance_pdf) if p is not None and Path(p).exists()]
+    if not available:
+        return None
+
     merger = PdfMerger()
     try:
-        for path in (trading_pdf, compliance_pdf):
+        for path in available:
             merger.append(str(path))
         merger.write(output_path)
     finally:

@@ -39,18 +39,6 @@ class Reconciliator:
         self.summary_rows = []
         self._detailed_calculations: Dict[str, Dict[str, pd.DataFrame]] = {}
 
-        # Access fund properties directly
-        self.is_closed_end_fund = fund.is_closed_end_fund
-        self.is_private_fund = fund.is_private_fund
-        self.is_etf = fund.is_etf
-        self.is_diversified = fund.is_diversified
-        self.is_non_diversified = fund.is_non_diversified
-        self.uses_index_flex = fund.uses_index_flex
-        self.vehicle = fund.vehicle
-
-        # Check for SG equity data availability
-        #self.has_sg_equity = self._check_sg_equity()
-
     def run_all_reconciliations(self):
         """Run all reconciliations using Fund object data"""
         recon_funcs = [
@@ -108,10 +96,15 @@ class Reconciliator:
         df['in_cust'] = df['_merge'] != 'left_only'
         df.drop(columns=['_merge'], inplace=True)
 
-        # Same for T-1
-        df1 = pd.merge(df_oms1, df_cust1,
-                       on='eqyticker', how='outer',
-                       suffixes=('_vest', '_cust'), indicator=False)
+        # Same for T-1, but only if both frames carry the join key. KNGIX (and any
+        # fund with no T-1 holdings) returns empty DataFrames with no columns at
+        # all, so the merge would raise KeyError on 'eqyticker'.
+        if 'eqyticker' in df_oms1.columns and 'eqyticker' in df_cust1.columns:
+            df1 = pd.merge(df_oms1, df_cust1,
+                           on='eqyticker', how='outer',
+                           suffixes=('_vest', '_cust'), indicator=False)
+        else:
+            df1 = pd.DataFrame()
 
         # Trades & corporate actions (only today)
         trade_map = df_trades.set_index('eqyticker')['qty_sign_adj'] \
@@ -120,7 +113,7 @@ class Reconciliator:
 
         # Use fund property to determine if CR/RD applies
         cr_map = (df_crrd.set_index('eqyticker')['cr_rd']
-                  if self.is_etf and 'eqyticker' in df_crrd.columns
+                  if self.fund.is_etf and 'eqyticker' in df_crrd.columns
                   else pd.Series(dtype=object))
         df['cr_rd'] = df['eqyticker'].map(cr_map).fillna(0)
 
@@ -259,11 +252,17 @@ class Reconciliator:
             if total_mv > 0:
                 df_oms['option_weight'] = df_oms['market_value'] / total_mv
 
-        # Merge current data
-        df = pd.merge(df_oms, df_cust, on='optticker', how='outer', suffixes=('_vest', '_cust'))
+        # Merge current data — guard against empty frames missing the join key.
+        if 'optticker' in df_oms.columns and 'optticker' in df_cust.columns:
+            df = pd.merge(df_oms, df_cust, on='optticker', how='outer', suffixes=('_vest', '_cust'))
+        else:
+            df = pd.DataFrame()
 
-        # Merge previous data
-        df1 = pd.merge(df_oms1, df_cust1, on='optticker', how='outer', suffixes=('_vest', '_cust'))
+        # Same for previous data.
+        if 'optticker' in df_oms1.columns and 'optticker' in df_cust1.columns:
+            df1 = pd.merge(df_oms1, df_cust1, on='optticker', how='outer', suffixes=('_vest', '_cust'))
+        else:
+            df1 = pd.DataFrame()
 
         # Identify discrepancies in current data
         if 'quantity' not in df.columns and 'quantity_vest' in df.columns:
@@ -352,7 +351,7 @@ class Reconciliator:
         """Reconcile custodian FLEX options separately using Fund snapshots."""
 
         # Only run if fund uses FLEX options
-        if not self.uses_index_flex:
+        if not self.fund.uses_index_flex:
             self.results['custodian_flex_option'] = ReconciliationResult(
                 raw_recon=pd.DataFrame(),
                 final_recon=pd.DataFrame(),
@@ -425,11 +424,17 @@ class Reconciliator:
                     df_cust1['shares_cust'] = 0.0
             df_cust1['shares_cust'] = self._coerce_numeric_series(df_cust1['shares_cust'])
 
-        # Merge current data
-        df = pd.merge(df_oms, df_cust, on='optticker', how='outer', suffixes=('_vest', '_cust'))
+        # Merge current data — guard against empty frames missing the join key.
+        if 'optticker' in df_oms.columns and 'optticker' in df_cust.columns:
+            df = pd.merge(df_oms, df_cust, on='optticker', how='outer', suffixes=('_vest', '_cust'))
+        else:
+            df = pd.DataFrame()
 
-        # Merge previous data
-        df1 = pd.merge(df_oms1, df_cust1, on='optticker', how='outer', suffixes=('_vest', '_cust'))
+        # Same for previous data.
+        if 'optticker' in df_oms1.columns and 'optticker' in df_cust1.columns:
+            df1 = pd.merge(df_oms1, df_cust1, on='optticker', how='outer', suffixes=('_vest', '_cust'))
+        else:
+            df1 = pd.DataFrame()
 
         # Identify discrepancies in current data
         if 'quantity' not in df.columns and 'quantity_vest' in df.columns:
@@ -1008,7 +1013,7 @@ class Reconciliator:
 
             # Add FLEX indicator and weights
             if not price_discrepancies.empty:
-                if self.uses_index_flex and 'optticker' in price_discrepancies.columns:
+                if self.fund.uses_index_flex and 'optticker' in price_discrepancies.columns:
                     price_discrepancies['is_flex'] = price_discrepancies['optticker'].str.contains(
                         "SPX|XSP", na=False
                     )
@@ -1027,7 +1032,7 @@ class Reconciliator:
                     price_discrepancies['option_weight'] = 0.0
 
                 # Filter standard options for private/closed-end funds
-                if self.vehicle in {"private_fund", "closed_end_fund"}:
+                if self.fund.vehicle in {"private_fund", "closed_end_fund"}:
                     standard_price = price_discrepancies[~price_discrepancies['is_flex']].copy()
                     flex_price = price_discrepancies[price_discrepancies['is_flex']].copy()
 
@@ -1192,7 +1197,7 @@ class Reconciliator:
             return value.copy() if isinstance(value, pd.DataFrame) else pd.DataFrame()
 
         # Only build if fund uses FLEX options
-        if not self.uses_index_flex:
+        if not self.fund.uses_index_flex:
             self._detailed_calculations['flex_option'] = {
                 'inputs': {},
                 'reconciliations': {},
