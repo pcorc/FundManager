@@ -39,3 +39,49 @@ Traceback (most recent call last):
   File "C:\Users\PatrickCorcoran\AppData\Local\Programs\Python\Python311\Lib\site-packages\fpdf\line_break.py", line 851, in get_line
     raise FPDFException(
 fpdf.errors.FPDFException: Not enough horizontal space to render a single character
+2026-05-20 19:33:59,278 - compliance_report - ERROR - Failed to save PDF to G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-05-14.pdf: FPDF.output() takes from 1 to 2 positional arguments but 3 were given
+2026-05-20 19:33:59,279 - compliance_report - ERROR - PDF generation failed: FPDF.output() takes from 1 to 2 positional arguments but 3 were given
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\PycharmProjects\FundManager\reporting\compliance_reporting.py", line 2635, in generate_compliance_reports
+    pdf_report = ComplianceReportPDF(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\PycharmProjects\FundManager\reporting\compliance_reporting.py", line 1105, in __init__
+    self.save_pdf()
+  File "C:\Users\PatrickCorcoran\PycharmProjects\FundManager\reporting\compliance_reporting.py", line 1125, in save_pdf
+    self.pdf.output(self.output_path)
+  File "C:\Users\PatrickCorcoran\AppData\Local\Programs\Python\Python311\Lib\site-packages\fpdf\deprecation.py", line 59, in wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+TypeError: FPDF.output() takes from 1 to 2 positional arguments but 3 were given
+2026-05-20 19:44:02,747 - compliance_report - ERROR - Failed to save PDF to G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kng_2026-05-14.pdf: FPDF.output() takes from 1 to 2 positional arguments but 3 were given
+2026-05-20 19:44:02,747 - compliance_report - ERROR - PDF generation failed: FPDF.output() takes from 1 to 2 positional arguments but 3 were given
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\PycharmProjects\FundManager\reporting\compliance_reporting.py", line 2635, in generate_compliance_reports
+    pdf_report = ComplianceReportPDF(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\PycharmProjects\FundManager\reporting\compliance_reporting.py", line 1105, in __init__
+    self.save_pdf()
+  File "C:\Users\PatrickCorcoran\PycharmProjects\FundManager\reporting\compliance_reporting.py", line 1125, in save_pdf
+    self.pdf.output(self.output_path, 'F')
+  File "C:\Users\PatrickCorcoran\AppData\Local\Programs\Python\Python311\Lib\site-packages\fpdf\deprecation.py", line 59, in wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+TypeError: FPDF.output() takes from 1 to 2 positional arguments but 3 were given
+2026-05-20 19:48:36,473 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_kng_2026-05-14.pdf
+2026-05-20 21:15:01,013 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_KNG_2026-05-14.pdf
+2026-05-20 21:15:48,696 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_KNG_2026-05-14.pdf
+2026-05-20 21:32:31,857 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_KNG_2026-05-14.pdf
+2026-05-20 21:58:50,894 - compliance_report - ERROR - Failed to save PDF to G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_KNG_2026-05-14.pdf: FPDF.output() takes from 1 to 2 positional arguments but 3 were given
+2026-05-20 21:58:50,894 - compliance_report - ERROR - PDF generation failed: FPDF.output() takes from 1 to 2 positional arguments but 3 were given
+Traceback (most recent call last):
+  File "C:\Users\PatrickCorcoran\PycharmProjects\FundManager\reporting\compliance_reporting.py", line 2635, in generate_compliance_reports
+    pdf_report = ComplianceReportPDF(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\PatrickCorcoran\PycharmProjects\FundManager\reporting\compliance_reporting.py", line 1105, in __init__
+    self.save_pdf()
+  File "C:\Users\PatrickCorcoran\PycharmProjects\FundManager\reporting\compliance_reporting.py", line 1125, in save_pdf
+    self.pdf.output(self.output_path, 'F')
+  File "C:\Users\PatrickCorcoran\AppData\Local\Programs\Python\Python311\Lib\site-packages\fpdf\deprecation.py", line 59, in wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+TypeError: FPDF.output() takes from 1 to 2 positional arguments but 3 were given

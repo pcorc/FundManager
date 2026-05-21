@@ -205,23 +205,30 @@ class NAVReconciliator:
         - Raw G/L = (price_t_vest - price_t1_vest) * qty_t
         - Adjusted G/L = (price_t_custodian - price_t1_custodian) * qty_t
         """
+        def _f(value, default=0.0):
+            try:
+                num = float(value)
+            except (TypeError, ValueError):
+                return float(default)
+            return float(default) if pd.isna(num) else num
+
         # Extract current position
-        qty_t = 0
-        price_t_vest = 0
+        qty_t = 0.0
+        price_t_vest = 0.0
         if not vest_current.empty and 'eqyticker' in vest_current.columns:
             ticker_data = vest_current[vest_current['eqyticker'] == ticker]
             if not ticker_data.empty:
-                qty_t = ticker_data.iloc[0].get('nav_shares', 0)
-                price_t_vest = ticker_data.iloc[0].get('price', 0)
+                qty_t = _f(ticker_data.iloc[0].get('nav_shares', 0))
+                price_t_vest = _f(ticker_data.iloc[0].get('price', 0))
 
         # Extract prior position
-        qty_t1 = 0
-        price_t1_vest = 0
+        qty_t1 = 0.0
+        price_t1_vest = 0.0
         if not vest_prior.empty and 'eqyticker' in vest_prior.columns:
             ticker_data = vest_prior[vest_prior['eqyticker'] == ticker]
             if not ticker_data.empty:
-                qty_t1 = ticker_data.iloc[0].get('nav_shares', 0)
-                price_t1_vest = ticker_data.iloc[0].get('price', 0)
+                qty_t1 = _f(ticker_data.iloc[0].get('nav_shares', 0))
+                price_t1_vest = _f(ticker_data.iloc[0].get('price', 0))
 
         # Start with vest prices
         price_t_custodian = price_t_vest
@@ -396,23 +403,31 @@ class NAVReconciliator:
 
         Similar to equity but with option-specific column names and multiplier.
         """
+
+        def _f(value, default=0.0):
+            try:
+                num = float(value)
+            except (TypeError, ValueError):
+                return float(default)
+            return float(default) if pd.isna(num) else num
+
         # Extract current position
-        qty_t = 0
-        price_t_vest = 0
+        qty_t = 0.0
+        price_t_vest = 0.0
         if not vest_current.empty and 'optticker' in vest_current.columns:
             ticker_data = vest_current[vest_current['optticker'] == ticker]
             if not ticker_data.empty:
-                qty_t = ticker_data.iloc[0].get('nav_shares', 0)
-                price_t_vest = ticker_data.iloc[0].get('price', 0)
+                qty_t = _f(ticker_data.iloc[0].get('nav_shares', 0))
+                price_t_vest = _f(ticker_data.iloc[0].get('price', 0))
 
         # Extract prior position
-        qty_t1 = 0
-        price_t1_vest = 0
+        qty_t1 = 0.0
+        price_t1_vest = 0.0
         if not vest_prior.empty and 'optticker' in vest_prior.columns:
             ticker_data = vest_prior[vest_prior['optticker'] == ticker]
             if not ticker_data.empty:
-                qty_t1 = ticker_data.iloc[0].get('nav_shares', 0)
-                price_t1_vest = ticker_data.iloc[0].get('price', 0)
+                qty_t1 = _f(ticker_data.iloc[0].get('nav_shares', 0))
+                price_t1_vest = _f(ticker_data.iloc[0].get('price', 0))
 
         # Start with vest prices
         price_t_custodian = price_t_vest
@@ -422,21 +437,21 @@ class NAVReconciliator:
         if use_trade_prices:
             trade_price = self._get_trade_execution_price(trades_t1, ticker)
             if trade_price is not None:
-                price_t1_vest = trade_price
-                price_t1_custodian = trade_price
+                price_t1_vest = _f(trade_price)
+                price_t1_custodian = _f(trade_price)
 
         # Apply custodian price adjustments
         if not price_breaks.empty and ticker in price_breaks.index:
             adj_data = price_breaks.loc[ticker]
 
             if 'price_t_adj' in adj_data:
-                price_t_custodian = adj_data['price_t_adj']
+                price_t_custodian = _f(adj_data['price_t_adj'])
 
             if 'price_cust' in adj_data:
                 cust_override = adj_data['price_cust']
                 if cust_override is not None and pd.notna(cust_override):
-                    price_t1_custodian = cust_override
-                    price_t_custodian = cust_override
+                    price_t1_custodian = _f(cust_override)
+                    price_t_custodian = _f(cust_override)
 
         # Calculate G/L with multiplier
         gl_raw = (price_t_vest - price_t1_custodian) * qty_t * multiplier

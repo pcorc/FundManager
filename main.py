@@ -530,8 +530,8 @@ if __name__ == "__main__":
 
     ACTIVE_RUNS = [
         # "trading_compliance_etfs",
-        "eod_compliance_custom",
-        # "eod_recon_etfs",
+        # "eod_compliance_custom",
+        "eod_recon_custom",
     ]
 
     RUN_OVERRIDES = {
@@ -539,43 +539,44 @@ if __name__ == "__main__":
         #     "funds": build_fund_list(CLOSED_END_FUNDS, PRIVATE_FUNDS, ETF_FUNDS),
         #     "output_tag": "cef",  # Custom tag for file names
         # },
-        "eod_compliance_custom": {
-            # "funds": build_fund_list(CLOSED_END_FUNDS), #
-            "funds": ["KNG",],
-            "output_tag": "etfs",
-            "compliance_tests": [
-                        "summary_metrics",
-                        "gics_compliance",
-                        "prospectus_80pct_policy",
-                        "diversification_40act_check",
-                        "diversification_IRS_check",
-                        "diversification_IRC_check",
-                        "max_15pct_illiquid_sai",
-                        "real_estate_check",
-                        "commodities_check",
-                        "twelve_d1a_other_inv_cos",
-                        "twelve_d2_insurance_cos",
-                        "twelve_d3_sec_biz"
-                    ],
-        },
-        # "eod_recon_custom": {
-        # "funds": build_fund_list(ETF_FUNDS),
-        #     "output_tag": "etfs",  # Custom tag for file names
+        # "eod_compliance_custom": {
+        #     # "funds": build_fund_list(CLOSED_END_FUNDS), #
+        #     "funds": ["KNG",],
+        #     "output_tag": "kng",
+        #     "compliance_tests": [
+        #                 "summary_metrics",
+        #                 "gics_compliance",
+        #                 "prospectus_80pct_policy",
+        #                 "diversification_40act_check",
+        #                 "diversification_IRS_check",
+        #                 "diversification_IRC_check",
+        #                 "max_15pct_illiquid_sai",
+        #                 "real_estate_check",
+        #                 "commodities_check",
+        #                 "twelve_d1a_other_inv_cos",
+        #                 "twelve_d2_insurance_cos",
+        #                 "twelve_d3_sec_biz"
+        #             ],
         # },
+        "eod_recon_custom": {
+        # "funds": build_fund_list(ETF_FUNDS),
+            "funds": ["KNG", ],
+            "output_tag": "kng",  # Custom tag for file names
+        },
     }
 
-    # ACTIVE_RUNS = ["eod_full_custom"] # eod_full_custom
+    ACTIVE_RUNS = ["eod_full_custom"] # eod_full_custom
 
-    # RUN_OVERRIDES = {
-    #     # "eod_full_custom": {
-    #     #     "funds": ["P2726"],
-    #     #     "output_tag": "p2726",
-    #     # },
-    #     # "trading_compliance_custom": {
-    #     #     "funds": ["P2726"],
-    #     #     "output_tag": "p2726",
-    #     # },
-    # }
+    RUN_OVERRIDES = {
+        "eod_full_custom": {
+            "funds": ["KNG"],
+            "output_tag": "KNG",
+        },
+        # "trading_compliance_custom": {
+        #     "funds": ["P2726"],
+        #     "output_tag": "p2726",
+        # },
+    }
 
     # ACTIVE_RUNS = [
     #     # "eod_full_etfs",

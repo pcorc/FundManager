@@ -1122,7 +1122,7 @@ class ComplianceReportPDF(BaseReportPDF):
             output_dir.mkdir(parents=True, exist_ok=True)
 
             # Save the PDF file
-            self.pdf.output(self.output_path, 'F')
+            self.pdf.output(self.output_path)
             logger.info(f"PDF saved successfully to: {self.output_path}")
         except Exception as e:
             logger.error(f"Failed to save PDF to {self.output_path}: {e}")
