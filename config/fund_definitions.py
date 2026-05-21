@@ -23,7 +23,7 @@ Fields surfaced by vw_tif_account_numbers (no longer duplicated here):
   creation_unit_size   -> Creation_Unit_Size
   bbg_ticker           -> BBG_Ticker
 """
-from __future__ import annotations
+
 
 from typing import Any, Dict
 

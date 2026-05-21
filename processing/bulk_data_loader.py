@@ -14,7 +14,6 @@ The loader owns:
     that doesn't belong in SQL)
   - merging v_fund_metadata into each Fund object for downstream services
 """
-from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
@@ -59,6 +58,7 @@ class ViewSpec:
     key_t1: Optional[str] = None
     extra_where: Optional[str] = None
     target_only: bool = False  # ignore previous_date (e.g. distributions)
+    analysis_type_filter: bool = False  # apply analysis_type filter (vest views)
 
 
 VIEWS: Tuple[ViewSpec, ...] = (
@@ -72,9 +72,9 @@ VIEWS: Tuple[ViewSpec, ...] = (
              extra_where="resolution_status = 'Unresolved'"),
 
     # Vest (OMS) holdings
-    ViewSpec("v_vest_equity",                 "vest_equity",        "vest_equity_t1"),
-    ViewSpec("v_vest_option",                 "vest_option",        "vest_option_t1"),
-    ViewSpec("v_vest_treasury",               "vest_treasury",      "vest_treasury_t1"),
+    ViewSpec("v_vest_equity",                 "vest_equity",        "vest_equity_t1", analysis_type_filter=True),
+    ViewSpec("v_vest_option",                 "vest_option",        "vest_option_t1", analysis_type_filter=True),
+    ViewSpec("v_vest_treasury",               "vest_treasury",      "vest_treasury_t1", analysis_type_filter=True),
 
     # Lifecycle events
     ViewSpec("v_fund_distributions",          "distributions",      None, target_only=True),
@@ -106,10 +106,11 @@ class BulkDataLoader:
     # Entry point
     # ------------------------------------------------------------------
     def load_all_data_for_date(
-        self,
-        target_date: date,
-        *,
-        previous_date: Optional[date] = None,
+            self,
+            target_date: date,
+            *,
+            previous_date: Optional[date] = None,
+            analysis_type: Optional[str] = None,
     ) -> BulkDataStore:
         store = BulkDataStore(date=str(target_date))
         funds = list(self.fund_registry.keys())
@@ -119,7 +120,7 @@ class BulkDataLoader:
 
         for spec in VIEWS:
             spec_dates = [target_date] if spec.target_only else dates
-            df = self._query_view(spec, dates=spec_dates, funds=funds)
+            df = self._query_view(spec, dates=spec_dates, funds=funds, analysis_type=analysis_type)
             self._fan_out(store, df, spec, target_date, previous_date)
 
         store.gics_mapping = self._query_sql(
@@ -129,7 +130,6 @@ class BulkDataLoader:
         self._split_trades_into_asset_classes(store, previous_date)
 
         for name, fund in self.fund_registry.items():
-            # Merge SQL-resolved metadata into fund.config for downstream services.
             metadata = store.fund_metadata.get(name)
             if metadata:
                 fund.config.update({k: v for k, v in metadata.items() if v is not None})
@@ -157,15 +157,25 @@ class BulkDataLoader:
             store.fund_metadata[row["fund_ticker"]] = row
 
     def _query_view(
-        self, spec: ViewSpec, *, dates: List[date], funds: List[str]
+            self,
+            spec: ViewSpec,
+            *,
+            dates: List[date],
+            funds: List[str],
+            analysis_type: Optional[str] = None,
     ) -> pd.DataFrame:
         if not dates or not funds:
             return pd.DataFrame()
         where = "`date` IN :dates AND fund_ticker IN :funds"
+        params: Dict[str, Any] = {"dates": dates, "funds": funds}
         if spec.extra_where:
             where += f" AND {spec.extra_where}"
+        if spec.analysis_type_filter and analysis_type:
+            where += " AND LOWER(TRIM(analysis_type)) = :analysis_type"
+            params["analysis_type"] = analysis_type.lower()
         sql = f"SELECT * FROM {VIEW_SCHEMA}.{spec.view} WHERE {where}"
-        return self._query_sql(sql, dates=dates, funds=funds)
+        return self._query_sql(sql, **params)
+
 
     def _query_sql(self, sql: str, **params: Any) -> pd.DataFrame:
         stmt = text(sql)

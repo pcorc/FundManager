@@ -119,7 +119,7 @@ def main(
             params = resolve_eod_parameters(options)
             requests = plan_eod_requests(params)
 
-        data_stores = fetch_data_stores(session, base_cls, registry, requests)
+        data_stores = fetch_data_stores(session, registry, requests)
 
     except Exception as exc:  # pragma: no cover - defensive catch-all
         logger.exception("Processing failed: %s", exc)
@@ -541,8 +541,8 @@ if __name__ == "__main__":
         # },
         "eod_compliance_custom": {
             # "funds": build_fund_list(CLOSED_END_FUNDS), #
-            "funds": ["P2726",],
-            "output_tag": "cefs",
+            "funds": ["KNG",],
+            "output_tag": "etfs",
             "compliance_tests": [
                         "summary_metrics",
                         "gics_compliance",
@@ -564,33 +564,34 @@ if __name__ == "__main__":
         # },
     }
 
-    ACTIVE_RUNS = ["eod_full_custom"] # eod_full_custom
+    # ACTIVE_RUNS = ["eod_full_custom"] # eod_full_custom
 
-    RUN_OVERRIDES = {
-        # "eod_full_custom": {
-        #     "funds": ["P2726"],
-        #     "output_tag": "p2726",
-        # },
-        # "trading_compliance_custom": {
-        #     "funds": ["P2726"],
-        #     "output_tag": "p2726",
-        # },
-    }
+    # RUN_OVERRIDES = {
+    #     # "eod_full_custom": {
+    #     #     "funds": ["P2726"],
+    #     #     "output_tag": "p2726",
+    #     # },
+    #     # "trading_compliance_custom": {
+    #     #     "funds": ["P2726"],
+    #     #     "output_tag": "p2726",
+    #     # },
+    # }
 
-    ACTIVE_RUNS = [
-        # "eod_full_etfs",
-        # "eod_full_closed_end_private",
-        # "trading_compliance_etfs",
-        # "trading_compliance_closed_end_private",
-        "eod_full_all_funds",          # every fund, compliance + holdings recon + NAV recon
-        # "trading_compliance_all_funds",  # every fund, ex-ante vs ex-post trading compliance
-    ]
+    # ACTIVE_RUNS = [
+    #     # "eod_full_etfs",
+    #     # "eod_full_closed_end_private",
+    #     # "trading_compliance_etfs",
+    #     # "trading_compliance_closed_end_private",
+    #     "eod_full_all_funds",          # every fund, compliance + holdings recon + NAV recon
+    #     # "trading_compliance_all_funds",  # every fund, ex-ante vs ex-post trading compliance
+    # ]
+    #
+    # RUN_OVERRIDES = {
+    #     "eod_full_all_funds": {
+    #         "funds": exclude_funds(ALL_FUNDS, "FTCSH", "FTMIX"),
+    #     },
+    # }
 
-    RUN_OVERRIDES = {
-        "eod_full_all_funds": {
-            "funds": exclude_funds(ALL_FUNDS, "FTCSH", "FTMIX"),
-        },
-    }
 
     exit_code = run_configuration_batch(
         config_names=ACTIVE_RUNS,

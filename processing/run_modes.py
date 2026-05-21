@@ -78,13 +78,12 @@ def plan_trading_requests(params) -> Sequence[DataLoadRequest]:
 
 def fetch_data_stores(
     session,
-    base_cls,
     registry: FundRegistry,
     requests: Sequence[DataLoadRequest],
 ) -> Dict[str, BulkDataStore]:
     """Load all required data stores using minimal database calls."""
 
-    loader = BulkDataLoader(session, base_cls, registry)
+    loader = BulkDataLoader(session, registry)
     cache: Dict[Tuple[date, Optional[date], Optional[str]], BulkDataStore] = {}
     stores: Dict[str, BulkDataStore] = {}
 
@@ -95,12 +94,10 @@ def fetch_data_stores(
                 request.target_date,
                 previous_date=request.previous_date,
                 analysis_type=request.analysis_type,
-
             )
         stores[request.label] = cache[key]
 
     return stores
-
 
 def run_eod_mode(
     registry: FundRegistry,
@@ -282,7 +279,7 @@ def run_eod_range_mode(
     if start_date > end_date:
         raise ValueError("start_date must be on or before end_date")
 
-    loader = BulkDataLoader(session, base_cls, registry)
+    loader = BulkDataLoader(session, registry)
     results_by_date: "OrderedDict[date, ProcessingResults]" = OrderedDict()
     daily_artefacts: "OrderedDict[str, Mapping[str, object]]" = OrderedDict()
 
