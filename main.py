@@ -11,20 +11,8 @@ import os
 from datetime import date
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence
-
-from config.database import initialize_database
+from datetime import date as _date
 from processing.fund import build_fund_registry
-from config.run_configurations import (
-    calculate_date_offsets,
-    generate_business_date_range,
-    get_config,
-    list_available_configs,
-    merge_overrides,
-    build_fund_list,
-    CLOSED_END_FUNDS,
-    ETF_FUNDS,
-    PRIVATE_FUNDS,
-)
 from processing.run_modes import (
     fetch_data_stores,
     flatten_eod_paths,
@@ -48,7 +36,16 @@ from utilities.main_helpers import (
     log_generated_paths,
     log_processing_summary,
 )
-from config.run_configurations import ALL_FUNDS, exclude_funds
+
+from config.database import initialize_database
+from config.fund_definitions import (load_cohorts_from_db,
+    ALL_FUNDS,
+    CLOSED_END_FUNDS,
+    ETF_FUNDS,
+    PRIVATE_FUNDS,
+    VIT_AND_MUTUAL_FUNDS,
+)
+from config.run_configurations import (build_run, exclude_funds, generate_business_date_range)
 
 # Optional runtime overrides for quick local tweaking without CLI arguments.
 RUNTIME_OVERRIDES: Optional[Mapping[str, object]] = None
@@ -97,7 +94,11 @@ def main(
     data_stores: Mapping[str, object] = {}
 
     session, base_cls = initialize_database()
+
     try:
+
+        load_cohorts_from_db(session)
+
         registry = build_fund_registry(session, base_cls)
         registry = filter_registry(registry, options.funds)
         if not registry:
@@ -519,160 +520,53 @@ def _execute_range_date_config(
 
 if __name__ == "__main__":
 
-    # ------------------------------------------------------------------------
-    # Example 1: Run predefined configurations
-    # ------------------------------------------------------------------------
 
-    # Base date: All date offsets (T, T-1, T-2) are calculated from this
-    BASE_DATE = "2026-05-14"
-    BASE_DATE_RANGE: Optional[tuple[str, str]] = None
-    BASE_DATE_RANGE = ("2026-05-14", BASE_DATE)
+    _boot_session, _ = initialize_database()
+    try:
+        load_cohorts_from_db(_boot_session)
+    finally:
+        _boot_session.close()
 
-    ACTIVE_RUNS = [
-        # "trading_compliance_etfs",
-        # "eod_compliance_custom",
-        "eod_recon_custom",
-    ]
+    # EOD compliance on just one fund from the cohort
+    # run = build_run("eod", cohorts=[CLOSED_END_FUNDS], funds=["HE3B1"])
+    # # Only run a subset of compliance tests
+    # run = build_run("eod", cohorts=[CLOSED_END_FUNDS],
+    #                 compliance_tests=["diversification_40act_check", "gics_compliance"])
+    # # Same cohort, time-series stacked across a date range
+    # run = build_run("time_series", cohorts=[CLOSED_END_FUNDS],
+    #                 date_range=("2026-05-01", "2026-05-14"))
+    # run = build_run("eod", cohorts=[CLOSED_END_FUNDS])
 
-    RUN_OVERRIDES = {
-        # "trading_compliance_closed_end_private": {
-        #     "funds": build_fund_list(CLOSED_END_FUNDS, PRIVATE_FUNDS, ETF_FUNDS),
-        #     "output_tag": "cef",  # Custom tag for file names
-        # },
-        # "eod_compliance_custom": {
-        #     # "funds": build_fund_list(CLOSED_END_FUNDS), #
-        #     "funds": ["KNG",],
-        #     "output_tag": "kng",
-        #     "compliance_tests": [
-        #                 "summary_metrics",
-        #                 "gics_compliance",
-        #                 "prospectus_80pct_policy",
-        #                 "diversification_40act_check",
-        #                 "diversification_IRS_check",
-        #                 "diversification_IRC_check",
-        #                 "max_15pct_illiquid_sai",
-        #                 "real_estate_check",
-        #                 "commodities_check",
-        #                 "twelve_d1a_other_inv_cos",
-        #                 "twelve_d2_insurance_cos",
-        #                 "twelve_d3_sec_biz"
-        #             ],
-        # },
-        "eod_recon_custom": {
-        # "funds": build_fund_list(ETF_FUNDS),
-            "funds": ["KNG", ],
-            "output_tag": "kng",  # Custom tag for file names
-        },
-    }
-
-    ACTIVE_RUNS = ["eod_full_custom"] # eod_full_custom
-
-    RUN_OVERRIDES = {
-        "eod_full_custom": {
-            "funds": ["KNG"],
-            "output_tag": "KNG",
-        },
-        # "trading_compliance_custom": {
-        #     "funds": ["P2726"],
-        #     "output_tag": "p2726",
-        # },
-    }
-
-    # ACTIVE_RUNS = [
-    #     # "eod_full_etfs",
-    #     # "eod_full_closed_end_private",
-    #     # "trading_compliance_etfs",
-    #     # "trading_compliance_closed_end_private",
-    #     "eod_full_all_funds",          # every fund, compliance + holdings recon + NAV recon
-    #     # "trading_compliance_all_funds",  # every fund, ex-ante vs ex-post trading compliance
-    # ]
-    #
-    # RUN_OVERRIDES = {
-    #     "eod_full_all_funds": {
-    #         "funds": exclude_funds(ALL_FUNDS, "FTCSH", "FTMIX"),
-    #     },
-    # }
+    # run["as_of_date"] = "2026-05-14"
+    # run["eod_reports"] = ["nav"] # Just NAV recon, nothing else
+    # run["eod_reports"] = ["reconciliation"] # Just holdings recon
+    # run["eod_reports"] = ["compliance", "nav"] # Compliance + NAV recon, skip holdings
 
 
-    exit_code = run_configuration_batch(
-        config_names=ACTIVE_RUNS,
-        base_date=BASE_DATE,
-        base_date_range=BASE_DATE_RANGE,
-        overrides=RUN_OVERRIDES,
+    run = build_run("eod", funds=exclude_funds(CLOSED_END_FUNDS, "FTMIX"))
+    run["eod_reports"] = ["compliance"] # Compliance skip NAV recon + holdings
+
+    run = build_run("trading_compliance", funds=exclude_funds(CLOSED_END_FUNDS, "FTMIX"))
+    # Iterate each business day in the range, producing a separate report per day.
+    business_days = generate_business_date_range(
+        _date(2026, 5, 22),
+        _date(2026, 5, 22),
     )
 
-    # ------------------------------------------------------------------------
-    # Example 2: Run predefined configurations
-    # ------------------------------------------------------------------------
-    #
-    # BASE_DATE_RANGE = ("2026-01-02", "2026-01-02")
-    #
-    # ACTIVE_RUNS = ["eod_compliance_custom"]
-    #
-    # RUN_OVERRIDES = {
-    #     "eod_compliance_custom": {
-    #         "funds": ["P2726",], #"KNGIX"
-    #         "output_tag": "P2726",
-    #         "compliance_tests": [
-    #                     # "summary_metrics",
-    #                     # "gics_compliance",
-    #                     # "prospectus_80pct_policy",
-    #                     "diversification_40act_check",
-    #                     "diversification_IRS_check",
-    #                     # "diversification_IRC_check",
-    #                     # "max_15pct_illiquid_sai",
-    #                     # "real_estate_check",
-    #                     # "commodities_check",
-    #                     # "twelve_d1a_other_inv_cos",
-    #                     # "twelve_d2_insurance_cos",
-    #                     # "twelve_d3_sec_biz"
-    #                 ],
-    #     },
-    # }
-    #
+    exit_code = 0
+    for trade_date in business_days:
+        iter_run = dict(run)
+        iter_run["as_of_date"] = trade_date.isoformat()
+        result = main(overrides=iter_run)
+        if result != 0:
+            exit_code = result
+            break
+
+    raise SystemExit(exit_code)
+
     # exit_code = run_configuration_batch(
     #     config_names=ACTIVE_RUNS,
-    #     base_date=BASE_DATE_RANGE[0],  # satisfies the required arg, effectively ignored
-    #     base_date_range=BASE_DATE_RANGE,
+    #     base_date=BASE_DATE,
+    #     base_date_range=BASE_DATE_RANGE if _is_range else None,
     #     overrides=RUN_OVERRIDES,
     # )
-
-    # ------------------------------------------------------------------------
-    # Example 3: Time series configuration for one fund
-    # ------------------------------------------------------------------------
-
-    # BASE_DATE_RANGE = ("2026-01-02", "2026-03-31")
-    # ACTIVE_RUNS = ["time_series_full_compliance"]
-    #
-    # RUN_OVERRIDES = {
-    #     "time_series_full_compliance": {
-    #          "funds": build_fund_list(CLOSED_END_FUNDS), #
-    #         "output_tag": "cefs",
-    #         "start_date": "2026-01-02",
-    #         "end_date": "2026-03-31",
-    #         "compliance_tests": [
-    #             # "summary_metrics",
-    #             # "gics_compliance",
-    #             # "prospectus_80pct_policy",
-    #             "diversification_40act_check",
-    #             "diversification_IRS_check",
-    #             # "diversification_IRC_check",
-    #             # "max_15pct_illiquid_sai",
-    #             # "real_estate_check",
-    #             # "commodities_check",
-    #             # "twelve_d1a_other_inv_cos",
-    #             # "twelve_d2_insurance_cos",
-    #             # "twelve_d3_sec_biz",
-    #         ],
-    #         "generate_daily_reports": False,
-    #     },
-    # }
-    #
-    # exit_code = run_configuration_batch(
-    #     config_names=ACTIVE_RUNS,
-    #     base_date="2026-03-31",  # required arg, effectively ignored for range mode
-    #     overrides=RUN_OVERRIDES,
-    # )
-    #
-    # raise SystemExit(exit_code)
-

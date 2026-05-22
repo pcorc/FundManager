@@ -315,12 +315,14 @@ class HoldingsReconciliationRenderer:
         else:
             self._draw_two_column_table([(f"{price_label} Price Breaks", 0)])
 
+    _OPTION_PRICE_BREAK_MIN_ABS = 1.00
+
     def _filter_option_price_breaks(
-        self,
-        price_df: pd.DataFrame,
-        fund_name: str | None,
-        recon_type: str | None,
-        is_flex: bool,
+            self,
+            price_df: pd.DataFrame,
+            fund_name: str | None,
+            recon_type: str | None,
+            is_flex: bool,
     ) -> pd.DataFrame:
         if not isinstance(price_df, pd.DataFrame) or price_df.empty:
             return pd.DataFrame()
@@ -328,14 +330,32 @@ class HoldingsReconciliationRenderer:
         if not fund_name or not recon_type or "option" not in recon_type.lower():
             return price_df
 
+        working = price_df.copy()
+
+        # Compute |price_vest - price_cust|. Prefer the pre-computed price_diff
+        # column if present; otherwise derive it from the two price columns.
+        if "price_diff" in working.columns:
+            diff = pd.to_numeric(working["price_diff"], errors="coerce").abs()
+        elif {"price_vest", "price_cust"}.issubset(working.columns):
+            pv = pd.to_numeric(working["price_vest"], errors="coerce")
+            pc = pd.to_numeric(working["price_cust"], errors="coerce")
+            diff = (pv - pc).abs()
+        else:
+            diff = None
+
+        if diff is not None:
+            working = working[diff >= self._OPTION_PRICE_BREAK_MIN_ABS]
+
+        if working.empty:
+            return working
+
         vehicle = (FUND_DEFINITIONS.get(fund_name, {}).get("vehicle_wrapper") or "").lower()
         if vehicle not in {"private_fund", "closed_end_fund"}:
-            return price_df
+            return working
 
         if is_flex:
-            return price_df
+            return working
 
-        working = price_df.copy()
         if "option_weight" in working.columns:
             working = working.sort_values("option_weight", ascending=False)
         elif "price_diff" in working.columns:

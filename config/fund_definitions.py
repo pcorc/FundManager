@@ -1,7 +1,8 @@
 """Static fund metadata consumed by :func:`processing.fund.build_fund_registry`."""
 from __future__ import annotations
-
 from typing import Any, Dict
+import pandas as pd
+from sqlalchemy import text
 
 
 """Per-fund policy / compliance config.
@@ -24,8 +25,6 @@ Fields surfaced by vw_tif_account_numbers (no longer duplicated here):
   bbg_ticker           -> BBG_Ticker
 """
 
-
-from typing import Any, Dict
 
 
 FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
@@ -371,23 +370,41 @@ FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
 
 ALL_FUNDS = set(FUND_DEFINITIONS.keys())
 
-CLOSED_END_FUNDS = {
-    fund
-    for fund, payload in FUND_DEFINITIONS.items()
-    if payload.get("vehicle_wrapper", "").lower() == "closed_end_fund"
+# Cohorts populated at startup from reconciliation.v_fund_metadata.
+ETF_FUNDS: set[str] = set()
+CLOSED_END_FUNDS: set[str] = set()
+PRIVATE_FUNDS: set[str] = set()
+VIT_AND_MUTUAL_FUNDS: set[str] = set()
+
+_STRATEGY_TO_COHORT = {
+    "TIF": ETF_FUNDS,
+    "CEF": CLOSED_END_FUNDS,
+    "PF":  PRIVATE_FUNDS,
+    "VIT": VIT_AND_MUTUAL_FUNDS,
 }
 
-PRIVATE_FUNDS = {
-    fund
-    for fund, payload in FUND_DEFINITIONS.items()
-    if payload.get("vehicle_wrapper", "").lower() == "private_fund"
-}
 
-ETF_FUNDS = {
-    fund
-    for fund, payload in FUND_DEFINITIONS.items()
-    if payload.get("vehicle_wrapper", "").lower() == "etf"
-}
+def load_cohorts_from_db(session) -> None:
+    """Populate cohort sets from reconciliation.v_fund_metadata.
+
+    Call once at startup, after the DB session is open and before any
+    run_configuration_batch() invocation.
+    """
+    df = pd.read_sql(
+        text("SELECT fund_ticker, eod_report_strategy "
+             "FROM reconciliation.v_fund_metadata"),
+        session.bind,
+    )
+    valid_tickers = set(FUND_DEFINITIONS.keys())
+
+    for target in _STRATEGY_TO_COHORT.values():
+        target.clear()
+    for _, row in df.iterrows():
+        target = _STRATEGY_TO_COHORT.get(row["eod_report_strategy"])
+        if target is not None and row["fund_ticker"] in valid_tickers:
+            target.add(row["fund_ticker"])
+
+
 
 DIVERSIFIED_FUNDS = {
     fund

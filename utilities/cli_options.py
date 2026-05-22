@@ -206,7 +206,12 @@ def resolve_trading_parameters(options: CLIOptions) -> TradingComplianceParamete
 
 
 def apply_overrides(options: CLIOptions, overrides: Optional[Mapping[str, object]]) -> CLIOptions:
-    """Apply explicit overrides (e.g. from ``main`` keyword arguments)."""
+    """Apply explicit overrides (e.g. from ``main`` keyword arguments).
+
+    Keys that don't correspond to a CLIOptions field are ignored — they're
+    typically metadata fields (date_mode, eod_reports, etc.) carried in the
+    same dict for downstream consumers.
+    """
 
     if not overrides:
         return options
@@ -215,9 +220,11 @@ def apply_overrides(options: CLIOptions, overrides: Optional[Mapping[str, object
 
     for key, value in overrides.items():
         if key not in data:
-            raise KeyError(f"Unknown CLI option override: {key}")
+            # Not a CLI option — let it through; another layer will use it.
+            continue
 
-        if key in {"as_of_date", "previous_date", "ex_ante_date", "ex_post_date", "custodian_date", "custodian_previous_date"}:
+        if key in {"as_of_date", "previous_date", "ex_ante_date", "ex_post_date",
+                   "custodian_date", "custodian_previous_date"}:
             if value is None:
                 data[key] = None
             else:

@@ -85,3 +85,37 @@ Traceback (most recent call last):
     return fn(*args, **kwargs)
            ^^^^^^^^^^^^^^^^^^^
 TypeError: FPDF.output() takes from 1 to 2 positional arguments but 3 were given
+2026-05-20 22:41:39,534 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_KNG_2026-05-14.pdf
+2026-05-21 08:53:13,471 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_KNG_2026-05-14.pdf
+2026-05-21 10:33:54,220 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_KNG_2026-05-14.pdf
+2026-05-21 10:35:15,287 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_KNG_2026-05-14.pdf
+2026-05-21 10:45:32,305 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-05-14.pdf
+2026-05-21 10:45:58,925 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-05-14.pdf
+2026-05-21 17:40:57,056 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-05-14.pdf
+2026-05-21 17:41:14,035 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-05-14.pdf
+2026-05-21 17:41:38,252 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_expost_etfs_2026-05-14.pdf
+2026-05-21 20:13:45,131 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-05-14.pdf
+2026-05-21 20:14:05,087 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-05-14.pdf
+2026-05-21 20:14:34,588 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_expost_etfs_2026-05-14.pdf
+2026-05-21 20:31:50,792 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-05-14.pdf
+2026-05-21 20:32:08,523 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-05-14.pdf
+2026-05-21 20:32:39,757 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_expost_etfs_2026-05-14.pdf
+2026-05-21 20:36:54,951 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-05-14.pdf
+2026-05-21 20:37:16,148 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-05-14.pdf
+2026-05-21 20:37:44,769 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_expost_etfs_2026-05-14.pdf
+2026-05-21 20:44:39,338 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-05-14.pdf
+2026-05-21 20:44:48,691 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_etfs_2026-05-14.pdf
+2026-05-21 20:45:04,918 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_expost_etfs_2026-05-14.pdf
+2026-05-21 21:25:18,477 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_cefs_2026-05-14.pdf
+2026-05-21 21:25:35,772 - compliance_report - INFO - PDF saved successfully to: G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\compliance_results_expost_cefs_2026-05-14.pdf
+2026-05-22 12:41:26,808 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_eod_2026-05-14.pdf
+2026-05-22 12:41:37,689 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_eod_2026-05-22.pdf
+2026-05-22 13:29:17,881 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_eod_2026-05-14.pdf
+2026-05-22 13:29:24,697 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_eod_2026-05-15.pdf
+2026-05-22 13:29:31,554 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_eod_2026-05-18.pdf
+2026-05-22 13:29:39,105 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_eod_2026-05-19.pdf
+2026-05-22 13:29:45,934 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_eod_2026-05-20.pdf
+2026-05-22 13:29:52,679 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_eod_2026-05-21.pdf
+2026-05-22 13:29:58,012 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_eod_2026-05-22.pdf
+2026-05-22 14:26:34,484 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_expost_trading_compliance_2026-05-22.pdf
+2026-05-22 14:38:14,272 - compliance_report - INFO - PDF saved successfully to: outputs\compliance_results_expost_trading_compliance_2026-05-22.pdf
