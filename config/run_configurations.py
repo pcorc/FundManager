@@ -117,6 +117,30 @@ MODES: Dict[str, Dict[str, Any]] = {
         "create_pdf": True,
         "output_dir": DEFAULT_OUTPUT_DIR,
     },
+    "compliance": {
+        "analysis_type": "eod",
+        "date_mode": "single",
+        "eod_reports": ["compliance"],
+        "compliance_tests": FULL_COMPLIANCE_TESTS,
+        "create_pdf": True,
+        "output_dir": DEFAULT_OUTPUT_DIR,
+    },
+    "reconciliation": {
+        "analysis_type": "eod",
+        "date_mode": "single",
+        "eod_reports": ["reconciliation"],
+        "compliance_tests": FULL_COMPLIANCE_TESTS,
+        "create_pdf": True,
+        "output_dir": DEFAULT_OUTPUT_DIR,
+    },
+    "nav": {
+        "analysis_type": "eod",
+        "date_mode": "single",
+        "eod_reports": ["nav"],
+        "compliance_tests": FULL_COMPLIANCE_TESTS,
+        "create_pdf": True,
+        "output_dir": DEFAULT_OUTPUT_DIR,
+    },
     "trading_compliance": {
         "analysis_type": "trading_compliance",
         "date_mode": "single",
@@ -137,26 +161,36 @@ MODES: Dict[str, Dict[str, Any]] = {
 
 
 def build_run(
-    mode: str,
+    mode: str | List[str],
     *,
     cohorts: Optional[List[Set[str]]] = None,
     funds: Optional[List[str]] = None,
-    date_range: Optional[Tuple[str, str]] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     output_tag: Optional[str] = None,
     compliance_tests: Optional[List[str]] = None,
-) -> Dict[str, Any]:
-    """Combine a mode with a fund selection into a runnable config.
+) -> Dict[str, Any] | List[Dict[str, Any]]:
+    """Build one config (str) or a list of configs (list of str)."""
+    # If a list of modes is passed, return one config per mode.
+    if isinstance(mode, list):
+        return [
+            build_run(
+                m,
+                cohorts=cohorts,
+                funds=funds,
+                start_date=start_date,
+                end_date=end_date,
+                output_tag=f"{output_tag}_{m}" if output_tag else m,
+                compliance_tests=compliance_tests,
+            )
+            for m in mode
+        ]
 
-    Args:
-        mode:             "eod" | "trading_compliance" | "time_series"
-        cohorts:          List of fund-group sets to include (e.g. [ETF_FUNDS, CLOSED_END_FUNDS])
-        funds:            Explicit ticker list to intersect with cohorts (or use alone)
-        date_range:       (start, end) — only meaningful for mode="time_series"
-        output_tag:       Filename tag; defaults to the mode name
-        compliance_tests: Optional override for the test suite (defaults to FULL_COMPLIANCE_TESTS)
-    """
+    # ... existing single-mode body unchanged ...
     if mode not in MODES:
         raise ValueError(f"Unknown mode '{mode}'. Available: {sorted(MODES)}")
+    if start_date is None:
+        raise ValueError("start_date is required")
 
     selected: Set[str] = set()
     if cohorts:
@@ -168,12 +202,11 @@ def build_run(
     cfg = dict(MODES[mode])
     cfg["funds"] = sorted(selected)
     cfg["output_tag"] = output_tag or mode
+    cfg["start_date"] = start_date
+    cfg["end_date"] = end_date or start_date
 
     if compliance_tests is not None:
         cfg["compliance_tests"] = compliance_tests
-
-    if mode == "time_series" and date_range:
-        cfg["start_date"], cfg["end_date"] = date_range
 
     return cfg
 

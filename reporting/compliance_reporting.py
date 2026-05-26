@@ -1123,7 +1123,6 @@ class ComplianceReportPDF(BaseReportPDF):
 
             # Save the PDF file
             self.pdf.output(self.output_path)
-            logger.info(f"PDF saved successfully to: {self.output_path}")
         except Exception as e:
             logger.error(f"Failed to save PDF to {self.output_path}: {e}")
             raise

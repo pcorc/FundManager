@@ -209,8 +209,8 @@ class CombinedReconciliationReport:
             nav_diff = float(nav_data.get("NAV Diff ($)", nav_data.get("difference", 0.0)) or 0.0)
 
             # Check if NAV is good at 2 and 4 decimal places
-            ok2 = bool(nav_data.get("NAV Good (2 Digit)", abs(nav_diff) < 0.01))
-            ok4 = bool(nav_data.get("NAV Good (4 Digit)", abs(nav_diff) < 0.0001))
+            ok2 = bool(nav_data.get("NAV Good (2 Digit)", abs(round(nav_diff, 2)) <= 0.01))
+            ok4 = bool(nav_data.get("NAV Good (4 Digit)", abs(round(nav_diff, 4)) <= 0.0001))
 
             # Fund name with hyperlink
             width = cols[0][1]

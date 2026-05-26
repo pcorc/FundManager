@@ -10,8 +10,7 @@ import logging
 import os
 from datetime import date
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence
-from datetime import date as _date
+from typing import (Dict, List, Mapping, Optional, Sequence)
 from processing.fund import build_fund_registry
 from processing.run_modes import (
     fetch_data_stores,
@@ -37,15 +36,16 @@ from utilities.main_helpers import (
     log_processing_summary,
 )
 
-from config.database import initialize_database
-from config.fund_definitions import (load_cohorts_from_db,
-    ALL_FUNDS,
-    CLOSED_END_FUNDS,
-    ETF_FUNDS,
-    PRIVATE_FUNDS,
-    VIT_AND_MUTUAL_FUNDS,
+from config.run_configurations import (
+    build_run,
+    exclude_funds,
+    generate_business_date_range
 )
-from config.run_configurations import (build_run, exclude_funds, generate_business_date_range)
+from config.database import initialize_database
+from config.fund_definitions import (
+    load_cohorts_from_db,
+    ETF_FUNDS, CLOSED_END_FUNDS, PRIVATE_FUNDS, VIT_AND_MUTUAL_FUNDS,
+)
 
 # Optional runtime overrides for quick local tweaking without CLI arguments.
 RUNTIME_OVERRIDES: Optional[Mapping[str, object]] = None
@@ -104,14 +104,6 @@ def main(
         if not registry:
             logger.error("No funds available after applying filters")
             return 1
-
-        if options.compliance_tests:
-            logger.info(
-                "Limiting compliance checks to: %s",
-                ", ".join(options.compliance_tests),
-            )
-        else:
-            logger.info("Compliance checks: all available tests will run")
 
         if options.analysis_type == "trading_compliance":
             params = resolve_trading_parameters(options)
@@ -268,251 +260,32 @@ def run_time_series(
     return 0
 
 
-def run_configuration_batch(
-    config_names: List[str],
-    base_date: Optional[str | date] = None,
-    base_date_range: Optional[tuple[str | date, str | date]] = None,
-    overrides: Optional[Dict[str, Dict[str, object]]] = None,
-) -> int:
-    """
-    Execute multiple run configurations in sequence.
+def execute_run(cfg: Mapping[str, object] | List[Mapping[str, object]]) -> int:
+    """Execute a config (dict) or batch of configs (list of dicts)."""
+    if isinstance(cfg, list):
+        for sub in cfg:
+            result = execute_run(sub)
+            if result != 0:
+                return result
+        return 0
 
-    Args:
-        config_names: List of configuration names to execute
-        base_date: Base date for all runs (T date, used to calculate T-1, T-2)
-        base_date_range: Optional tuple of (start_date, end_date) to iterate over
-            business days instead of a single base_date
-        overrides: Optional per-config overrides dict {config_name: {param: value}}
+    # ... existing single-config body unchanged ...
+    from config.run_configurations import generate_business_date_range
 
-    Returns:
-        0 if all runs succeeded, 1 if any failed
+    start = _date.fromisoformat(str(cfg["start_date"]))
+    end   = _date.fromisoformat(str(cfg["end_date"]))
 
-    Example:
-        run_configuration_batch(
-            config_names=["trading_compliance_daily", "eod_compliance_all_funds"],
-            base_date="2025-11-21",
-            overrides={
-                "trading_compliance_daily": {"funds": ["RDVI"]},
-            }
-        )
-    """
-    logging.basicConfig(
-        level=os.getenv("LOG_LEVEL", "INFO").upper(),
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    )
-    logger = logging.getLogger("fund_manager.batch")
+    if cfg.get("date_mode") == "range":
+        return run_time_series(overrides=cfg)
 
-    if base_date_range is None and base_date is None:
-        raise ValueError("Either base_date or base_date_range must be provided")
-
-    if base_date_range:
-        start_date, end_date = base_date_range
-        start_date = helper_coerce_date(start_date, "base_date_range.start")
-        end_date = helper_coerce_date(end_date, "base_date_range.end")
-        business_dates = generate_business_date_range(start_date, end_date)
-        logger.info(
-            "Expanding base_date_range %s -> %s into %d business dates: %s",
-            start_date,
-            end_date,
-            len(business_dates),
-            ", ".join(str(d) for d in business_dates),
-        )
-    else:
-        if isinstance(base_date, str):
-            base_date = helper_coerce_date(base_date, "base_date")
-        business_dates = [base_date]
-
-    # Validate all configs exist before starting
-    logger.info("Validating %d configurations...", len(config_names))
-    for config_name in config_names:
-        try:
-            get_config(config_name)
-        except ValueError as e:
-            logger.error("Configuration validation failed: %s", e)
-            return 1
-
-    # Execute each configuration for each base date
-    results = []
-    logger.info(
-        "Starting batch execution of %d configurations across %d base date(s)",
-        len(config_names),
-        len(business_dates),
-    )
-
-    for base_date_value in business_dates:
-        # Calculate date offsets
-        date_offsets = calculate_date_offsets(base_date_value)
-        logger.info(
-            "Base date configuration: T=%s, T-1=%s, T-2=%s",
-            date_offsets["t"],
-            date_offsets["t1"],
-            date_offsets["t2"],
-        )
-
-        for idx, config_name in enumerate(config_names, 1):
-            logger.info("=" * 80)
-            logger.info(
-                "Executing configuration %d/%d for base date %s: %s",
-                idx,
-                len(config_names),
-                date_offsets["t"],
-                config_name,
-            )
-            logger.info("=" * 80)
-
-            try:
-                # Load base config
-                config = get_config(config_name)
-
-                # Apply any user overrides for this specific config
-                if overrides and config_name in overrides:
-                    config = merge_overrides(config, overrides[config_name])
-
-                # Execute based on date_mode
-                date_mode = config.get("date_mode", "single")
-
-                if date_mode == "single":
-                    exit_code = _execute_single_date_config(config, date_offsets, logger)
-                elif date_mode == "range":
-                    exit_code = _execute_range_date_config(config, date_offsets, logger)
-                else:
-                    raise ValueError(f"Unknown date_mode: {date_mode}")
-
-                results.append({
-                    "base_date": date_offsets["t"],
-                    "config": config_name,
-                    "status": "success" if exit_code == 0 else "failed",
-                    "exit_code": exit_code,
-                })
-
-                if exit_code != 0:
-                    logger.error(
-                        "Configuration '%s' failed with exit code %d for base date %s",
-                        config_name,
-                        exit_code,
-                        date_offsets["t"],
-                    )
-                else:
-                    logger.info(
-                        "Configuration '%s' completed successfully for base date %s",
-                        config_name,
-                        date_offsets["t"],
-                    )
-
-            except Exception as exc:
-                logger.exception(
-                    "Configuration '%s' raised exception for base date %s: %s",
-                    config_name,
-                    date_offsets["t"],
-                    exc,
-                )
-                results.append({
-                    "base_date": date_offsets["t"],
-                    "config": config_name,
-                    "status": "error",
-                    "error": str(exc),
-                })
-
-    # Report summary
-    logger.info("=" * 80)
-    logger.info("BATCH EXECUTION SUMMARY")
-    logger.info("=" * 80)
-
-    successes = [r for r in results if r["status"] == "success"]
-    failures = [r for r in results if r["status"] in ("failed", "error")]
-
-    logger.info("Total configuration runs: %d", len(results))
-    logger.info("Successful: %d", len(successes))
-    logger.info("Failed: %d", len(failures))
-
-    if failures:
-        logger.error("Failed configurations:")
-        for result in failures:
-            error_detail = result.get("error", f"exit code {result.get('exit_code', 'unknown')}")
-            logger.error(
-                "  - %s (base date %s): %s",
-                result["config"],
-                result.get("base_date", "unknown"),
-                error_detail,
-            )
-        return 1
-
-    logger.info("All configurations completed successfully!")
-    return 0
-
-
-def _execute_single_date_config(
-        config: Dict[str, object],
-        date_offsets: Dict[str, date],
-        logger: logging.Logger,
-) -> int:
-    """Execute a single-date configuration (trading_compliance or eod)."""
-
-    analysis_type = config["analysis_type"]
-
-    # Build overrides for main()
-    override_payload = {
-        "analysis_type": analysis_type,
-        "as_of_date": date_offsets["t"],
-        "funds": config.get("funds", []),
-        "create_pdf": config.get("create_pdf", True),
-        #"output_dir": config.get("output_dir", "./outputs"),
-        "output_dir": "G:\\Shared drives\\Portfolio Management\\Funds\\Archive\\Daily_Compliance",
-        "output_tag": config.get("output_tag"),
-    }
-
-    if analysis_type == "trading_compliance":
-        override_payload.update({
-            "ex_ante_date": date_offsets["t"],
-            "ex_post_date": date_offsets["t"],
-            "custodian_date": date_offsets["t1"],
-            "custodian_previous_date": date_offsets["t2"],
-            "compliance_tests": config.get("compliance_tests", []),
-        })
-    elif analysis_type == "eod":
-        override_payload.update({
-            "previous_date": date_offsets["t1"],
-            "eod_reports": config.get("eod_reports", []),
-            "compliance_tests": config.get("compliance_tests", []),
-        })
-
-    return main(overrides=override_payload)
-
-
-def _execute_range_date_config(
-        config: Dict[str, object],
-        date_offsets: Dict[str, date],
-        logger: logging.Logger,
-) -> int:
-    """Execute a range-date configuration (time series)."""
-
-    # For range configs, user must provide start_date/end_date in overrides
-    # or we use a default range around the base date
-    if "start_date" not in config or "end_date" not in config:
-        logger.warning(
-            "Range config missing start_date/end_date; using default 30-day range from base date"
-        )
-        from datetime import timedelta
-        start_date = date_offsets["t"] - timedelta(days=30)
-        end_date = date_offsets["t"]
-    else:
-        start_date = helper_coerce_date(config["start_date"], "start_date")
-        end_date = helper_coerce_date(config["end_date"], "end_date")
-
-    override_payload = {
-        "analysis_type": config["analysis_type"],
-        "start_date": start_date,
-        "end_date": end_date,
-        "funds": config.get("funds", []),
-        "eod_reports": config.get("eod_reports", []),
-        "compliance_tests": config.get("compliance_tests", []),
-        "create_pdf": config.get("create_pdf", False),
-        # "output_dir": config.get("output_dir", "./outputs"),
-        "output_dir": "G:\\Shared drives\\Portfolio Management\\Funds\\Archive\\Daily_Compliance",
-        "generate_daily_reports": config.get("generate_daily_reports", False),
-    }
-
-    return run_time_series(overrides=override_payload)
+    exit_code = 0
+    for trade_date in generate_business_date_range(start, end):
+        iter_cfg = dict(cfg)
+        iter_cfg["as_of_date"] = trade_date.isoformat()
+        result = main(overrides=iter_cfg)
+        if result != 0:
+            return result
+    return exit_code
 
 # ============================================================================
 # MAIN EXECUTION BLOCK
@@ -520,53 +293,69 @@ def _execute_range_date_config(
 
 if __name__ == "__main__":
 
-
     _boot_session, _ = initialize_database()
     try:
         load_cohorts_from_db(_boot_session)
     finally:
         _boot_session.close()
 
-    # EOD compliance on just one fund from the cohort
-    # run = build_run("eod", cohorts=[CLOSED_END_FUNDS], funds=["HE3B1"])
-    # # Only run a subset of compliance tests
-    # run = build_run("eod", cohorts=[CLOSED_END_FUNDS],
-    #                 compliance_tests=["diversification_40act_check", "gics_compliance"])
-    # # Same cohort, time-series stacked across a date range
-    # run = build_run("time_series", cohorts=[CLOSED_END_FUNDS],
-    #                 date_range=("2026-05-01", "2026-05-14"))
-    # run = build_run("eod", cohorts=[CLOSED_END_FUNDS])
+    # 2) Build the run
 
-    # run["as_of_date"] = "2026-05-14"
-    # run["eod_reports"] = ["nav"] # Just NAV recon, nothing else
-    # run["eod_reports"] = ["reconciliation"] # Just holdings recon
-    # run["eod_reports"] = ["compliance", "nav"] # Compliance + NAV recon, skip holdings
-
-
-    run = build_run("eod", funds=exclude_funds(CLOSED_END_FUNDS, "FTMIX"))
-    run["eod_reports"] = ["compliance"] # Compliance skip NAV recon + holdings
-
-    run = build_run("trading_compliance", funds=exclude_funds(CLOSED_END_FUNDS, "FTMIX"))
-    # Iterate each business day in the range, producing a separate report per day.
-    business_days = generate_business_date_range(
-        _date(2026, 5, 22),
-        _date(2026, 5, 22),
-    )
-
-    exit_code = 0
-    for trade_date in business_days:
-        iter_run = dict(run)
-        iter_run["as_of_date"] = trade_date.isoformat()
-        result = main(overrides=iter_run)
-        if result != 0:
-            exit_code = result
-            break
-
-    raise SystemExit(exit_code)
-
-    # exit_code = run_configuration_batch(
-    #     config_names=ACTIVE_RUNS,
-    #     base_date=BASE_DATE,
-    #     base_date_range=BASE_DATE_RANGE if _is_range else None,
-    #     overrides=RUN_OVERRIDES,
+    # # EOD all reports, single day, single cohort
+    # cfg = build_run("eod", cohorts=[ETF_FUNDS], start_date="2026-05-14")
+    #
+    # # Just NAV recon, single day, one fund
+    # cfg = build_run("nav", funds=["KNG"], start_date="2026-05-14")
+    #
+    # # Trading compliance over a week, multiple cohorts
+    # cfg = build_run(
+    #     "trading_compliance",
+    #     cohorts=[ETF_FUNDS, CLOSED_END_FUNDS],
+    #     start_date="2026-05-14",
+    #     end_date="2026-05-21",
     # )
+    #
+    # # Time-series stacked compliance over a month
+    # cfg = build_run(
+    #     "time_series",
+    #     cohorts=[CLOSED_END_FUNDS],
+    #     start_date="2026-04-21",
+    #     end_date="2026-05-21",
+    # )
+    #
+    # # All four EOD report flavors on the same day — chain them
+    # cfg = build_run(
+    #     ["compliance", "reconciliation", "nav"],
+    #     cohorts=[ETF_FUNDS],
+    #     start_date="2026-05-14",
+    #     output_tag="etfs",
+    # )
+    #
+    # cfg = build_run(
+    #     "trading_compliance",
+    #     cohorts=[ETF_FUNDS, CLOSED_END_FUNDS],
+    #     funds=sorted((ETF_FUNDS | CLOSED_END_FUNDS) - {"FTMIX"}),
+    #     start_date="2026-05-14",
+    #     end_date="2026-05-21",
+    # )
+    #
+    # cfg = build_run(
+    #     mode="compliance",
+    #     #funds=exclude_funds(CLOSED_END_FUNDS, "FTMIX"),
+    #     cohorts=[ETF_FUNDS],
+    #     start_date="2026-05-14",
+    #     end_date="2026-05-22",
+    #     output_tag="etfs",
+    # )
+
+    # # Just NAV recon, single day, one fund
+    cfg = build_run(
+                    mode="eod",
+                    funds=["p2726"],
+                    start_date="2026-05-14",
+                    output_tag="p2726")
+
+
+    # 3) Execute
+    exit_code = execute_run(cfg)
+    raise SystemExit(exit_code)
