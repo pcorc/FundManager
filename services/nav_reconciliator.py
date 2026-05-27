@@ -355,8 +355,8 @@ class NAVReconciliator:
             )
 
         # Get holdings DataFrames
-        vest_current = self.fund.data.current.vest.options
-        vest_prior = self.fund.data.previous.vest.options
+        vest_current = self.fund.data.current.vest.flex_options
+        vest_prior = self.fund.data.previous.vest.flex_options
 
         use_roll_trade_prices = self.fund.is_option_settlement_date(self.analysis_date)
         trades_t1 = self.fund.data.previous.flex_option_trades

@@ -754,33 +754,45 @@ class CombinedReconciliationReport:
                 self.pdf.cell(cols[1][1], 7, self._format_currency(value, digits=digits), border=1, align="R")
                 self.pdf.ln()
 
-        # ===== NAV Good flags =====
+        # ===== NAV Difference ($ and %) on one line =====
         self.pdf.ln(3)
-        nav_good_rows = [
-            ("NAV Good (2 Decimal)", nav_data.get("NAV Good (2 Digit)")),
-            ("NAV Good (4 Decimal)", nav_data.get("NAV Good (4 Digit)")),
+        nav_diff = float(nav_data.get("NAV Diff ($)", nav_data.get("difference", 0.0)) or 0.0)
+        cust_nav = float(nav_data.get("Custodian NAV", nav_data.get("current_nav", 0.0)) or 0.0)
+        nav_diff_pct = (nav_diff / cust_nav * 100.0) if cust_nav else 0.0
+
+        self.pdf.set_font("Arial", "B", 9)
+        self.pdf.cell(cols[0][1], 7, "NAV Difference ($ / %)", border=1)
+        self.pdf.set_font("Arial", size=9)
+        self.pdf.cell(cols[1][1], 7, f"{nav_diff:.4f}   ({nav_diff_pct:.4f}%)", border=1, align="R")
+        self.pdf.ln()
+
+        # ===== NAV Good flags — transposed into a single compact row =====
+        flags = [
+            ("2-Dec", nav_data.get("NAV Good (2 Digit)", nav_data.get("nav_good_two"))),
+            ("4-Dec", nav_data.get("NAV Good (4 Digit)", nav_data.get("nav_good_four"))),
         ]
         if self._is_cef(fund_name) and nav_data.get("NAV Good (Cust Opt Prices)") is not None:
-            nav_good_rows.append(("NAV Good (Cust Opt Prices)", nav_data.get("NAV Good (Cust Opt Prices)")))
-        for label, flag in nav_good_rows:
-            if flag is None:
-                continue
-            value = "PASS" if bool(flag) else "FAIL"
-            self.pdf.cell(cols[0][1], 7, label, border=1)
-            self.pdf.set_fill_color(200, 255, 200) if value == "PASS" else self.pdf.set_fill_color(255, 200, 200)
-            self.pdf.cell(cols[1][1], 7, value, border=1, fill=True, align="C")
+            flags.append(("Cust Opt", nav_data.get("NAV Good (Cust Opt Prices)")))
+
+        flags = [(label, flag) for label, flag in flags if flag is not None]
+        if flags:
+            self.pdf.ln(1)
+            total_w = cols[0][1] + cols[1][1]          # same total width as the metric+value table
+            cell_w = total_w / len(flags)
+
+            # Header row
+            self.pdf.set_font("Arial", "B", 8)
+            self.pdf.set_fill_color(240, 240, 240)
+            for label, _ in flags:
+                self.pdf.cell(cell_w, 6, f"NAV Good {label}", border=1, fill=True, align="C")
             self.pdf.ln()
 
-        for label, flag in nav_good_rows:
-            if flag is None:
-                continue
-            value = "PASS" if bool(flag) else "FAIL"
-            self.pdf.cell(cols[0][1], 7, label, border=1)
-            if value == "PASS":
-                self.pdf.set_fill_color(200, 255, 200)
-            else:
-                self.pdf.set_fill_color(255, 200, 200)
-            self.pdf.cell(cols[1][1], 7, value, border=1, fill=True, align="C")
+            # PASS/FAIL row
+            self.pdf.set_font("Arial", "B", 9)
+            for _, flag in flags:
+                passed = bool(flag)
+                self.pdf.set_fill_color(200, 255, 200) if passed else self.pdf.set_fill_color(255, 200, 200)
+                self.pdf.cell(cell_w, 7, "PASS" if passed else "FAIL", border=1, fill=True, align="C")
             self.pdf.ln()
 
     def _find_nav_data_for_fund(self, fund_name: str) -> Mapping[str, Any] | None:

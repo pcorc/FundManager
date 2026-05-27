@@ -100,7 +100,15 @@ class HoldingsReconciliationRenderer:
 
         df = recon_data.get("final_recon", pd.DataFrame())
         if not isinstance(df, pd.DataFrame) or df.empty:
-            self._draw_two_column_table([("Status", "No reconciliation data available")])
+            # Distinguish "ran cleanly, no breaks" from "genuinely no data".
+            merged = recon_data.get("merged_data")
+            price_t = recon_data.get("price_discrepancies_T")
+            ran = (
+                (isinstance(merged, pd.DataFrame) and not merged.empty)
+                or (isinstance(price_t, pd.DataFrame) and not price_t.empty)
+            )
+            msg = "All reconciliations successful - no breaks found" if ran else "No reconciliation data available"
+            self._draw_two_column_table([("Status", msg)])
             self.pdf.ln(4)
             return
 

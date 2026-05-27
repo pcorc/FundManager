@@ -382,12 +382,14 @@ class Fund:
         tickers: Set[str] = set()
         for snap in snapshots:
             for source in (snap.vest, snap.custodian):
-                df = source.options
+                # Options are already split upstream into regular (.options) and
+                # flex (.flex_options). Read the correct frame directly instead of
+                # re-filtering .options (which no longer contains flex rows).
+                df = source.flex_options if include_flex else source.options
                 if df.empty or "optticker" not in df.columns:
                     continue
-                mask = df["optticker"].str.contains(self.flex_option_pattern, na=False, regex=True)
-                filtered = df[mask if include_flex else ~mask]
-                tickers.update(filtered["optticker"].dropna().unique())
+                tickers.update(df["optticker"].dropna().unique())
+
         return tickers
 
     def get_price_breaks(self, asset_class: str) -> pd.DataFrame:

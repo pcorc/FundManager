@@ -20,12 +20,7 @@ def _unwrap_if_date_keyed(
     payload: Mapping[str, Any],
     fund_level_keys: Iterable[str],
 ) -> Mapping[str, Any]:
-    """If payload looks like {date: {fund: data}}, return the inner {fund: data}.
-
-    Detection: the first nested value is a dict whose first value is itself a dict
-    that contains at least one of ``fund_level_keys``. Otherwise the payload is
-    returned unchanged.
-    """
+    """If payload looks like {date: {fund: data}}, return the inner {fund: data}."""
     if not payload:
         return payload
     first_value = next(iter(payload.values()))
@@ -58,8 +53,6 @@ class GeneratedNAVReconciliationReport:
 class NAVReconciliationExcelReport:
     """Render NAV reconciliation data into an Excel workbook with formulas and ticker details."""
 
-    # Style + format constants — module-level constants would be just as fine,
-    # but keeping them on the instance preserves the original API.
     CURRENCY_FORMAT = "#,##0.00"
     NAV_FORMAT = "#,##0.0000"
     INTEGER_FORMAT = "#,##0"
@@ -83,6 +76,7 @@ class NAVReconciliationExcelReport:
         self.header_font = Font(bold=True, size=12)
         self.subheader_font = Font(bold=True, size=10)
         self.body_font = Font(size=10)
+        self.link_font = Font(color="0000FF", underline="single")
         self.currency_format = self.CURRENCY_FORMAT
         self.nav_format = self.NAV_FORMAT
         self.integer_format = self.INTEGER_FORMAT
@@ -95,7 +89,6 @@ class NAVReconciliationExcelReport:
     # ------------------------------------------------------------------
     @staticmethod
     def _normalize_nav_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
-        """Return fund-level data, unwrapping a date-keyed wrapper if present."""
         if not payload:
             return {}
         fund_level = _unwrap_if_date_keyed(payload, _NAV_FUND_LEVEL_KEYS)
@@ -109,7 +102,6 @@ class NAVReconciliationExcelReport:
     def _export(self) -> None:
         workbook = self.workbook or Workbook()
         if not self._using_existing_workbook:
-            # Drop the auto-created default sheet so we can position ours.
             workbook.remove(workbook.active)
 
         for fund_name, payload in sorted(self.results.items()):
@@ -128,14 +120,15 @@ class NAVReconciliationExcelReport:
         ws = wb.create_sheet(fund_name[:31])
         self._sheet_refs[fund_name] = {"sheet_name": fund_name[:31], "components": {}}
 
-        back = ws.cell(row=1, column=5, value="-> NAV Summary")
-        back.hyperlink = "#'NAV Summary'!A1"
-        back.font = Font(color="0000FF", underline="single")
-
         ws.merge_cells("A1:C1")
         ws["A1"] = f"{fund_name} - NAV Reconciliation - {date_str}"
         ws["A1"].font = self.title_font
         ws["A1"].alignment = Alignment(horizontal="center")
+
+        # Back-link to summary
+        back = ws.cell(row=1, column=5, value="-> NAV Summary")
+        back.hyperlink = "#'NAV Summary'!A1"
+        back.font = self.link_font
 
         row = 3
         ws.cell(row=row, column=1, value="NAV CALCULATION SUMMARY").font = self.header_font
@@ -158,8 +151,6 @@ class NAVReconciliationExcelReport:
         row += 1
 
         component_row_refs: Dict[str, str] = {}
-
-        # Detail sections start below the summary block.
         detail_start_row = row + 30
 
         equity_info = self._add_asset_details_with_formulas(
@@ -368,6 +359,45 @@ class NAVReconciliationExcelReport:
 
         ws.cell(row=row, column=1, value="NAV Good (4 decimal)")
         ws.cell(row=row, column=3, value=f'=IF(ABS(ROUND(C{nav_diff_row},4))<=0.0001,"PASS","FAIL")')
+        row += 2
+
+        # ===== Option Price Sensitivity (Custodian vs Vest) =====
+        impact_present = (
+            nav_data.get("Option Price Impact ($)") not in (None, 0, 0.0)
+            or nav_data.get("Option MV (Vest Prices)")
+            or nav_data.get("Option MV (Custodian Prices)")
+        )
+        if impact_present:
+            ws.cell(row=row, column=1, value="OPTION PRICE SENSITIVITY (Custodian vs Vest)").font = self.header_font
+            row += 1
+            ws.cell(
+                row=row, column=1,
+                value="Only option price breaks > $1 counted. Shows NAV sensitivity to option price source.",
+            ).font = Font(italic=True, size=9)
+            row += 1
+
+            sens_rows = [
+                ("  Option MV (Vest Prices)",        nav_data.get("Option MV (Vest Prices)", 0), self.currency_format),
+                ("  Option MV (Custodian Prices)",   nav_data.get("Option MV (Custodian Prices)", 0), self.currency_format),
+                ("  G/L Impact of Custodian Prices", nav_data.get("Option Price Impact ($)", 0), self.currency_format),
+                ("  Expected NAV (Vest Opt Prices)", nav_data.get("Expected NAV (Vest Opt Prices)", 0), self.nav_format),
+                ("  Expected NAV (Cust Opt Prices)", nav_data.get("Expected NAV (Custodian Opt Prices)", 0), self.nav_format),
+            ]
+            for label, value, fmt in sens_rows:
+                ws.cell(row=row, column=1, value=label)
+                ws.cell(row=row, column=3, value=value).number_format = fmt
+                row += 1
+
+            nav_good_cust = nav_data.get("NAV Good (Cust Opt Prices)")
+            if nav_good_cust is not None:
+                ws.cell(row=row, column=1, value="  NAV Good (Cust Opt Prices)")
+                good_cell = ws.cell(row=row, column=3, value="PASS" if bool(nav_good_cust) else "FAIL")
+                good_cell.fill = (
+                    PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
+                    if bool(nav_good_cust)
+                    else PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")
+                )
+                row += 1
 
         self._sheet_refs[fund_name]["prior_nav"] = f"C{beg_tna_row}"
 
@@ -387,11 +417,6 @@ class NAVReconciliationExcelReport:
         empty_message: str,
         contract_multiplier: int = 1,
     ) -> Dict[str, Any]:
-        """Render a per-ticker gain/loss section. Used for equity, options, and flex options.
-
-        ``contract_multiplier`` is the factor applied to the G/L formula:
-        1 for cash equities, 100 for options/flex options (per-contract underlying).
-        """
         ws.cell(row=start_row, column=1, value=title).font = self.header_font
 
         details_df = nav_data.get("detailed_calculations", {}).get(details_key, pd.DataFrame())
@@ -478,42 +503,46 @@ class NAVReconciliationExcelReport:
             "end_row": total_row,
         }
 
+    # ------------------------------------------------------------------
     def _create_summary_sheet(self, workbook: Workbook):
-        """Create summary sheet with all funds. Column A links to each fund's tab."""
+        """Create summary sheet with all funds. Column A links to each fund's tab;
+        trailing columns show the custodian-option-price sensitivity analysis."""
         worksheet = workbook.create_sheet("NAV Summary")
 
-        worksheet.merge_cells("A1:K1")
+        headers = [
+            "Fund", "Date", "Expected TNA", "Custodian TNA", "TNA Diff ($)",
+            "Expected NAV", "Custodian NAV", "NAV Diff ($)", "Shares Outstanding",
+            "NAV Good (2-dec)", "NAV Good (4-dec)",
+            # ---- new custodian-option-price columns ----
+            "Option Price Impact ($)", "Expected NAV (Cust Opt)", "NAV Good (Cust Opt)",
+        ]
+
+        last_col = len(headers)
+        worksheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
         title_cell = worksheet.cell(
             row=1, column=1, value=f"NAV Reconciliation Summary - {self.report_date}"
         )
         title_cell.font = self.title_font
         title_cell.alignment = Alignment(horizontal="center")
 
-        headers = [
-            "Fund", "Date", "Expected TNA", "Custodian TNA", "TNA Diff ($)",
-            "Expected NAV", "Custodian NAV", "NAV Diff ($)", "Shares Outstanding",
-            "NAV Good (2-dec)", "NAV Good (4-dec)",
-        ]
         header_row = 3
         for index, header in enumerate(headers, start=1):
             cell = worksheet.cell(row=header_row, column=index, value=header)
             cell.font = self.header_font
-            cell.alignment = Alignment(horizontal="center")
+            cell.alignment = Alignment(horizontal="center", wrap_text=True)
 
         good_fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
         bad_fill = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")
-        link_font = Font(color="0000FF", underline="single")
 
         current_row = header_row + 1
         for fund_name in sorted(self.results.keys()):
             nav_data = self.results[fund_name]
 
-            # Fund cell with an internal hyperlink to that fund's tab.
+            # Fund cell with internal hyperlink to that fund's tab
             fund_cell = worksheet.cell(row=current_row, column=1, value=fund_name)
             sheet_name = self._sheet_refs.get(fund_name, {}).get("sheet_name", fund_name[:31])
-            # Quote the sheet name so names with spaces/symbols still resolve.
             fund_cell.hyperlink = f"#'{sheet_name}'!A1"
-            fund_cell.font = link_font
+            fund_cell.font = self.link_font
 
             worksheet.cell(row=current_row, column=2, value=self.report_date)
             worksheet.cell(row=current_row, column=3, value=nav_data.get("Expected TNA", 0)).number_format = self.currency_format
@@ -526,18 +555,35 @@ class NAVReconciliationExcelReport:
 
             nav_good_2 = bool(nav_data.get("NAV Good (2 Digit)", False))
             nav_good_4 = bool(nav_data.get("NAV Good (4 Digit)", False))
-
             cell_2dec = worksheet.cell(row=current_row, column=10, value="PASS" if nav_good_2 else "FAIL")
             cell_4dec = worksheet.cell(row=current_row, column=11, value="PASS" if nav_good_4 else "FAIL")
             cell_2dec.fill = good_fill if nav_good_2 else bad_fill
             cell_4dec.fill = good_fill if nav_good_4 else bad_fill
 
+            # ---- custodian-option-price sensitivity columns ----
+            worksheet.cell(
+                row=current_row, column=12,
+                value=nav_data.get("Option Price Impact ($)", 0),
+            ).number_format = self.currency_format
+            worksheet.cell(
+                row=current_row, column=13,
+                value=nav_data.get("Expected NAV (Custodian Opt Prices)", nav_data.get("Expected NAV", 0)),
+            ).number_format = self.nav_format
+
+            nav_good_cust = nav_data.get("NAV Good (Cust Opt Prices)")
+            if nav_good_cust is None:
+                worksheet.cell(row=current_row, column=14, value="N/A")
+            else:
+                cust_cell = worksheet.cell(row=current_row, column=14, value="PASS" if bool(nav_good_cust) else "FAIL")
+                cust_cell.fill = good_fill if bool(nav_good_cust) else bad_fill
+
             current_row += 1
 
-        for column_index in range(1, 12):
-            worksheet.column_dimensions[get_column_letter(column_index)].width = 15
+        for column_index in range(1, last_col + 1):
+            worksheet.column_dimensions[get_column_letter(column_index)].width = 16
 
         return worksheet
+
 
 # ------------------------------------------------------------------------
 def convert_nav_results_to_dicts(nav_data: Mapping[str, Any]) -> Dict[str, Any]:
