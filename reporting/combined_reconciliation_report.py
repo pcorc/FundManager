@@ -110,6 +110,11 @@ class CombinedReconciliationReport:
                     funds.add(fund_name)
         return funds
 
+    def _is_cef(self, fund_name: str) -> bool:
+        """True if the fund is a closed-end fund."""
+        from config.fund_definitions import CLOSED_END_FUNDS
+        return fund_name in CLOSED_END_FUNDS
+
     def _generate_report(self) -> None:
         self._add_title_page()
         self._add_nav_summary_page()
@@ -567,7 +572,7 @@ class CombinedReconciliationReport:
 
         nav_data = self._find_nav_data_for_fund(fund_name)
         if nav_data:
-            self._add_nav_details(nav_data)
+            self._add_nav_details(fund_name, nav_data)
 
         holdings_data, date_str = self._find_holdings_data_for_fund(fund_name)
         if holdings_data:
@@ -656,7 +661,7 @@ class CombinedReconciliationReport:
         self.pdf.set_text_color(0, 0, 0)
         self.pdf.ln(row_height + 3)
 
-    def _add_nav_details(self, nav_data: Mapping[str, Any]) -> None:
+    def _add_nav_details(self, fund_name: str, nav_data: Mapping[str, Any]) -> None:
         cols = [("Metric", 70), ("Value", 60)]
 
         # Main NAV metrics table
@@ -699,42 +704,72 @@ class CombinedReconciliationReport:
             self.pdf.cell(cols[1][1], 7, formatted, border=1, fill=True, align="R")
             self.pdf.ln()
 
-        # Gain/Loss Components section
-        self.pdf.ln(1)
+        # ===== Gain/Loss Components (asset classes only) =====
+        self.pdf.ln(2)
         self.pdf.set_font("Arial", "B", 10)
         self.pdf.cell(0, 7, "Gain/Loss Components", ln=True)
-
-        gl_rows = [
-            ("  Equity G/L", nav_data.get("Equity G/L", nav_data.get("equity_gl", 0.0))),
-            ("  Option G/L", nav_data.get("Option G/L", nav_data.get("options_gl", 0.0))),
-            ("  Flex Option G/L", nav_data.get("Flex Option G/L", nav_data.get("flex_options_gl", 0.0))),
-            ("  Treasury G/L", nav_data.get("Treasury G/L", nav_data.get("treasury_gl", 0.0))),
-            ("  Assignment G/L", nav_data.get("Assignment G/L", nav_data.get("assignment_gl", 0.0))),
-        ]
-
         self.pdf.set_font("Arial", size=9)
-        for metric, value in gl_rows:
-            self.pdf.cell(cols[0][1], 7, metric, border=1)
-            self.pdf.cell(cols[1][1], 7, self._format_currency(value, digits=2), border=1, align="R")
-            self.pdf.ln()
-
-        accruals_value = nav_data.get("Accruals", nav_data.get("accruals", 0.0))
-        distributions_value = nav_data.get("Distributions", nav_data.get("distributions", 0.0))
-
         for metric, value in (
-            ("  Accruals", -abs(accruals_value)),
-            ("  Distributions", -abs(distributions_value)),
+            ("  Equity G/L",      nav_data.get("Equity G/L", 0.0)),
+            ("  Option G/L",      nav_data.get("Option G/L", 0.0)),
+            ("  Flex Option G/L", nav_data.get("Flex Option G/L", 0.0)),
+            ("  Treasury G/L",    nav_data.get("Treasury G/L", 0.0)),
         ):
             self.pdf.cell(cols[0][1], 7, metric, border=1)
             self.pdf.cell(cols[1][1], 7, self._format_currency(value, digits=2), border=1, align="R")
             self.pdf.ln()
 
-        # NAV Good flags
+        # ===== Adjustments (assignment / accruals / distributions) =====
+        self.pdf.ln(2)
+        self.pdf.set_font("Arial", "B", 10)
+        self.pdf.cell(0, 7, "Adjustments", ln=True)
+        self.pdf.set_font("Arial", size=9)
+        for metric, value in (
+            ("  Assignment G/L", nav_data.get("Assignment G/L", 0.0)),
+            ("  Accruals",       -abs(nav_data.get("Accruals", 0.0))),
+            ("  Distributions",  -abs(nav_data.get("Distributions", 0.0))),
+        ):
+            self.pdf.cell(cols[0][1], 7, metric, border=1)
+            self.pdf.cell(cols[1][1], 7, self._format_currency(value, digits=2), border=1, align="R")
+            self.pdf.ln()
+
+        # ===== Option Price Sensitivity (CEF only) — option data ONLY =====
+        if self._is_cef(fund_name) and nav_data.get("Option Price Impact ($)"):
+            self.pdf.ln(4)
+            self.pdf.set_font("Arial", "B", 10)
+            self.pdf.cell(0, 7, "Option Price Sensitivity (Custodian vs Vest)", ln=True)
+            self.pdf.set_font("Arial", "I", 8)
+            self.pdf.cell(0, 5,
+                "Closed-end fund: counts only option price breaks > $1. "
+                "Shows NAV sensitivity to the option price source.", ln=True)
+            self.pdf.set_font("Arial", size=9)
+            for metric, value, digits in (
+                ("  Option MV (Vest Prices)",        nav_data.get("Option MV (Vest Prices)", 0.0), 2),
+                ("  Option MV (Custodian Prices)",   nav_data.get("Option MV (Custodian Prices)", 0.0), 2),
+                ("  G/L Impact of Custodian Prices", nav_data.get("Option Price Impact ($)", 0.0), 2),
+                ("  Expected NAV (Vest Opt Prices)", nav_data.get("Expected NAV (Vest Opt Prices)", 0.0), 4),
+                ("  Expected NAV (Cust Opt Prices)", nav_data.get("Expected NAV (Custodian Opt Prices)", 0.0), 4),
+            ):
+                self.pdf.cell(cols[0][1], 7, metric, border=1)
+                self.pdf.cell(cols[1][1], 7, self._format_currency(value, digits=digits), border=1, align="R")
+                self.pdf.ln()
+
+        # ===== NAV Good flags =====
         self.pdf.ln(3)
         nav_good_rows = [
-            ("NAV Good (2 Decimal)", nav_data.get("NAV Good (2 Digit)", nav_data.get("nav_good_two"))),
-            ("NAV Good (4 Decimal)", nav_data.get("NAV Good (4 Digit)", nav_data.get("nav_good_four"))),
+            ("NAV Good (2 Decimal)", nav_data.get("NAV Good (2 Digit)")),
+            ("NAV Good (4 Decimal)", nav_data.get("NAV Good (4 Digit)")),
         ]
+        if self._is_cef(fund_name) and nav_data.get("NAV Good (Cust Opt Prices)") is not None:
+            nav_good_rows.append(("NAV Good (Cust Opt Prices)", nav_data.get("NAV Good (Cust Opt Prices)")))
+        for label, flag in nav_good_rows:
+            if flag is None:
+                continue
+            value = "PASS" if bool(flag) else "FAIL"
+            self.pdf.cell(cols[0][1], 7, label, border=1)
+            self.pdf.set_fill_color(200, 255, 200) if value == "PASS" else self.pdf.set_fill_color(255, 200, 200)
+            self.pdf.cell(cols[1][1], 7, value, border=1, fill=True, align="C")
+            self.pdf.ln()
 
         for label, flag in nav_good_rows:
             if flag is None:

@@ -126,6 +126,7 @@ class NAVReconciliator:
 
         # Calculate NAV summary
         summary = self._calculate_nav_summary(components)
+        option_price_impact = self._calculate_option_price_impact(summary)
 
         # Build final results
         results = NAVReconciliationResults(
@@ -134,6 +135,7 @@ class NAVReconciliator:
             prior_date=self.prior_date,
             components=components,
             summary=summary,
+            option_price_impact=option_price_impact,  # NEW
         )
 
         self._log_completion(results)
@@ -653,6 +655,42 @@ class NAVReconciliator:
         days = 3 if analysis_dt.weekday() == 4 else 1
 
         return tna * expense_ratio * (days / 365)
+
+    def _calculate_option_price_impact(self, summary) -> dict:
+        """CEF option-price sensitivity. Counts only option price breaks > $1,
+        and computes Expected NAV under vest vs custodian option prices."""
+        cur = self.fund.data.current
+        oms = cur.vest.options
+        cust = cur.custodian.options
+        if oms.empty or cust.empty or 'optticker' not in oms.columns or 'optticker' not in cust.columns:
+            return {}
+
+        cust_px = cust[['optticker', 'price']].rename(columns={'price': 'price_cust'})
+        merged = oms.merge(cust_px, on='optticker', how='inner')
+        merged['price_vest'] = pd.to_numeric(merged.get('price'), errors='coerce')
+        merged['price_cust'] = pd.to_numeric(merged['price_cust'], errors='coerce')
+        merged['qty'] = pd.to_numeric(merged.get('nav_shares'), errors='coerce').fillna(0.0)
+        merged['abs_diff'] = (merged['price_vest'] - merged['price_cust']).abs()
+
+        material = merged[merged['abs_diff'] > 1.0]
+        mv_vest = float((merged['price_vest'] * merged['qty'] * 100).sum())
+        mv_cust = float((merged['price_cust'] * merged['qty'] * 100).sum())
+        impact = mv_cust - mv_vest
+
+        shares = summary.shares_outstanding or 0
+        exp_nav_vest = summary.expected_nav
+        exp_nav_cust = (summary.expected_tna + impact) / shares if shares else exp_nav_vest
+        nav_good_cust = abs(round(summary.custodian_nav - exp_nav_cust, 4)) <= 0.0001
+
+        return {
+            "option_mv_vest_prices": mv_vest,
+            "option_mv_custodian_prices": mv_cust,
+            "option_price_impact": impact,
+            "expected_nav_vest_prices": exp_nav_vest,
+            "expected_nav_custodian_prices": exp_nav_cust,
+            "material_break_count": int(len(material)),
+            "nav_good_cust_opt": bool(nav_good_cust),
+        }
 
     def _calculate_distributions(self) -> float:
         """

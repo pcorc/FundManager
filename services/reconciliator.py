@@ -96,6 +96,11 @@ class Reconciliator:
         df['in_cust'] = df['_merge'] != 'left_only'
         df.drop(columns=['_merge'], inplace=True)
 
+        # The report's "quantity" column is the vest holding. The vest side has
+        # nav_shares (no `quantity` column), so the merge leaves the custodian's
+        # `quantity` un-suffixed — make `quantity` explicitly the vest shares.
+        df['quantity'] = self._coerce_numeric_series(df.get('nav_shares', pd.Series(dtype=float)))
+
         # Same for T-1, but only if both frames carry the join key. KNGIX (and any
         # fund with no T-1 holdings) returns empty DataFrames with no columns at
         # all, so the merge would raise KeyError on 'eqyticker'.
@@ -424,17 +429,37 @@ class Reconciliator:
                     df_cust1['shares_cust'] = 0.0
             df_cust1['shares_cust'] = self._coerce_numeric_series(df_cust1['shares_cust'])
 
-        # Merge current data — guard against empty frames missing the join key.
-        if 'optticker' in df_oms.columns and 'optticker' in df_cust.columns:
-            df = pd.merge(df_oms, df_cust, on='optticker', how='outer', suffixes=('_vest', '_cust'))
+        # FLEX opttickers don't match between sides — OMS emits
+        # "4SPX US 07/31/26 C5000.01" while custodian emits "SPX US 07/31/26 C5000".
+        # Both carry the flex contract code instead:
+        #   OMS:       equity_underlying_ticker (e.g. SC31761B)
+        #   custodian: cusip                    (e.g. SC31761B)
+        for frame in (df_oms, df_cust, df_oms1, df_cust1):
+            if frame.empty:
+                continue
+            if 'equity_underlying_ticker' in frame.columns:
+                frame['flex_code'] = frame['equity_underlying_ticker']
+            elif 'cusip' in frame.columns:
+                frame['flex_code'] = frame['cusip']
+
+        if 'flex_code' in df_oms.columns and 'flex_code' in df_cust.columns:
+            df = pd.merge(df_oms, df_cust, on='flex_code', how='outer', suffixes=('_vest', '_cust'))
         else:
             df = pd.DataFrame()
 
-        # Same for previous data.
-        if 'optticker' in df_oms1.columns and 'optticker' in df_cust1.columns:
-            df1 = pd.merge(df_oms1, df_cust1, on='optticker', how='outer', suffixes=('_vest', '_cust'))
+        if 'flex_code' in df_oms1.columns and 'flex_code' in df_cust1.columns:
+            df1 = pd.merge(df_oms1, df_cust1, on='flex_code', how='outer', suffixes=('_vest', '_cust'))
         else:
             df1 = pd.DataFrame()
+
+        # Single display optticker: prefer OMS canonical form, fall back to custodian.
+        for frame in (df, df1):
+            if frame.empty or 'optticker' in frame.columns:
+                continue
+            if 'optticker_vest' in frame.columns:
+                frame['optticker'] = frame['optticker_vest'].fillna(frame.get('optticker_cust'))
+            elif 'optticker_cust' in frame.columns:
+                frame['optticker'] = frame['optticker_cust']
 
         # Identify discrepancies in current data
         if 'quantity' not in df.columns and 'quantity_vest' in df.columns:

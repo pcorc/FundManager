@@ -153,12 +153,16 @@ class NAVReconciliationResults:
     prior_date: str
     components: NAVComponents
     summary: NAVSummary
+    option_price_impact: dict = field(default_factory=dict)   # NEW
+
 
     def to_legacy_dict(self) -> Dict[str, object]:
         """
         Convert to legacy dictionary format for backward compatibility.
         This matches the structure expected by existing reporting code.
         """
+        impact = self.option_price_impact or {}
+
         return {
             "Beginning TNA": self.summary.beginning_tna,
             "Adjusted Beginning TNA": self.summary.adjusted_beginning_tna,
@@ -187,6 +191,16 @@ class NAVReconciliationResults:
             "Difference (%) - 2 Digit": self.summary.diff_pct_2_decimal,
             "NAV Good (2 Digit)": self.summary.nav_good_2_decimal,
             "NAV Good (4 Digit)": self.summary.nav_good_4_decimal,
+            "NAV Good (Cust Opt Prices)": impact.get("nav_good_cust_opt"),
+
+            # --- Option price sensitivity (custodian vs vest), CEF-focused ---
+            "Option MV (Vest Prices)": impact.get("option_mv_vest_prices", 0.0),
+            "Option MV (Custodian Prices)": impact.get("option_mv_custodian_prices", 0.0),
+            "Option Price Impact ($)": impact.get("option_price_impact", 0.0),
+            "Expected NAV (Vest Opt Prices)": impact.get("expected_nav_vest_prices", self.summary.expected_nav),
+            "Expected NAV (Custodian Opt Prices)": impact.get("expected_nav_custodian_prices", self.summary.expected_nav),
+            "Option Price Breaks (>$1)": impact.get("material_break_count", 0),
+
             "detailed_calculations": {
                 "equity_details": self.components.equity.to_detail_dataframe(),
                 "option_details": self.components.options.to_detail_dataframe(),
@@ -201,4 +215,3 @@ class NAVReconciliationResults:
             },
             "summary": self.summary.to_dict(),
         }
-

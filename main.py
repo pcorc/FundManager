@@ -270,10 +270,9 @@ def execute_run(cfg: Mapping[str, object] | List[Mapping[str, object]]) -> int:
         return 0
 
     # ... existing single-config body unchanged ...
-    from config.run_configurations import generate_business_date_range
 
-    start = _date.fromisoformat(str(cfg["start_date"]))
-    end   = _date.fromisoformat(str(cfg["end_date"]))
+    start = date.fromisoformat(str(cfg["start_date"]))
+    end   = date.fromisoformat(str(cfg["end_date"]))
 
     if cfg.get("date_mode") == "range":
         return run_time_series(overrides=cfg)

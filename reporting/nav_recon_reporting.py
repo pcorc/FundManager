@@ -128,6 +128,10 @@ class NAVReconciliationExcelReport:
         ws = wb.create_sheet(fund_name[:31])
         self._sheet_refs[fund_name] = {"sheet_name": fund_name[:31], "components": {}}
 
+        back = ws.cell(row=1, column=5, value="-> NAV Summary")
+        back.hyperlink = "#'NAV Summary'!A1"
+        back.font = Font(color="0000FF", underline="single")
+
         ws.merge_cells("A1:C1")
         ws["A1"] = f"{fund_name} - NAV Reconciliation - {date_str}"
         ws["A1"].font = self.title_font
@@ -474,9 +478,8 @@ class NAVReconciliationExcelReport:
             "end_row": total_row,
         }
 
-    # ------------------------------------------------------------------
     def _create_summary_sheet(self, workbook: Workbook):
-        """Create summary sheet with all funds."""
+        """Create summary sheet with all funds. Column A links to each fund's tab."""
         worksheet = workbook.create_sheet("NAV Summary")
 
         worksheet.merge_cells("A1:K1")
@@ -499,12 +502,19 @@ class NAVReconciliationExcelReport:
 
         good_fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
         bad_fill = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")
+        link_font = Font(color="0000FF", underline="single")
 
         current_row = header_row + 1
         for fund_name in sorted(self.results.keys()):
             nav_data = self.results[fund_name]
 
-            worksheet.cell(row=current_row, column=1, value=fund_name)
+            # Fund cell with an internal hyperlink to that fund's tab.
+            fund_cell = worksheet.cell(row=current_row, column=1, value=fund_name)
+            sheet_name = self._sheet_refs.get(fund_name, {}).get("sheet_name", fund_name[:31])
+            # Quote the sheet name so names with spaces/symbols still resolve.
+            fund_cell.hyperlink = f"#'{sheet_name}'!A1"
+            fund_cell.font = link_font
+
             worksheet.cell(row=current_row, column=2, value=self.report_date)
             worksheet.cell(row=current_row, column=3, value=nav_data.get("Expected TNA", 0)).number_format = self.currency_format
             worksheet.cell(row=current_row, column=4, value=nav_data.get("Custodian TNA", 0)).number_format = self.currency_format
@@ -528,7 +538,6 @@ class NAVReconciliationExcelReport:
             worksheet.column_dimensions[get_column_letter(column_index)].width = 15
 
         return worksheet
-
 
 # ------------------------------------------------------------------------
 def convert_nav_results_to_dicts(nav_data: Mapping[str, Any]) -> Dict[str, Any]:
