@@ -164,6 +164,8 @@ class NAVReconciliator:
         # Get holdings DataFrames
         vest_current = self.fund.data.current.vest.equity
         vest_prior = self.fund.data.previous.vest.equity
+        cust_current = self.fund.data.current.custodian.equity
+        cust_prior = self.fund.data.previous.custodian.equity
 
         # Get price breaks for adjustments
         price_breaks = self.fund.get_price_breaks('equity')
@@ -175,6 +177,8 @@ class NAVReconciliator:
                 ticker,
                 vest_current,
                 vest_prior,
+                cust_current,
+                cust_prior,
                 price_breaks,
             )
             if detail:
@@ -191,11 +195,33 @@ class NAVReconciliator:
             ticker_details=ticker_details,
         )
 
+    @staticmethod
+    def _lookup_price(
+            frame: pd.DataFrame,
+            ticker_col: str,
+            ticker: str,
+            default: float = 0.0,
+    ) -> Optional[float]:
+        """Return the price for ``ticker`` from ``frame`` (None if absent)."""
+        if frame is None or frame.empty or ticker_col not in frame.columns or 'price' not in frame.columns:
+            return None
+        match = frame[frame[ticker_col] == ticker]
+        if match.empty:
+            return None
+        try:
+            value = float(match.iloc[0]['price'])
+        except (TypeError, ValueError):
+            return default
+        return default if pd.isna(value) else value
+
+
     def _calculate_equity_ticker_gl(
             self,
             ticker: str,
             vest_current: pd.DataFrame,
             vest_prior: pd.DataFrame,
+            cust_current: pd.DataFrame,
+            cust_prior: pd.DataFrame,
             price_breaks: pd.DataFrame,
     ) -> Optional[TickerGainLoss]:
         """
@@ -230,9 +256,12 @@ class NAVReconciliator:
                 qty_t1 = _f(ticker_data.iloc[0].get('nav_shares', 0))
                 price_t1_vest = _f(ticker_data.iloc[0].get('price', 0))
 
-        # Start with vest prices
-        price_t_custodian = price_t_vest
-        price_t1_custodian = price_t1_vest
+        # Source real custodian prices; fall back to vest where the custodian
+        # has no separate mark for this ticker.
+        cust_t = self._lookup_price(cust_current, 'eqyticker', ticker)
+        cust_t1 = self._lookup_price(cust_prior, 'eqyticker', ticker)
+        price_t_custodian = cust_t if cust_t is not None else price_t_vest
+        price_t1_custodian = cust_t1 if cust_t1 is not None else price_t1_vest
 
         # Apply custodian price adjustments if available
         if not price_breaks.empty and ticker in price_breaks.index:
@@ -249,8 +278,8 @@ class NAVReconciliator:
                     price_t1_custodian = cust_override
                     price_t_custodian = cust_override
 
-        # Calculate G/L
-        gl_raw = (price_t_vest - price_t1_custodian) * qty_t
+        # Calculate G/L: raw uses the vest book, adjusted uses custodian marks
+        gl_raw = (price_t_vest - price_t1_vest) * qty_t
         gl_adjusted = (price_t_custodian - price_t1_custodian) * qty_t
 
         # Only return if position exists
@@ -293,6 +322,8 @@ class NAVReconciliator:
         # Get holdings DataFrames
         vest_current = self.fund.data.current.vest.options
         vest_prior = self.fund.data.previous.vest.options
+        cust_current = self.fund.data.current.custodian.options
+        cust_prior = self.fund.data.previous.custodian.options
 
         # Roll days should source T-1 prices from execution data
         use_roll_trade_prices = self.fund.is_option_settlement_date(self.analysis_date)
@@ -306,6 +337,8 @@ class NAVReconciliator:
                 ticker,
                 vest_current,
                 vest_prior,
+                cust_current,
+                cust_prior,
                 price_breaks,
                 multiplier=100.0,  # Option contract multiplier
                 trades_t1=trades_t1,
@@ -355,6 +388,8 @@ class NAVReconciliator:
         # Get holdings DataFrames
         vest_current = self.fund.data.current.vest.flex_options
         vest_prior = self.fund.data.previous.vest.flex_options
+        cust_current = self.fund.data.current.custodian.flex_options
+        cust_prior = self.fund.data.previous.custodian.flex_options
 
         use_roll_trade_prices = self.fund.is_option_settlement_date(self.analysis_date)
         trades_t1 = self.fund.data.previous.flex_option_trades
@@ -369,6 +404,8 @@ class NAVReconciliator:
                 ticker,
                 vest_current,
                 vest_prior,
+                cust_current,
+                cust_prior,
                 price_breaks,
                 multiplier=100.0,
                 trades_t1=trades_t1,
@@ -393,6 +430,8 @@ class NAVReconciliator:
             ticker: str,
             vest_current: pd.DataFrame,
             vest_prior: pd.DataFrame,
+            cust_current: pd.DataFrame,
+            cust_prior: pd.DataFrame,
             price_breaks: pd.DataFrame,
             multiplier: float = 100.0,
             trades_t1: Optional[pd.DataFrame] = None,
@@ -429,9 +468,11 @@ class NAVReconciliator:
                 qty_t1 = _f(ticker_data.iloc[0].get('nav_shares', 0))
                 price_t1_vest = _f(ticker_data.iloc[0].get('price', 0))
 
-        # Start with vest prices
-        price_t_custodian = price_t_vest
-        price_t1_custodian = price_t1_vest
+        # Source real custodian marks; fall back to vest where absent
+        cust_t = self._lookup_price(cust_current, 'optticker', ticker)
+        cust_t1 = self._lookup_price(cust_prior, 'optticker', ticker)
+        price_t_custodian = cust_t if cust_t is not None else price_t_vest
+        price_t1_custodian = cust_t1 if cust_t1 is not None else price_t1_vest
 
         # On option roll dates, use execution prices from the T-1 trades feed
         if use_trade_prices:
@@ -453,8 +494,8 @@ class NAVReconciliator:
                     price_t1_custodian = _f(cust_override)
                     price_t_custodian = _f(cust_override)
 
-        # Calculate G/L with multiplier
-        gl_raw = (price_t_vest - price_t1_custodian) * qty_t * multiplier
+        # Calculate G/L with multiplier: raw = vest book, adjusted = custodian
+        gl_raw = (price_t_vest - price_t1_vest) * qty_t * multiplier
         gl_adjusted = (price_t_custodian - price_t1_custodian) * qty_t * multiplier
 
         if qty_t != 0 or qty_t1 != 0:
@@ -757,21 +798,44 @@ class NAVReconciliator:
         return tna * expense_ratio * (days / 365)
 
     def _calculate_option_price_impact(self, summary) -> dict:
-        """CEF option-price sensitivity. Counts only option price breaks > $1,
-        and computes Expected NAV under vest vs custodian option prices."""
+        """Custodian-vs-vest option-price sensitivity. Covers BOTH listed and
+        flex options (concat'd) so flex-only CEFs are also handled. Counts
+        material price breaks (> $1) and computes Expected NAV under both
+        vest and custodian option prices."""
         cur = self.fund.data.current
-        oms = cur.vest.options
-        cust = cur.custodian.options
-        if oms.empty or cust.empty or 'optticker' not in oms.columns or 'optticker' not in cust.columns:
-            return {}
 
-        cust_px = cust[['optticker', 'price']].rename(columns={'price': 'price_cust'})
-        merged = oms.merge(cust_px, on='optticker', how='inner')
-        merged['price_vest'] = pd.to_numeric(merged.get('price'), errors='coerce')
-        merged['price_cust'] = pd.to_numeric(merged['price_cust'], errors='coerce')
-        merged['qty'] = pd.to_numeric(merged.get('nav_shares'), errors='coerce').fillna(0.0)
-        merged['abs_diff'] = (merged['price_vest'] - merged['price_cust']).abs()
+        def _opt_frame(vest_df, cust_df):
+            """Merge a vest options frame against the matching custodian frame."""
+            if vest_df is None or cust_df is None or vest_df.empty or cust_df.empty:
+                return None
+            if 'optticker' not in vest_df.columns or 'optticker' not in cust_df.columns:
+                return None
+            cust_px = cust_df[['optticker', 'price']].rename(columns={'price': 'price_cust'})
+            merged = vest_df.merge(cust_px, on='optticker', how='inner')
+            if merged.empty:
+                return None
+            merged['price_vest'] = pd.to_numeric(merged.get('price'), errors='coerce')
+            merged['price_cust'] = pd.to_numeric(merged['price_cust'], errors='coerce')
+            merged['qty'] = pd.to_numeric(merged.get('nav_shares'), errors='coerce').fillna(0.0)
+            merged['abs_diff'] = (merged['price_vest'] - merged['price_cust']).abs()
+            return merged
 
+        listed = _opt_frame(cur.vest.options, cur.custodian.options)
+        flex = _opt_frame(cur.vest.flex_options, cur.custodian.flex_options)
+
+        frames = [f for f in (listed, flex) if f is not None]
+        if not frames:
+            return {
+                "option_mv_vest_prices": 0.0,
+                "option_mv_custodian_prices": 0.0,
+                "option_price_impact": 0.0,
+                "expected_nav_vest_prices": summary.expected_nav,
+                "expected_nav_custodian_prices": summary.expected_nav,
+                "material_break_count": 0,
+                "nav_good_cust_opt": bool(summary.nav_good_4_decimal),
+            }
+
+        merged = pd.concat(frames, ignore_index=True, sort=False)
         material = merged[merged['abs_diff'] > 1.0]
         mv_vest = float((merged['price_vest'] * merged['qty'] * 100).sum())
         mv_cust = float((merged['price_cust'] * merged['qty'] * 100).sum())
@@ -780,7 +844,10 @@ class NAVReconciliator:
         shares = summary.shares_outstanding or 0
         exp_nav_vest = summary.expected_nav
         exp_nav_cust = (summary.expected_tna + impact) / shares if shares else exp_nav_vest
-        nav_good_cust = abs(round(summary.custodian_nav - exp_nav_cust, 4)) <= 0.0001
+        #nav_good_cust = abs(round(summary.custodian_nav - exp_nav_cust, 4)) <= 0.0001
+
+        # Round both NAVs to 2 decimals first, then compare (matches the 2-dec check)
+        nav_good_cust = round(float(summary.custodian_nav or 0), 2) == round(float(exp_nav_cust or 0), 2)
 
         return {
             "option_mv_vest_prices": mv_vest,

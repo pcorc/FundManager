@@ -133,6 +133,7 @@ class BulkDataLoader:
             metadata = store.fund_metadata.get(name)
             if metadata:
                 fund.config.update({k: v for k, v in metadata.items() if v is not None})
+                fund.expense_ratio = float(fund.config.get("expense_ratio") or 0.0)
             store.fund_data[name] = normalize_all_holdings(
                 name,
                 store.fund_data.get(name, {}),

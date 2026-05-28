@@ -18,19 +18,22 @@ class TickerGainLoss:
     gl_adjusted: float
 
     def to_dict(self) -> Dict[str, float]:
-        """Convert to dictionary for DataFrame construction."""
+        """Convert to dictionary for DataFrame construction.
+
+        Display convention: the non-"Adj" columns carry custodian pricing,
+        the "Adj" columns carry vest pricing.
+        """
         return {
             "ticker": self.ticker,
             "quantity_t1": self.quantity_t1,
             "quantity_t": self.quantity_t,
-            "price_t1_raw": self.price_t1_vest,
-            "price_t_raw": self.price_t_vest,
-            "price_t1_adj": self.price_t1_custodian,
-            "price_t_adj": self.price_t_custodian,
-            "gl_raw": self.gl_raw,
-            "gl_adjusted": self.gl_adjusted,
+            "price_t1_raw": self.price_t1_custodian,
+            "price_t_raw": self.price_t_custodian,
+            "price_t1_adj": self.price_t1_vest,
+            "price_t_adj": self.price_t_vest,
+            "gl_raw": self.gl_adjusted,      # custodian-priced G/L (non-"Adj" column)
+            "gl_adjusted": self.gl_raw,      # vest-priced G/L ("Adj" column)
         }
-
 
 @dataclass
 class AssetClassGainLoss:

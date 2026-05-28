@@ -187,14 +187,29 @@ class HoldingsReconciliationRenderer:
             ),
             None,
         )
-        column_sources = {
-            "eqy_ticker": [ticker_col] if ticker_col else [],
-            "discrepancy_type": ["discrepancy_type", "type"],
-            "shares_cust": ["shares_cust", "cust_shares", "custodian_shares"],
-            "shares_vest": ["shares_vest", "nav_shares", "quantity", "shares_oms", "vest_shares"],
-            "price_vest": ["price_vest", "fund_price", "vest_price"],
-            "price_cust": ["price_cust", "cust_price", "price_custodian"],
-        }
+
+        # Price-break tables (caller passes a title containing "Price") only need
+        # ticker + the two price columns. Holdings-discrepancy tables keep the
+        # full column set.
+        is_price_table = "Price" in title
+
+        if is_price_table:
+            column_sources = {
+                "eqy_ticker": [ticker_col] if ticker_col else [],
+                "price_vest": ["price_vest", "fund_price", "vest_price"],
+                "price_cust": ["price_cust", "cust_price", "price_custodian"],
+            }
+            right_aligned = {"price_vest", "price_cust"}
+        else:
+            column_sources = {
+                "eqy_ticker": [ticker_col] if ticker_col else [],
+                "discrepancy_type": ["discrepancy_type", "type"],
+                "shares_cust": ["shares_cust", "cust_shares", "custodian_shares"],
+                "shares_vest": ["shares_vest", "nav_shares", "quantity", "shares_oms", "vest_shares"],
+                "price_vest": ["price_vest", "fund_price", "vest_price"],
+                "price_cust": ["price_cust", "cust_price", "price_custodian"],
+            }
+            right_aligned = {"shares_cust", "shares_vest", "price_vest", "price_cust"}
 
         resolved_columns = {}
         for display_name, candidates in column_sources.items():
@@ -224,7 +239,7 @@ class HoldingsReconciliationRenderer:
                     text = f"{val:,.2f}"
                 else:
                     text = str(val)
-                align = "R" if col in {"shares_cust", "shares_vest", "price_vest", "price_cust"} else "L"
+                align = "R" if col in right_aligned else "L"
                 self.pdf.cell(col_width, 5, text[:20], border=1, align=align)
             self.pdf.ln()
 

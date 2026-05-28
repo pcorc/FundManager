@@ -574,6 +574,29 @@ class ReconciliationReport:
         )
 
         worksheet = writer.sheets["RECONCILIATION BREAKS SUMMARY"]
+
+        red_fill = PatternFill(start_color="FFC8C8", end_color="FFC8C8", fill_type="solid")
+        orange_fill = PatternFill(start_color="FFC896", end_color="FFC896", fill_type="solid")
+
+        # Row 1 = header (fund names); row 2+ = data rows in the order of summary_df.index.
+        # Column A is the row label; columns B.. are per-fund counts.
+        for r_offset, recon_label in enumerate(summary_df.index, start=2):
+            label_lower = str(recon_label).lower()
+            if "holdings_breaks" in label_lower:
+                fill = red_fill
+            elif "price_breaks" in label_lower:
+                fill = orange_fill
+            else:
+                continue
+            for c in range(2, len(funds) + 2):
+                cell = worksheet.cell(row=r_offset, column=c)
+                try:
+                    if cell.value is not None and float(cell.value) > 0:
+                        cell.fill = fill
+                except (TypeError, ValueError):
+                    pass
+
+
         has_private_or_closed = any(
             (FUND_DEFINITIONS.get(f, {}).get("vehicle_wrapper") in {"private_fund", "closed_end_fund"})
             for f in funds
@@ -775,6 +798,7 @@ class ReconciliationReport:
 
     _SOURCE_PREFIXES: Tuple[str, ...] = (
         "custodian_equity",
+        "custodian_flex_option",
         "custodian_option",
         "custodian_treasury",
         "index_equity",

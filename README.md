@@ -293,7 +293,7 @@ Lives in `services/nav_reconciliator.py` (`NAVReconciliator`) with reporting in 
 ### Orchestrator (`run_nav_reconciliation`)
 
 1. **Settlement-day detection** — `fund.is_option_settlement_date(analysis_date)` decides whether today is an assignment day. Branches the rest of the calculation.
-2. **Equity G/L** — both **raw** (vest price T-1 vs vest price T) and **adjusted** (after trade and corporate action adjustments), per ticker. `_calculate_equity_gl` returns an `AssetClassGainLoss` with ticker-level detail; the Excel sheet renders individual quantities and prices with **formulas** (not static values) so the user can re-derive totals in cell.
+2. **Equity G/L** — both **raw** (vest price T-1 vs vest price T) and **adjusted** (after trade and corporate action adjustments), per ticker. `v_calculate_equity_gl` returns an `AssetClassGainLoss` with ticker-level detail; the Excel sheet renders individual quantities and prices with **formulas** (not static values) so the user can re-derive totals in cell.
 3. **Option G/L** — on a non-assignment day, mark-to-mark between vest prices at T-1 and T. On an assignment day, `_process_assignments` handles expired options' P&L (this is the consolidated version — the old wrapper layer is gone) and `_calculate_rolled_option_gl` calculates the contribution of new rolled options using executed prices from the trade dataframe rather than mark prices. `_find_last_settlement_date` walks back to the most recent settlement based on the fund's `option_roll_tenor`:
    - Weekly = last Friday
    - Monthly = last third Friday

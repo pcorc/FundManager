@@ -331,14 +331,6 @@ if __name__ == "__main__":
     # )
     #
     # cfg = build_run(
-    #     "trading_compliance",
-    #     cohorts=[ETF_FUNDS, CLOSED_END_FUNDS],
-    #     funds=sorted((ETF_FUNDS | CLOSED_END_FUNDS) - {"FTMIX"}),
-    #     start_date="2026-05-14",
-    #     end_date="2026-05-21",
-    # )
-    #
-    # cfg = build_run(
     #     mode="compliance",
     #     #funds=exclude_funds(CLOSED_END_FUNDS, "FTMIX"),
     #     cohorts=[ETF_FUNDS],
@@ -347,13 +339,22 @@ if __name__ == "__main__":
     #     output_tag="etfs",
     # )
 
-    # # Just NAV recon, single day, one fund
-    cfg = build_run(
-                    mode="eod",
-                    funds=["p2726"],
-                    start_date="2026-05-14",
-                    output_tag="p2726")
+    # Just NAV recon, single day, one fund
+    # cfg = build_run(
+    #                 mode="eod",
+    #                 funds=exclude_funds(CLOSED_END_FUNDS, "FTMIX"),
+    #                 start_date="2026-05-26",
+    #                 end_date="2026-05-27",
+    #                 output_tag="cefs"
+    #                 )
 
+    cfg = build_run(
+        "trading_compliance",
+        funds=["p2726", "RDVI"],
+        start_date="2026-05-22",
+        #end_date="2026-05-21",
+        output_tag="may22"
+    )
 
     # 3) Execute
     exit_code = execute_run(cfg)

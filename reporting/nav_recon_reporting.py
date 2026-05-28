@@ -172,6 +172,7 @@ class NAVReconciliationExcelReport:
             details_key="flex_details",
             empty_message="No flex option holdings with gain/loss",
             contract_multiplier=100,
+            always_highlight=True,
         )
 
         # Equity G/L
@@ -358,7 +359,7 @@ class NAVReconciliationExcelReport:
         row += 1
 
         ws.cell(row=row, column=1, value="NAV Good (4 decimal)")
-        ws.cell(row=row, column=3, value=f'=IF(ABS(ROUND(C{nav_diff_row},4))<=0.0001,"PASS","FAIL")')
+        ws.cell(row=row, column=3, value=f'=IF(ROUND(C{cust_nav_row},2)=ROUND(C{expected_nav_row},2),"PASS","FAIL")')
         row += 2
 
         # ===== Option Price Sensitivity (Custodian vs Vest) =====
@@ -416,6 +417,7 @@ class NAVReconciliationExcelReport:
         details_key: str,
         empty_message: str,
         contract_multiplier: int = 1,
+        always_highlight: bool = False,
     ) -> Dict[str, Any]:
         ws.cell(row=start_row, column=1, value=title).font = self.header_font
 
@@ -431,9 +433,9 @@ class NAVReconciliationExcelReport:
 
         headers = [
             "Ticker", "Qty T-1", "Qty T",
-            "Price T-1\n(Vest)", "Price T\n(Raw)",
-            "Price T-1\n(Cust)", "Price T\n(Adj)",
-            "G/L", "G/L Adj",
+            "Price T-1\n(Cust)", "Price T\n(Cust)",
+            "Price T-1\n(Vest/Adj)", "Price T\n(Vest/Adj)",
+            "G/L\n(Cust)", "G/L\n(Vest/Adj)",
         ]
         header_row = start_row + 2
         for i, header in enumerate(headers):
@@ -460,18 +462,20 @@ class NAVReconciliationExcelReport:
 
             adj_t1_cell = ws.cell(row=data_row, column=6, value=price_t1_adj)
             adj_t1_cell.number_format = self.currency_format
-            if abs(price_t1_adj - price_t1_raw) > 0.001:
+            if always_highlight or abs(price_t1_adj - price_t1_raw) > 0.001:
                 adj_t1_cell.fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
 
             adj_t_cell = ws.cell(row=data_row, column=7, value=price_t_adj)
             adj_t_cell.number_format = self.currency_format
-            if abs(price_t_adj - price_t_raw) > 0.001:
+            if always_highlight or abs(price_t_adj - price_t_raw) > 0.001:
                 adj_t_cell.fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
 
+            # G/L (Cust) = (Price T Cust - Price T-1 Cust) * Qty
             ws.cell(
                 row=data_row, column=8,
-                value=f"=(E{data_row}-F{data_row})*C{data_row}{multiplier_suffix}",
+                value=f"=(E{data_row}-D{data_row})*C{data_row}{multiplier_suffix}",
             ).number_format = self.currency_format
+            # G/L (Vest/Adj) = (Price T Vest - Price T-1 Vest) * Qty
             ws.cell(
                 row=data_row, column=9,
                 value=f"=(G{data_row}-F{data_row})*C{data_row}{multiplier_suffix}",
@@ -561,8 +565,8 @@ class NAVReconciliationExcelReport:
 
             nav_good_2 = bool(nav_data.get("NAV Good (2 Digit)", False))
             nav_good_4 = bool(nav_data.get("NAV Good (4 Digit)", False))
-            cell_2dec = worksheet.cell(row=current_row, column=10, value="PASS" if nav_good_2 else "FAIL")
-            cell_4dec = worksheet.cell(row=current_row, column=11, value="PASS" if nav_good_4 else "FAIL")
+            cell_2dec = worksheet.cell(row=current_row, column=10, value=f'=IF(ROUND(F{current_row},2)=ROUND(G{current_row},2),"PASS","FAIL")')
+            cell_4dec = worksheet.cell(row=current_row, column=11, value=f'=IF(ROUND(F{current_row},4)=ROUND(G{current_row},4),"PASS","FAIL")')
             cell_2dec.fill = good_fill if nav_good_2 else bad_fill
             cell_4dec.fill = good_fill if nav_good_4 else bad_fill
 
@@ -579,7 +583,7 @@ class NAVReconciliationExcelReport:
             # Option Price Impact = Custodian G/L - Vest G/L  (live formula)
             impact_cell = worksheet.cell(
                 row=current_row, column=14,
-                value=f"={cust_col_letter}{current_row}-{vest_col_letter}{current_row}",
+                value=f"=M{current_row}-L{current_row}",
             )
             impact_cell.number_format = self.currency_format
 
@@ -588,14 +592,12 @@ class NAVReconciliationExcelReport:
                 value=nav_data.get("exp_nav_cust", nav_data.get("Expected NAV", 0)),
             ).number_format = self.nav_format
 
-            nav_good_cust = nav_data.get("nav_good_cust")
-            if nav_good_cust is None:
-                worksheet.cell(row=current_row, column=16, value="N/A")
-            else:
-                cust_cell = worksheet.cell(
-                    row=current_row, column=16,
-                    value="PASS" if bool(nav_good_cust) else "FAIL",
-                )
+            nav_good_cust = nav_data.get("NAV Good (Cust Opt Prices)")
+            cust_cell = worksheet.cell(
+                row=current_row, column=16,
+                value=f'=IF(ROUND(G{current_row},2)=ROUND(O{current_row},2),"PASS","FAIL")',
+            )
+            if nav_good_cust is not None:
                 cust_cell.fill = good_fill if bool(nav_good_cust) else bad_fill
 
             current_row += 1
