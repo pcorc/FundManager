@@ -727,7 +727,7 @@ class ReconciliationReport:
                 row["Price_Diff"] = price_row.get("price_diff")
 
             weight = price_row.get("option_weight")
-            if isinstance(weight, (int, float)) and weight:
+            if isinstance(weight, (int, float)) and pd.notna(weight) and weight:
                 row["Option Weight"] = f"{weight * 100:.2f}%"
 
             pct = price_row.get("price_pct_diff")

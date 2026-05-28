@@ -155,13 +155,16 @@ class NAVReconciliationResults:
     summary: NAVSummary
     option_price_impact: dict = field(default_factory=dict)   # NEW
 
-
     def to_legacy_dict(self) -> Dict[str, object]:
-        """
-        Convert to legacy dictionary format for backward compatibility.
-        This matches the structure expected by existing reporting code.
-        """
         impact = self.option_price_impact or {}
+
+        # Build each detail frame ONCE and share it between the two views.
+        detail_frames = {
+            "equity_details": self.components.equity.to_detail_dataframe(),
+            "option_details": self.components.options.to_detail_dataframe(),
+            "flex_details": self.components.flex_options.to_detail_dataframe(),
+            "treasury_details": self.components.treasury.to_detail_dataframe(),
+        }
 
         return {
             "Beginning TNA": self.summary.beginning_tna,
@@ -191,27 +194,21 @@ class NAVReconciliationResults:
             "Difference (%) - 2 Digit": self.summary.diff_pct_2_decimal,
             "NAV Good (2 Digit)": self.summary.nav_good_2_decimal,
             "NAV Good (4 Digit)": self.summary.nav_good_4_decimal,
-            "NAV Good (Cust Opt Prices)": impact.get("nav_good_cust_opt"),
 
-            # --- Option price sensitivity (custodian vs vest), CEF-focused ---
-            "Option MV (Vest Prices)": impact.get("option_mv_vest_prices", 0.0),
-            "Option MV (Custodian Prices)": impact.get("option_mv_custodian_prices", 0.0),
-            "Option Price Impact ($)": impact.get("option_price_impact", 0.0),
-            "Expected NAV (Vest Opt Prices)": impact.get("expected_nav_vest_prices", self.summary.expected_nav),
-            "Expected NAV (Custodian Opt Prices)": impact.get("expected_nav_custodian_prices", self.summary.expected_nav),
-            "Option Price Breaks (>$1)": impact.get("material_break_count", 0),
+            # --- Option price sensitivity matrix (listed + flex, vest vs custodian) ---
+            "listed_gl_vest": impact.get("listed_gl_vest", 0.0),
+            "listed_gl_cust": impact.get("listed_gl_cust", 0.0),
+            "flex_gl_vest": impact.get("flex_gl_vest", 0.0),
+            "flex_gl_cust": impact.get("flex_gl_cust", 0.0),
+            "combined_gl_vest": impact.get("combined_gl_vest", 0.0),
+            "combined_gl_cust": impact.get("combined_gl_cust", 0.0),
+            "exp_nav_vest": impact.get("exp_nav_vest", self.summary.expected_nav),
+            "exp_nav_cust": impact.get("exp_nav_cust", self.summary.expected_nav),
+            "cust_nav": impact.get("cust_nav", self.summary.custodian_nav),
+            "nav_good_vest": impact.get("nav_good_vest"),
+            "nav_good_cust": impact.get("nav_good_cust"),
 
-            "detailed_calculations": {
-                "equity_details": self.components.equity.to_detail_dataframe(),
-                "option_details": self.components.options.to_detail_dataframe(),
-                "flex_details": self.components.flex_options.to_detail_dataframe(),
-                "treasury_details": self.components.treasury.to_detail_dataframe(),
-            },
-            "details": {
-                "equity_details": self.components.equity.to_detail_dataframe(),
-                "option_details": self.components.options.to_detail_dataframe(),
-                "flex_details": self.components.flex_options.to_detail_dataframe(),
-                "treasury_details": self.components.treasury.to_detail_dataframe(),
-            },
+            "detailed_calculations": detail_frames,
+            "details": detail_frames,
             "summary": self.summary.to_dict(),
         }

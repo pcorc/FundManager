@@ -246,14 +246,20 @@ class HoldingsReconciliationRenderer:
 
     def _print_custodian_equity_section(self, recon_data: Mapping[str, Any]) -> None:
         final_df = recon_data.get("final_recon")
-        if isinstance(final_df, pd.DataFrame) and not final_df.empty:
+        price_t = recon_data.get("price_discrepancies_T")
+        has_holdings = isinstance(final_df, pd.DataFrame) and not final_df.empty
+        has_price = isinstance(price_t, pd.DataFrame) and not price_t.empty
+
+        if has_holdings:
             self._draw_two_column_table([("Holdings Breaks", len(final_df))])
             self._print_discrepancy_table(final_df, "Holdings Discrepancies")
         else:
             self._draw_two_column_table([("Holdings Breaks", 0)])
 
-        price_t = recon_data.get("price_discrepancies_T")
         self._print_price_discrepancies(price_t, price_label="Custodian")
+
+        if not has_holdings and not has_price:
+            self._draw_two_column_table([("Status", "All reconciliations successful - no breaks found")])
 
     def _print_custodian_option_section(
         self,

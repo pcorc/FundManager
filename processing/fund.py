@@ -340,7 +340,7 @@ class Fund:
 
         usage = c.get("index_flex_usage")
         self.uses_index_flex: bool = (
-            isinstance(usage, str) and usage.lower() in ("true", "yes", "enabled", "1")
+                self.has_flex_option and (self.flex_option_type or "").lower() == "index"
         )
 
         self.custodian_type: Optional[str] = _custodian_type(c)

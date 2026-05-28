@@ -126,16 +126,14 @@ class NAVReconciliator:
 
         # Calculate NAV summary
         summary = self._calculate_nav_summary(components)
-        option_price_impact = self._calculate_option_price_impact(summary)
-
-        # Build final results
+        price_sensitivity = self._calculate_price_sensitivity(summary)
         results = NAVReconciliationResults(
             fund_name=self.fund.name,
             analysis_date=self.analysis_date,
             prior_date=self.prior_date,
             components=components,
             summary=summary,
-            option_price_impact=option_price_impact,  # NEW
+            option_price_impact=price_sensitivity,   # carries the whole matrix dict
         )
 
         self._log_completion(results)
@@ -473,6 +471,108 @@ class NAVReconciliator:
             )
         return None
 
+    def _calculate_flex_price_impact(self) -> dict:
+        """Flex option G/L two ways — vest prices vs custodian prices.
+        True G/L = (price_T - price_T-1) * qty * 100, matched on flex contract code."""
+        if not self.has_flex_option:
+            return {}
+
+        def _prep(src) -> pd.DataFrame:
+            df = src.copy()
+            if df.empty:
+                return pd.DataFrame(columns=["flex_code", "price", "qty"])
+            code = df["equity_underlying_ticker"] if "equity_underlying_ticker" in df.columns else df.get("cusip")
+            return pd.DataFrame({
+                "flex_code": code,
+                "price": pd.to_numeric(df.get("price"), errors="coerce"),
+                "qty": pd.to_numeric(df.get("nav_shares", df.get("shares_cust")), errors="coerce").fillna(0.0),
+            })
+
+        vt  = _prep(self.fund.data.current.vest.flex_options)
+        vt1 = _prep(self.fund.data.previous.vest.flex_options)
+        ct  = _prep(self.fund.data.current.custodian.flex_options)
+        ct1 = _prep(self.fund.data.previous.custodian.flex_options)
+        if vt.empty:
+            return {}
+
+        base = vt.rename(columns={"price": "pv_t"})
+        base = base.merge(vt1.rename(columns={"price": "pv_t1"})[["flex_code", "pv_t1"]], on="flex_code", how="left")
+        base = base.merge(ct.rename(columns={"price": "pc_t"})[["flex_code", "pc_t"]], on="flex_code", how="left")
+        base = base.merge(ct1.rename(columns={"price": "pc_t1"})[["flex_code", "pc_t1"]], on="flex_code", how="left")
+
+        gl_vest = float(((base["pv_t"] - base["pv_t1"]) * base["qty"] * 100).sum())
+        gl_cust = float(((base["pc_t"] - base["pc_t1"]) * base["qty"] * 100).sum())
+        return {
+            "flex_gl_vest_prices": gl_vest,
+            "flex_gl_custodian_prices": gl_cust,
+            "flex_gl_price_impact": gl_cust - gl_vest,
+        }
+
+    def _calculate_price_sensitivity(self, summary) -> dict:
+        """Option price sensitivity: listed + flex option G/L computed with vest
+        vs custodian prices, and Expected NAV under each pricing source.
+        True G/L = (price_T - price_T-1) * qty * 100."""
+
+        def _prep(src, flex: bool) -> pd.DataFrame:
+            df = src.copy()
+            if df.empty:
+                return pd.DataFrame(columns=["k", "price", "qty"])
+            if flex:
+                code = df["equity_underlying_ticker"] if "equity_underlying_ticker" in df.columns else df.get("cusip")
+            else:
+                code = df.get("optticker")
+            return pd.DataFrame({
+                "k": code,
+                "price": pd.to_numeric(df.get("price"), errors="coerce"),
+                "qty": pd.to_numeric(df.get("nav_shares", df.get("shares_cust")), errors="coerce").fillna(0.0),
+            })
+
+        def _gl_two_ways(vc, vp, cc, cp, flex: bool) -> tuple[float, float]:
+            vt, vt1 = _prep(vc, flex), _prep(vp, flex)
+            ct, ct1 = _prep(cc, flex), _prep(cp, flex)
+            if vt.empty:
+                return 0.0, 0.0
+            b = vt.rename(columns={"price": "pv_t"})
+            b = b.merge(vt1.rename(columns={"price": "pv_t1"})[["k", "pv_t1"]], on="k", how="left")
+            b = b.merge(ct.rename(columns={"price": "pc_t"})[["k", "pc_t"]], on="k", how="left")
+            b = b.merge(ct1.rename(columns={"price": "pc_t1"})[["k", "pc_t1"]], on="k", how="left")
+            gl_v = float(((b["pv_t"] - b["pv_t1"]) * b["qty"] * 100).sum())
+            gl_c = float(((b["pc_t"] - b["pc_t1"]) * b["qty"] * 100).sum())
+            return gl_v, gl_c
+
+        cur, prev = self.fund.data.current, self.fund.data.previous
+        listed_v, listed_c = _gl_two_ways(
+            cur.vest.options, prev.vest.options,
+            cur.custodian.options, prev.custodian.options, flex=False,
+        )
+        flex_v, flex_c = (0.0, 0.0)
+        if self.has_flex_option:
+            flex_v, flex_c = _gl_two_ways(
+                cur.vest.flex_options, prev.vest.flex_options,
+                cur.custodian.flex_options, prev.custodian.flex_options, flex=True,
+            )
+
+        combined_v = listed_v + flex_v
+        combined_c = listed_c + flex_c
+
+        shares = summary.shares_outstanding or 0
+        exp_tna_vest = summary.expected_tna
+        exp_tna_cust = exp_tna_vest - combined_v + combined_c   # swap vest option G/L for custodian
+        exp_nav_vest = summary.expected_nav
+        exp_nav_cust = (exp_tna_cust / shares) if shares else exp_nav_vest
+        cust_nav = summary.custodian_nav
+
+        return {
+            "listed_gl_vest": listed_v, "listed_gl_cust": listed_c,
+            "flex_gl_vest": flex_v, "flex_gl_cust": flex_c,
+            "combined_gl_vest": combined_v, "combined_gl_cust": combined_c,
+            "exp_nav_vest": exp_nav_vest, "exp_nav_cust": exp_nav_cust,
+            "cust_nav": cust_nav,
+            "nav_good_vest": bool(abs(round(cust_nav - exp_nav_vest, 4)) <= 0.0001),
+            "nav_good_cust": bool(abs(round(cust_nav - exp_nav_cust, 4)) <= 0.0001),
+        }
+
+
     @staticmethod
     def _get_trade_execution_price(
             trades: Optional[pd.DataFrame], ticker: str
@@ -691,6 +791,7 @@ class NAVReconciliator:
             "material_break_count": int(len(material)),
             "nav_good_cust_opt": bool(nav_good_cust),
         }
+
 
     def _calculate_distributions(self) -> float:
         """

@@ -59,6 +59,8 @@ class CombinedReconciliationReport:
         self.holdings_summary = holdings_recon_summary or {}
         self.compliance_results = compliance_results or {}
         self.date = str(date)
+        self._all_funds_cache: set[str] | None = None
+        self._nav_data_cache: Dict[str, Dict[str, Any]] | None = None
         self.output_path = Path(output_path)
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -93,22 +95,25 @@ class CombinedReconciliationReport:
         return links
 
     def _get_all_funds(self) -> set[str]:
-        funds: set[str] = set()
-        for fund_data in self.nav_results.values():
-            funds.update(fund_data.keys())
-        for fund_data in self.holdings_results.values():
-            funds.update(fund_data.keys())
-        for summary_list in self.nav_summary.values():
-            for summary in summary_list:
-                fund_name = summary.get("fund") if isinstance(summary, Mapping) else None
-                if fund_name:
-                    funds.add(fund_name)
-        for summary_list in self.holdings_summary.values():
-            for summary in summary_list:
-                fund_name = summary.get("fund") if isinstance(summary, Mapping) else None
-                if fund_name:
-                    funds.add(fund_name)
-        return funds
+        if self._all_funds_cache is None:
+
+            funds: set[str] = set()
+            for fund_data in self.nav_results.values():
+                funds.update(fund_data.keys())
+            for fund_data in self.holdings_results.values():
+                funds.update(fund_data.keys())
+            for summary_list in self.nav_summary.values():
+                for summary in summary_list:
+                    fund_name = summary.get("fund") if isinstance(summary, Mapping) else None
+                    if fund_name:
+                        funds.add(fund_name)
+            for summary_list in self.holdings_summary.values():
+                for summary in summary_list:
+                    fund_name = summary.get("fund") if isinstance(summary, Mapping) else None
+                    if fund_name:
+                        funds.add(fund_name)
+            self._all_funds_cache = funds
+        return self._all_funds_cache
 
     def _is_cef(self, fund_name: str) -> bool:
         """True if the fund is a closed-end fund."""
@@ -276,15 +281,11 @@ class CombinedReconciliationReport:
             return
 
         cols = [
-            ("Fund", 30),
-            ("Equity Holdings", 25),
-            ("Equity Quantity", 25),
-            ("Equity Price", 20),
-            ("Option Holdings", 25),
-            ("Option Quantity", 25),
-            ("Option Price", 20),
-            ("Index Holdings", 25),
-            ("Index Weight", 25),
+            ("Fund", 26),
+            ("Equity Holdings", 22), ("Equity Qty", 20), ("Equity Price", 20),
+            ("Option Holdings", 22), ("Option Qty", 20), ("Option Price", 20),
+            ("Flex Holdings", 20), ("Flex Price", 18),
+            ("Index Holdings", 22), ("Index Weight", 22),
         ]
 
         self.pdf.set_font("Arial", "B", 7)
@@ -299,14 +300,13 @@ class CombinedReconciliationReport:
             summary = all_summaries[fund_name]
             equity_summary = summary.get("custodian_equity", {})
             option_summary = summary.get("custodian_option", {})
+            flex_summary = summary.get("custodian_flex_option", {})
             index_summary = summary.get("index_equity", {})
-
-            if not isinstance(equity_summary, Mapping):
-                equity_summary = {}
-            if not isinstance(option_summary, Mapping):
-                option_summary = {}
-            if not isinstance(index_summary, Mapping):
-                index_summary = {}
+            for s in ("equity_summary", "option_summary", "flex_summary", "index_summary"):
+                if not isinstance(locals()[s], Mapping):
+                    pass  # keep as-is; the explicit guards below handle it
+            if not isinstance(flex_summary, Mapping):
+                flex_summary = {}
 
             x, y = self.pdf.get_x(), self.pdf.get_y()
             self.pdf.set_font("Arial", "BU", 7)
@@ -324,6 +324,8 @@ class CombinedReconciliationReport:
                 self._resolve_summary_value(option_summary, "holdings_discrepancies", "final_recon"),
                 self._resolve_summary_value(option_summary, "raw_recon", "quantity_discrepancies"),
                 self._resolve_summary_value(option_summary, "price_discrepancies", "price_discrepancies_T"),
+                self._resolve_summary_value(flex_summary, "holdings_discrepancies", "final_recon"),
+                self._resolve_summary_value(flex_summary, "price_discrepancies", "price_discrepancies_T"),
                 self._resolve_summary_value(index_summary, "holdings_discrepancies"),
                 self._resolve_summary_value(index_summary, "significant_diffs", "weight_breaks"),
             ]
@@ -664,7 +666,7 @@ class CombinedReconciliationReport:
     def _add_nav_details(self, fund_name: str, nav_data: Mapping[str, Any]) -> None:
         cols = [("Metric", 70), ("Value", 60)]
 
-        # Main NAV metrics table
+        # ===== Main NAV metrics table =====
         rows = [
             ("Expected TNA", nav_data.get("Expected TNA", nav_data.get("expected_tna", 0.0)), 0),
             ("Custodian TNA", nav_data.get("Custodian TNA", nav_data.get("custodian_tna", 0.0)), 0),
@@ -674,34 +676,15 @@ class CombinedReconciliationReport:
             ("NAV Difference", nav_data.get("NAV Diff ($)", nav_data.get("difference", 0.0)), 4),
         ]
 
-        # Add optional unadjusted options fields if they exist
-        if nav_data.get("Expected NAV (Unadj Options)") is not None or nav_data.get("expected_nav_unadjusted") is not None:
-            unadj_nav = nav_data.get("Expected NAV (Unadj Options)", nav_data.get("expected_nav_unadjusted"))
-            if unadj_nav is not None:
-                rows.append(("Expected NAV (Unadj Options)", unadj_nav, 4))
-
-        if nav_data.get("NAV Diff (Adj vs Unadj)") is not None or nav_data.get("nav_diff_adj_vs_unadj") is not None:
-            nav_diff_adj = nav_data.get("NAV Diff (Adj vs Unadj)", nav_data.get("nav_diff_adj_vs_unadj"))
-            if nav_diff_adj is not None:
-                rows.append(("NAV Diff (Adj vs Unadj)", nav_diff_adj, 4))
-
         self.pdf.set_font("Arial", "B", 10)
         for label, width in cols:
             self.pdf.cell(width, 8, label, border=1, fill=True, align="C")
         self.pdf.ln()
         self.pdf.set_font("Arial", size=10)
-
         for metric, value, digits in rows:
             self.pdf.cell(cols[0][1], 7, metric, border=1)
-            formatted = self._format_currency(value, digits=digits)
-
-            # Highlight unadjusted fields with light yellow background
-            if "Unadj" in metric:
-                self.pdf.set_fill_color(255, 255, 224)
-            else:
-                self.pdf.set_fill_color(255, 255, 255)
-
-            self.pdf.cell(cols[1][1], 7, formatted, border=1, fill=True, align="R")
+            self.pdf.set_fill_color(255, 255, 255)
+            self.pdf.cell(cols[1][1], 7, self._format_currency(value, digits=digits), border=1, fill=True, align="R")
             self.pdf.ln()
 
         # ===== Gain/Loss Components (asset classes only) =====
@@ -733,26 +716,57 @@ class CombinedReconciliationReport:
             self.pdf.cell(cols[1][1], 7, self._format_currency(value, digits=2), border=1, align="R")
             self.pdf.ln()
 
-        # ===== Option Price Sensitivity (CEF only) — option data ONLY =====
-        if self._is_cef(fund_name) and nav_data.get("Option Price Impact ($)"):
+        # ===== Option Price Sensitivity matrix (CEF only) =====
+        if self._is_cef(fund_name) and (nav_data.get("combined_gl_vest") or nav_data.get("combined_gl_cust")):
             self.pdf.ln(4)
             self.pdf.set_font("Arial", "B", 10)
-            self.pdf.cell(0, 7, "Option Price Sensitivity (Custodian vs Vest)", ln=True)
-            self.pdf.set_font("Arial", "I", 8)
-            self.pdf.cell(0, 5,
-                "Closed-end fund: counts only option price breaks > $1. "
-                "Shows NAV sensitivity to the option price source.", ln=True)
-            self.pdf.set_font("Arial", size=9)
-            for metric, value, digits in (
-                ("  Option MV (Vest Prices)",        nav_data.get("Option MV (Vest Prices)", 0.0), 2),
-                ("  Option MV (Custodian Prices)",   nav_data.get("Option MV (Custodian Prices)", 0.0), 2),
-                ("  G/L Impact of Custodian Prices", nav_data.get("Option Price Impact ($)", 0.0), 2),
-                ("  Expected NAV (Vest Opt Prices)", nav_data.get("Expected NAV (Vest Opt Prices)", 0.0), 4),
-                ("  Expected NAV (Cust Opt Prices)", nav_data.get("Expected NAV (Custodian Opt Prices)", 0.0), 4),
+            self.pdf.cell(0, 7, "Option Price Sensitivity (Vest vs Custodian Pricing)", ln=True)
+
+            col_w = [55, 35, 35, 25]   # label | Vest | Custodian | Impact
+            self.pdf.set_font("Arial", "B", 8)
+            self.pdf.set_fill_color(240, 240, 240)
+            for h, w in zip(("", "Vest Prices", "Custodian Prices", "Impact ($)"), col_w):
+                self.pdf.cell(w, 6, h, border=1, fill=True, align="C")
+            self.pdf.ln()
+
+            self.pdf.set_font("Arial", size=8)
+            for label, kv, kc in (
+                ("Listed Option G/L",   "listed_gl_vest",   "listed_gl_cust"),
+                ("Flex Option G/L",     "flex_gl_vest",     "flex_gl_cust"),
+                ("Combined Option G/L", "combined_gl_vest", "combined_gl_cust"),
             ):
-                self.pdf.cell(cols[0][1], 7, metric, border=1)
-                self.pdf.cell(cols[1][1], 7, self._format_currency(value, digits=digits), border=1, align="R")
+                v, c = nav_data.get(kv, 0.0), nav_data.get(kc, 0.0)
+                self.pdf.cell(col_w[0], 6, label, border=1)
+                self.pdf.cell(col_w[1], 6, self._format_currency(v, digits=0), border=1, align="R")
+                self.pdf.cell(col_w[2], 6, self._format_currency(c, digits=0), border=1, align="R")
+                self.pdf.cell(col_w[3], 6, self._format_currency(c - v, digits=0), border=1, align="R")
                 self.pdf.ln()
+
+            # Expected NAV row (4-dec)
+            ev, ec = nav_data.get("exp_nav_vest", 0.0), nav_data.get("exp_nav_cust", 0.0)
+            self.pdf.set_font("Arial", "B", 8)
+            self.pdf.cell(col_w[0], 6, "Expected NAV", border=1)
+            self.pdf.set_font("Arial", size=8)
+            self.pdf.cell(col_w[1], 6, f"{ev:,.4f}", border=1, align="R")
+            self.pdf.cell(col_w[2], 6, f"{ec:,.4f}", border=1, align="R")
+            self.pdf.cell(col_w[3], 6, f"{ec - ev:,.4f}", border=1, align="R")
+            self.pdf.ln()
+
+            # Custodian NAV reference (spans the value columns)
+            self.pdf.cell(col_w[0], 6, "Custodian NAV", border=1)
+            self.pdf.cell(col_w[1] + col_w[2] + col_w[3], 6,
+                          f"{nav_data.get('cust_nav', 0.0):,.4f}", border=1, align="R")
+            self.pdf.ln()
+
+            # NAV Good under each pricing source
+            self.pdf.set_font("Arial", "B", 8)
+            self.pdf.cell(col_w[0], 6, "NAV Good (4-dec)", border=1)
+            for key in ("nav_good_vest", "nav_good_cust"):
+                passed = bool(nav_data.get(key))
+                self.pdf.set_fill_color(200, 255, 200) if passed else self.pdf.set_fill_color(255, 200, 200)
+                self.pdf.cell(col_w[1], 6, "PASS" if passed else "FAIL", border=1, fill=True, align="C")
+            self.pdf.cell(col_w[3], 6, "", border=1)
+            self.pdf.ln()
 
         # ===== NAV Difference ($ and %) on one line =====
         self.pdf.ln(3)
@@ -766,28 +780,21 @@ class CombinedReconciliationReport:
         self.pdf.cell(cols[1][1], 7, f"{nav_diff:.4f}   ({nav_diff_pct:.4f}%)", border=1, align="R")
         self.pdf.ln()
 
-        # ===== NAV Good flags — transposed into a single compact row =====
+        # ===== NAV Good flags — transposed compact row =====
         flags = [
             ("2-Dec", nav_data.get("NAV Good (2 Digit)", nav_data.get("nav_good_two"))),
             ("4-Dec", nav_data.get("NAV Good (4 Digit)", nav_data.get("nav_good_four"))),
         ]
-        if self._is_cef(fund_name) and nav_data.get("NAV Good (Cust Opt Prices)") is not None:
-            flags.append(("Cust Opt", nav_data.get("NAV Good (Cust Opt Prices)")))
-
         flags = [(label, flag) for label, flag in flags if flag is not None]
         if flags:
             self.pdf.ln(1)
-            total_w = cols[0][1] + cols[1][1]          # same total width as the metric+value table
+            total_w = cols[0][1] + cols[1][1]
             cell_w = total_w / len(flags)
-
-            # Header row
             self.pdf.set_font("Arial", "B", 8)
             self.pdf.set_fill_color(240, 240, 240)
             for label, _ in flags:
                 self.pdf.cell(cell_w, 6, f"NAV Good {label}", border=1, fill=True, align="C")
             self.pdf.ln()
-
-            # PASS/FAIL row
             self.pdf.set_font("Arial", "B", 9)
             for _, flag in flags:
                 passed = bool(flag)
@@ -795,11 +802,15 @@ class CombinedReconciliationReport:
                 self.pdf.cell(cell_w, 7, "PASS" if passed else "FAIL", border=1, fill=True, align="C")
             self.pdf.ln()
 
+
     def _find_nav_data_for_fund(self, fund_name: str) -> Mapping[str, Any] | None:
         combined = self._collect_nav_data()
-        if fund_name in combined:
-            return combined[fund_name]
-        return None
+        if self._nav_data_cache is None:
+            combined: Dict[str, Dict[str, Any]] = {}
+            if fund_name in combined:
+                return combined[fund_name]
+            self._nav_data_cache = combined
+        return self._nav_data_cache
 
     def _find_holdings_data_for_fund(self, fund_name: str) -> tuple[Mapping[str, Any] | None, str | None]:
         for date_str, funds_data in self.holdings_results.items():

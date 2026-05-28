@@ -506,15 +506,17 @@ class NAVReconciliationExcelReport:
     # ------------------------------------------------------------------
     def _create_summary_sheet(self, workbook: Workbook):
         """Create summary sheet with all funds. Column A links to each fund's tab;
-        trailing columns show the custodian-option-price sensitivity analysis."""
+        trailing columns show the vest-vs-custodian option-price sensitivity, with
+        the Option Price Impact as a live formula (Cust G/L - Vest G/L)."""
         worksheet = workbook.create_sheet("NAV Summary")
 
         headers = [
             "Fund", "Date", "Expected TNA", "Custodian TNA", "TNA Diff ($)",
             "Expected NAV", "Custodian NAV", "NAV Diff ($)", "Shares Outstanding",
             "NAV Good (2-dec)", "NAV Good (4-dec)",
-            # ---- new custodian-option-price columns ----
-            "Option Price Impact ($)", "Expected NAV (Cust Opt)", "NAV Good (Cust Opt)",
+            # ---- option-price sensitivity (vest vs custodian) ----
+            "Combined Opt G/L (Vest)", "Combined Opt G/L (Cust)", "Option Price Impact ($)",
+            "Expected NAV (Cust Opt)", "NAV Good (Cust Opt)",
         ]
 
         last_col = len(headers)
@@ -533,6 +535,10 @@ class NAVReconciliationExcelReport:
 
         good_fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
         bad_fill = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")
+
+        # Column letters for the two G/L components (used in the impact formula).
+        vest_col_letter = get_column_letter(12)   # "L"
+        cust_col_letter = get_column_letter(13)    # "M"
 
         current_row = header_row + 1
         for fund_name in sorted(self.results.keys()):
@@ -560,21 +566,36 @@ class NAVReconciliationExcelReport:
             cell_2dec.fill = good_fill if nav_good_2 else bad_fill
             cell_4dec.fill = good_fill if nav_good_4 else bad_fill
 
-            # ---- custodian-option-price sensitivity columns ----
+            # ---- option-price sensitivity columns ----
             worksheet.cell(
                 row=current_row, column=12,
-                value=nav_data.get("Option Price Impact ($)", 0),
+                value=nav_data.get("combined_gl_vest", 0.0),
             ).number_format = self.currency_format
             worksheet.cell(
                 row=current_row, column=13,
-                value=nav_data.get("Expected NAV (Custodian Opt Prices)", nav_data.get("Expected NAV", 0)),
+                value=nav_data.get("combined_gl_cust", 0.0),
+            ).number_format = self.currency_format
+
+            # Option Price Impact = Custodian G/L - Vest G/L  (live formula)
+            impact_cell = worksheet.cell(
+                row=current_row, column=14,
+                value=f"={cust_col_letter}{current_row}-{vest_col_letter}{current_row}",
+            )
+            impact_cell.number_format = self.currency_format
+
+            worksheet.cell(
+                row=current_row, column=15,
+                value=nav_data.get("exp_nav_cust", nav_data.get("Expected NAV", 0)),
             ).number_format = self.nav_format
 
-            nav_good_cust = nav_data.get("NAV Good (Cust Opt Prices)")
+            nav_good_cust = nav_data.get("nav_good_cust")
             if nav_good_cust is None:
-                worksheet.cell(row=current_row, column=14, value="N/A")
+                worksheet.cell(row=current_row, column=16, value="N/A")
             else:
-                cust_cell = worksheet.cell(row=current_row, column=14, value="PASS" if bool(nav_good_cust) else "FAIL")
+                cust_cell = worksheet.cell(
+                    row=current_row, column=16,
+                    value="PASS" if bool(nav_good_cust) else "FAIL",
+                )
                 cust_cell.fill = good_fill if bool(nav_good_cust) else bad_fill
 
             current_row += 1
@@ -583,7 +604,6 @@ class NAVReconciliationExcelReport:
             worksheet.column_dimensions[get_column_letter(column_index)].width = 16
 
         return worksheet
-
 
 # ------------------------------------------------------------------------
 def convert_nav_results_to_dicts(nav_data: Mapping[str, Any]) -> Dict[str, Any]:
