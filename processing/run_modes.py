@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from notifications.email_manager import EmailManager, EmailPayload
 
 from typing import Dict, Mapping, MutableMapping, Optional, Sequence, Tuple
 
@@ -18,7 +19,7 @@ from reporting.compliance_reporter import (
     build_compliance_reports_for_range,
 )
 from reporting.compliance_reporting import GeneratedComplianceReport
-from reporting.reconciliation_reporter import build_reconciliation_reports
+
 from reporting.nav_recon_reporter import build_nav_reconciliation_reports
 from reporting.trade_compliance_reporter import (
     build_trading_compliance_reports,
@@ -151,8 +152,18 @@ def run_eod_mode(
             create_pdf=params.create_pdf
         )
 
-    return results, artefacts
+    # Send the EOD notification email (HTML body + PDF/Excel attachments).
+    try:
+        EmailManager().send(
+            _build_eod_email_payload(results, artefacts, params),
+            params.operation_config,   # OperationConfig with mode=OperationMode.EOD
+        )
+    except Exception:
+        # Don't fail the run if email delivery breaks; log + continue.
+        import logging
+        logging.getLogger(__name__).exception("EOD email notification failed")
 
+    return results, artefacts
 
 def run_trading_mode(
     registry: FundRegistry,
@@ -225,7 +236,7 @@ def run_trading_mode(
         output_dir=str(output_dir),
         traded_funds_info=traded_funds_info,  # Pass the populated traded_funds_info
         fund_registry=fund_registry_ex_post,  # NEW: Pass fund registry for property-based reporting
-        file_name_prefix=_build_prefix("trading_compliance_results"),
+        file_name_prefix=_build_prefix("trading_analysis"),
         create_pdf=params.create_pdf,
     )
 
@@ -257,8 +268,16 @@ def run_trading_mode(
         combined_report=combined_report,
     )
 
-    return results_ex_ante, results_ex_post, combined_artefacts
+    try:
+        EmailManager().send(
+            _build_trading_email_payload(results_ex_ante, results_ex_post, combined_artefacts, params),
+            params.operation_config,   # OperationConfig with mode=OperationMode.TRADING_COMPLIANCE
+        )
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("Trading-analysis email notification failed")
 
+    return results_ex_ante, results_ex_post, combined_artefacts
 
 def run_eod_range_mode(
     session,
@@ -490,6 +509,154 @@ def _extract_payload(results: ProcessingResults, attribute: str) -> Dict[str, Ma
             payload[fund_name] = value
     return payload
 
+
+# ---------------------------------------------------------------------------
+# Email wiring
+# ---------------------------------------------------------------------------
+def _summary_count(summary: Mapping[str, object], *keys: str) -> int:
+    """Pull a numeric count out of a holdings-summary subdict by trying ``keys``."""
+    for k in keys:
+        value = summary.get(k) if isinstance(summary, Mapping) else None
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _build_eod_email_payload(
+    results: ProcessingResults,
+    artefacts: Mapping[str, object],
+    params,
+) -> EmailPayload:
+    """Assemble the email payload for an EOD run."""
+    nav_by_fund: Dict[str, Mapping[str, object]] = _extract_payload(results, "nav_results")
+    # Convert NAVReconciliationResults objects → legacy dicts if needed.
+    nav_summary: Dict[str, Mapping[str, object]] = {
+        fund: (data.to_legacy_dict() if hasattr(data, "to_legacy_dict") else data)
+        for fund, data in nav_by_fund.items()
+    }
+
+    # Holdings summary table — mirrors the PDF Holdings Summary section.
+    recon_payload = _extract_payload(results, "reconciliation_results")
+    holdings_summary: Dict[str, Mapping[str, object]] = {}
+    for fund, payload in recon_payload.items():
+        summary = payload.get("summary", {}) if isinstance(payload, Mapping) else {}
+        eq    = summary.get("custodian_equity", {}) or {}
+        opt   = summary.get("custodian_option", {}) or {}
+        flex  = summary.get("custodian_flex_option", {}) or {}
+        treas = summary.get("custodian_treasury", {}) or {}
+        idx   = summary.get("index_equity", {}) or {}
+        holdings_summary[fund] = {
+            "equity_holdings":      _summary_count(eq,    "holdings_discrepancies", "final_recon"),
+            "equity_price":         _summary_count(eq,    "price_discrepancies", "price_discrepancies_T"),
+            "option_holdings":      _summary_count(opt,   "holdings_discrepancies", "final_recon"),
+            "option_price":         _summary_count(opt,   "price_discrepancies", "price_discrepancies_T"),
+            "flex_option_holdings": _summary_count(flex,  "holdings_discrepancies", "final_recon"),
+            "flex_option_price":    _summary_count(flex,  "price_discrepancies", "price_discrepancies_T"),
+            "treasury_holdings":    _summary_count(treas, "holdings_discrepancies", "final_recon"),
+            "treasury_price":       _summary_count(treas, "price_discrepancies", "price_discrepancies_T"),
+            "index_holdings":       _summary_count(idx,   "holdings_discrepancies"),
+        }
+
+    gl_summary = {
+        fund: {
+            "Equity G/L":      data.get("Equity G/L", 0),
+            "Option G/L":      data.get("Option G/L", 0),
+            "Flex Option G/L": data.get("Flex Option G/L", 0),
+            "Treasury G/L":    data.get("Treasury G/L", 0),
+        }
+        for fund, data in nav_summary.items()
+    }
+
+    paths = flatten_eod_paths(artefacts)
+    attachment_keys = (
+        "reconciliation_summary_pdf",
+        "nav_reconciliation_excel",
+        "holdings_reconciliation_excel",
+        "compliance_pdf",
+        "compliance_excel",
+    )
+    attachments = [Path(paths[k]) for k in attachment_keys if k in paths]
+
+    return EmailPayload(
+        date=str(params.trade_date),
+        attachments=attachments,
+        nav_summary=nav_summary,
+        holdings_summary=holdings_summary,
+        gl_summary=gl_summary,
+    )
+
+
+def _build_trading_email_payload(
+    results_ex_ante: ProcessingResults,
+    results_ex_post: ProcessingResults,
+    artefacts,
+    params,
+) -> EmailPayload:
+    """Assemble the email payload for a trading-analysis run."""
+    ante_payload = _extract_payload(results_ex_ante, "compliance_results")
+    post_payload = _extract_payload(results_ex_post, "compliance_results")
+
+    # Compliance status changes: fund -> list of {test, ante_status, post_status}
+    compliance_changes: Dict[str, list] = {}
+    for fund in sorted(set(ante_payload) | set(post_payload)):
+        ante = ante_payload.get(fund, {}) or {}
+        post = post_payload.get(fund, {}) or {}
+        for test in sorted(set(ante) | set(post)):
+            if test in ("fund_object", "fund", "summary_metrics"):
+                continue
+            ante_status = _compliance_status(ante.get(test))
+            post_status = _compliance_status(post.get(test))
+            if ante_status != post_status:
+                compliance_changes.setdefault(fund, []).append({
+                    "test": test,
+                    "ante_status": ante_status,
+                    "post_status": post_status,
+                })
+
+    # Trade activity summary: fund -> {asset_class: asset_trade_summary dict}
+    trade_activity_summary: Dict[str, Mapping[str, Mapping[str, object]]] = {}
+    report = getattr(artefacts, "report", None)
+    comparison = getattr(report, "comparison_data", None) if report else None
+    funds_payload = (comparison or {}).get("funds", {}) if isinstance(comparison, Mapping) else {}
+    for fund, fund_data in funds_payload.items():
+        trade_info = (fund_data or {}).get("trade_info") or {}
+        asset_summary = trade_info.get("asset_trade_summary") or {}
+        if asset_summary:
+            trade_activity_summary[fund] = asset_summary
+
+    paths = flatten_trading_paths(artefacts)
+    attachment_keys = (
+        "trading_compliance_combined_pdf",
+        "trading_compliance_combined_excel",
+        "trading_compliance_pdf",
+        "trading_compliance_excel",
+        "trading_ex_post_compliance_pdf",
+        "trading_ex_post_compliance_excel",
+    )
+    attachments = [Path(paths[k]) for k in attachment_keys if k in paths]
+
+    return EmailPayload(
+        date=str(params.ex_post_date),
+        attachments=attachments,
+        compliance_changes=compliance_changes,
+        trade_activity_summary=trade_activity_summary,
+    )
+
+
+def _compliance_status(test_result) -> str:
+    """Reduce a compliance test result to PASS / FAIL / N/A."""
+    if test_result is None:
+        return "N/A"
+    is_compliant = getattr(test_result, "is_compliant", None)
+    if is_compliant is None and isinstance(test_result, Mapping):
+        is_compliant = test_result.get("is_compliant")
+    if is_compliant is True:
+        return "PASS"
+    if is_compliant is False:
+        return "FAIL"
+    return "N/A"
 
 __all__ = [
     "DataLoadRequest",

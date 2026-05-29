@@ -277,7 +277,6 @@ class TradingComplianceAnalyzer:
                 "net": quantity_delta,
             }
 
-            # Calculate notionals using appropriate shares columns
             post_notional = self._calculate_notional(post_df, "iiv_shares", asset_type=key)
             ante_notional = self._calculate_notional(ante_df, "nav_shares", asset_type=key)
             notional_delta = post_notional - ante_notional
@@ -286,8 +285,16 @@ class TradingComplianceAnalyzer:
             ex_ante_market_values[key] = ante_notional
             ex_post_market_values[key] = post_notional
 
-            # IMPORTANT: Pass the post_df which has ex-post prices and iiv_shares for trade activity
-            # This ensures we use the same data source as Fund Summary Metrics Ex-Post
+            # Splice closed positions back in so sell-to-close shows up.
+            if asset_type == "options" and not ante_df.empty:
+                ante_only = ante_df[~ante_df["optticker"].isin(post_df["optticker"])].copy()
+                if not ante_only.empty:
+                    ante_only["iiv_shares"] = 0.0
+                    ante_only["trade_rebal"] = -pd.to_numeric(
+                        ante_only.get("nav_shares", 0.0), errors="coerce"
+                    ).fillna(0.0)
+                    post_df = pd.concat([post_df, ante_only], ignore_index=True)
+
             activity_details = self._calculate_trade_activity(post_df, asset_type=key)
 
             if activity_details["buys"] or activity_details["sells"]:
@@ -318,22 +325,19 @@ class TradingComplianceAnalyzer:
             asset_trade_totals[key] = trade_total
             total_traded += trade_total
 
-        # Rest of the method remains the same...
-        ante_metrics = self._extract_summary_metrics_payload(
-            ante_results.get("summary_metrics")
-        )
-        post_metrics = self._extract_summary_metrics_payload(
-            post_results.get("summary_metrics")
-        )
+        # Pull TNA / TA straight from the fund snapshot the bulk loader populated.
+        # Single source of truth; no dependency on the "summary_metrics" compliance
+        # test being scheduled.
+        snapshot = getattr(getattr(fund, "data", None), "current", None)
 
-        total_net_assets = float(
-            post_metrics.get("total_net_assets")
-            or ante_metrics.get("total_net_assets")
-            or 0.0
-        )
-        total_assets = float(
-            post_metrics.get("total_assets") or ante_metrics.get("total_assets") or 0.0
-        )
+        def _from_snapshot(attr: str) -> float:
+            try:
+                return float(getattr(snapshot, attr, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        total_net_assets = _from_snapshot("tna")
+        total_assets = _from_snapshot("ta")
 
         asset_trade_summary: Dict[str, Dict[str, float]] = {}
 
@@ -369,96 +373,6 @@ class TradingComplianceAnalyzer:
 
         return trade_summary
 
-    def _calculate_trade_activity(
-            self,
-            holdings: pd.DataFrame,
-            *,
-            asset_type: str,
-    ) -> Dict[str, Any]:
-        """Calculate trade activity from holdings data.
-
-        Args:
-            holdings: DataFrame containing holdings data (should be ex-post data with iiv_shares)
-            asset_type: Type of asset (equity, options, treasury)
-        """
-        empty_result = {
-            "buys": [],
-            "sells": [],
-            "net": {
-                "buy_quantity": 0.0,
-                "sell_quantity": 0.0,
-                "buy_value": 0.0,
-                "sell_value": 0.0,
-            },
-        }
-
-        if not isinstance(holdings, pd.DataFrame) or holdings.empty:
-            return empty_result
-
-        trade_series = self._extract_trade_series(holdings)
-        if trade_series.empty or (trade_series == 0.0).all():
-            return empty_result
-
-        df = holdings.copy()
-        df["trade_rebal"] = trade_series
-        df = df.loc[df["trade_rebal"] != 0.0]
-
-        if df.empty:
-            return empty_result
-
-        buys = []
-        sells = []
-        total_buy_qty = 0.0
-        total_sell_qty = 0.0
-        total_buy_value = 0.0
-        total_sell_value = 0.0
-
-        # Detect the correct ticker column for this asset type
-        ticker_column = self._detect_ticker_column(df, asset_type)
-        if ticker_column is None:
-            ticker_column = 'ticker'
-
-        for _, row in df.iterrows():
-            quantity = float(row.get("trade_rebal", 0.0))
-            if quantity == 0.0:
-                continue
-
-            # Get ticker from the appropriate column
-            ticker = ""
-            if ticker_column in row:
-                ticker_value = row.get(ticker_column)
-                if pd.notna(ticker_value):
-                    ticker = str(ticker_value).upper().strip()
-
-            # Calculate market value using ex-post price and trade quantity
-            # This matches how Fund Summary Metrics Ex-Post is calculated
-            market_value = self._estimate_trade_market_value(row, quantity, asset_type)
-
-            trade_payload = {
-                "ticker": ticker,
-                "quantity": abs(quantity),
-                "market_value": abs(market_value),
-            }
-
-            if quantity > 0:
-                total_buy_qty += abs(quantity)
-                total_buy_value += abs(market_value)
-                buys.append(trade_payload)
-            else:
-                total_sell_qty += abs(quantity)
-                total_sell_value += abs(market_value)
-                sells.append(trade_payload)
-
-        return {
-            "buys": buys,
-            "sells": sells,
-            "net": {
-                "buy_quantity": total_buy_qty,
-                "sell_quantity": total_sell_qty,
-                "buy_value": total_buy_value,
-                "sell_value": total_sell_value,
-            },
-        }
 
     def _get_holdings(
         self,

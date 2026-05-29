@@ -561,20 +561,13 @@ def _create_trade_activity_sheet(workbook: Workbook, data: Mapping[str, Any]) ->
                 detail_rows_written = True
                 fund_rows_written = True
 
-            # Always show net totals
-            if abs(buy_qty) > 0.0 or abs(buy_val) > 0.0:
-                _write_row("Net Buy", "", buy_qty, buy_val)
-
-            if abs(sell_qty) > 0.0 or abs(sell_val) > 0.0:
-                _write_row("Net Sell", "", sell_qty, sell_val)
-
             # Show individual trades (limited to top 5 for equity/options)
             for trade in buys_list:
                 quantity = float(trade.get("quantity", 0.0) or 0.0)
                 value = float(trade.get("market_value", 0.0) or 0.0)
                 if quantity == 0.0 and value == 0.0:
                     continue
-                ticker = str(trade.get("eqyticker", ""))
+                ticker = str(trade.get("ticker", ""))
                 _write_row("Buy", ticker, quantity, value)
 
             for trade in sells_list:
@@ -894,11 +887,6 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
                 }
             )
 
-            if abs(buy_qty) > 0.0 or abs(buy_val) > 0.0:
-                detail_rows.append((fund_name, asset_label, "Net Buy", "", buy_qty, buy_val))
-            if abs(sell_qty) > 0.0 or abs(sell_val) > 0.0:
-                detail_rows.append((fund_name, asset_label, "Net Sell", "", sell_qty, sell_val))
-
             for trade in buys_list or []:
                 quantity = float(trade.get("quantity", 0.0) or 0.0)
                 value = float(trade.get("market_value", 0.0) or 0.0)
@@ -1006,49 +994,67 @@ def _add_trade_activity(pdf: FPDF, data: Mapping[str, Any]) -> None:
     pdf.ln(3)
 
     if detail_rows:
-        detail_headers = ["Fund", "Asset Class", "Direction", "Ticker", "Quantity", "Market Value"]
-        detail_rel_widths = [1.2, 1.0, 0.9, 1.0, 0.9, 1.1]
-        detail_total = sum(detail_rel_widths)
-        detail_widths = [usable_width * w / detail_total for w in detail_rel_widths]
-
         pdf.set_font("Arial", "B", 10)
         pdf.cell(0, 6, "Trade Activity Details", 0, 1, "L")
         pdf.ln(1)
 
-        pdf.set_font("Arial", "B", 6)
-        pdf.set_fill_color(200, 200, 200)
-        for width, header in zip(detail_widths, detail_headers):
-            pdf.cell(width, 5.5, header, 1, 0, "C", True)
-        pdf.ln(5.5)
-
-        pdf.set_font("Arial", "", 6)
-        last_fund = None
-        row_height = 5.0
-
+        # Group rows by fund, preserving the sort order that put them here.
+        from collections import defaultdict
+        by_fund: dict[str, list[tuple[str, str, str, float, float]]] = defaultdict(list)
         for fund_name, asset, direction, ticker, quantity, value in detail_rows:
-            if pdf.get_y() + row_height > page_limit:
+            by_fund[fund_name].append((asset, direction, ticker, quantity, value))
+
+        # 5-col mini-table (no Fund column; fund is the header bar above it).
+        sub_headers = ["Asset Class", "Direction", "Ticker", "Quantity", "Market Value"]
+        sub_rel_widths = [1.1, 0.9, 1.1, 1.0, 1.2]
+        sub_total = sum(sub_rel_widths)
+        sub_widths = [usable_width * w / sub_total for w in sub_rel_widths]
+        row_height = 5.0
+        header_height = 5.5
+        fund_bar_height = 6.0
+
+        def _draw_subtable_header() -> None:
+            pdf.set_font("Arial", "B", 6)
+            pdf.set_fill_color(200, 200, 200)
+            for width, header in zip(sub_widths, sub_headers):
+                pdf.cell(width, header_height, header, 1, 0, "C", True)
+            pdf.ln(header_height)
+
+        for fund_name in sorted(by_fund.keys()):
+            rows = by_fund[fund_name]
+
+            # If the fund's whole block won't fit on the current page, page-break.
+            block_needed = fund_bar_height + header_height + row_height * len(rows) + 2
+            if pdf.get_y() + block_needed > page_limit:
                 pdf.add_page(orientation=getattr(pdf, "cur_orientation", "L"))
-                pdf.set_font("Arial", "B", 6)
-                pdf.set_fill_color(200, 200, 200)
-                for width, header in zip(detail_widths, detail_headers):
-                    pdf.cell(width, 5.5, header, 1, 0, "C", True)
-                pdf.ln(5.5)
-                pdf.set_font("Arial", "", 6)
 
-            fund_label = fund_name if fund_name != last_fund else ""
-            if fund_label:
-                pdf.set_font("Arial", "B", 6)
-            pdf.cell(detail_widths[0], row_height, fund_label, 1, 0, "L")
-            if fund_label:
-                pdf.set_font("Arial", "", 6)
+            # Fund header bar
+            pdf.set_font("Arial", "B", 8)
+            pdf.set_fill_color(220, 230, 241)  # light blue
+            pdf.cell(usable_width, fund_bar_height, fund_name, 1, 1, "L", True)
 
-            pdf.cell(detail_widths[1], row_height, asset, 1, 0, "L")
-            pdf.cell(detail_widths[2], row_height, direction, 1, 0, "L")
-            pdf.cell(detail_widths[3], row_height, ticker, 1, 0, "L")
-            pdf.cell(detail_widths[4], row_height, format_number(quantity, digits=2), 1, 0, "R")
-            pdf.cell(detail_widths[5], row_height, format_number(value, digits=2), 1, 1, "R")
+            # Sub-table header
+            _draw_subtable_header()
 
-            last_fund = fund_name
+            # Rows
+            pdf.set_font("Arial", "", 6)
+            for asset, direction, ticker, quantity, value in rows:
+                # Mid-fund page break: redraw the fund bar + header on the new page.
+                if pdf.get_y() + row_height > page_limit:
+                    pdf.add_page(orientation=getattr(pdf, "cur_orientation", "L"))
+                    pdf.set_font("Arial", "B", 8)
+                    pdf.set_fill_color(220, 230, 241)
+                    pdf.cell(usable_width, fund_bar_height, f"{fund_name} (continued)", 1, 1, "L", True)
+                    _draw_subtable_header()
+                    pdf.set_font("Arial", "", 6)
+
+                pdf.cell(sub_widths[0], row_height, asset, 1, 0, "L")
+                pdf.cell(sub_widths[1], row_height, direction, 1, 0, "L")
+                pdf.cell(sub_widths[2], row_height, ticker, 1, 0, "L")
+                pdf.cell(sub_widths[3], row_height, format_number(quantity, digits=2), 1, 0, "R")
+                pdf.cell(sub_widths[4], row_height, format_number(value, digits=2), 1, 1, "R")
+
+            pdf.ln(2)
 
 
 def _add_summary_metrics_section(pdf: FPDF, data: Mapping[str, Any]) -> None:
@@ -1283,7 +1289,7 @@ def generate_trading_compliance_reports(
     report_date: Any,
     output_dir: str,
     *,
-    file_name_prefix: str = "trading_compliance_results",
+    file_name_prefix: str = "trading_analysis",
     create_pdf: bool = True,
 ) -> GeneratedTradingComplianceReport:
     """Generate Excel and PDF outputs for trading compliance comparisons."""
