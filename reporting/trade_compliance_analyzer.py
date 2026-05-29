@@ -286,7 +286,7 @@ class TradingComplianceAnalyzer:
             ex_post_market_values[key] = post_notional
 
             # Splice closed positions back in so sell-to-close shows up.
-            if asset_type == "options" and not ante_df.empty:
+            if key == "options" and isinstance(ante_df, pd.DataFrame) and not ante_df.empty:
                 ante_only = ante_df[~ante_df["optticker"].isin(post_df["optticker"])].copy()
                 if not ante_only.empty:
                     ante_only["iiv_shares"] = 0.0

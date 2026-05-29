@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+import logging
+
 from notifications.email_manager import EmailManager, EmailPayload
 
 from typing import Dict, Mapping, MutableMapping, Optional, Sequence, Tuple
@@ -19,7 +21,7 @@ from reporting.compliance_reporter import (
     build_compliance_reports_for_range,
 )
 from reporting.compliance_reporting import GeneratedComplianceReport
-
+from config.operation_config import OperationConfig, OperationMode
 from reporting.nav_recon_reporter import build_nav_reconciliation_reports
 from reporting.trade_compliance_reporter import (
     build_trading_compliance_reports,
@@ -156,11 +158,9 @@ def run_eod_mode(
     try:
         EmailManager().send(
             _build_eod_email_payload(results, artefacts, params),
-            params.operation_config,   # OperationConfig with mode=OperationMode.EOD
+            OperationConfig.create(OperationMode.EOD),
         )
     except Exception:
-        # Don't fail the run if email delivery breaks; log + continue.
-        import logging
         logging.getLogger(__name__).exception("EOD email notification failed")
 
     return results, artefacts
@@ -271,10 +271,9 @@ def run_trading_mode(
     try:
         EmailManager().send(
             _build_trading_email_payload(results_ex_ante, results_ex_post, combined_artefacts, params),
-            params.operation_config,   # OperationConfig with mode=OperationMode.TRADING_COMPLIANCE
+            OperationConfig.create(OperationMode.TRADING_COMPLIANCE),
         )
     except Exception:
-        import logging
         logging.getLogger(__name__).exception("Trading-analysis email notification failed")
 
     return results_ex_ante, results_ex_post, combined_artefacts
@@ -595,36 +594,40 @@ def _build_trading_email_payload(
     params,
 ) -> EmailPayload:
     """Assemble the email payload for a trading-analysis run."""
-    ante_payload = _extract_payload(results_ex_ante, "compliance_results")
-    post_payload = _extract_payload(results_ex_post, "compliance_results")
+    # Pull the analyzer output that already powers the PDF / Excel.
+    report = getattr(artefacts, "report", None)
+    comparison = getattr(report, "comparison_data", None) or {}
+    funds_payload = comparison.get("funds", {}) or {}
 
-    # Compliance status changes: fund -> list of {test, ante_status, post_status}
+    # Compliance status changes: fund -> [{test, ante_status, post_status}, ...]
     compliance_changes: Dict[str, list] = {}
-    for fund in sorted(set(ante_payload) | set(post_payload)):
-        ante = ante_payload.get(fund, {}) or {}
-        post = post_payload.get(fund, {}) or {}
-        for test in sorted(set(ante) | set(post)):
-            if test in ("fund_object", "fund", "summary_metrics"):
+    for fund_name, fund_data in funds_payload.items():
+        checks = (fund_data or {}).get("checks", {}) or {}
+        changed_rows = []
+        for check_name, check in checks.items():
+            if not isinstance(check, Mapping):
                 continue
-            ante_status = _compliance_status(ante.get(test))
-            post_status = _compliance_status(post.get(test))
-            if ante_status != post_status:
-                compliance_changes.setdefault(fund, []).append({
-                    "test": test,
-                    "ante_status": ante_status,
-                    "post_status": post_status,
-                })
+            post_status = str(check.get("status_after", "") or "").upper()
+            # Include the row if (a) the status changed between ex-ante and
+            # ex-post, or (b) the fund is currently out of compliance on
+            # ex-post regardless of whether it changed.
+            if not check.get("changed") and post_status != "FAIL":
+                continue
+            changed_rows.append({
+                "test": check_name,
+                "ante_status": check.get("status_before", ""),
+                "post_status": check.get("status_after", ""),
+            })
+        if changed_rows:
+            compliance_changes[fund_name] = changed_rows
 
     # Trade activity summary: fund -> {asset_class: asset_trade_summary dict}
     trade_activity_summary: Dict[str, Mapping[str, Mapping[str, object]]] = {}
-    report = getattr(artefacts, "report", None)
-    comparison = getattr(report, "comparison_data", None) if report else None
-    funds_payload = (comparison or {}).get("funds", {}) if isinstance(comparison, Mapping) else {}
-    for fund, fund_data in funds_payload.items():
+    for fund_name, fund_data in funds_payload.items():
         trade_info = (fund_data or {}).get("trade_info") or {}
         asset_summary = trade_info.get("asset_trade_summary") or {}
         if asset_summary:
-            trade_activity_summary[fund] = asset_summary
+            trade_activity_summary[fund_name] = asset_summary
 
     paths = flatten_trading_paths(artefacts)
     attachment_keys = (

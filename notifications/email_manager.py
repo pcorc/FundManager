@@ -20,6 +20,7 @@ SMTP_PORT = int(os.environ.get("FUNDMANAGER_SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("FUNDMANAGER_SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("FUNDMANAGER_SMTP_PASSWORD", "")
 FROM_ADDRESS = os.environ.get("FUNDMANAGER_FROM_ADDRESS", SMTP_USER or "noreply@vestfin.com")
+EMAIL_MODE = os.environ.get("FUNDMANAGER_EMAIL_MODE", "display")
 
 
 @dataclass
@@ -201,12 +202,24 @@ class EmailManager:
         )
 
     def _render_trade_activity(
-        self, summary: Mapping[str, Mapping[str, Mapping[str, Any]]]
+            self, summary: Mapping[str, Mapping[str, Mapping[str, Any]]]
     ) -> str:
         rows = []
         for fund, asset_data in sorted(summary.items()):
             for asset, metrics in sorted((asset_data or {}).items()):
                 metrics = metrics or {}
+                numeric_values = (
+                    metrics.get("trade_value"),
+                    metrics.get("pct_of_tna"),
+                    metrics.get("pct_of_total_assets"),
+                    metrics.get("ex_ante_market_value"),
+                    metrics.get("ex_post_market_value"),
+                    metrics.get("market_value_delta"),
+                )
+                # Skip rows where every numeric column is zero / blank (e.g. funds
+                # with no treasury activity).
+                if all(self._is_zero(v) for v in numeric_values):
+                    continue
                 rows.append(
                     "<tr>"
                     f"<td>{fund}</td><td>{str(asset).title()}</td>"
@@ -221,11 +234,11 @@ class EmailManager:
         if not rows:
             return "<h3>Trade Activity Summary</h3><p>No trading activity detected.</p>"
         return (
-            "<h3>Trade Activity Summary</h3>"
-            "<table><tr><th>Fund</th><th>Asset Class</th><th>Trade Value</th>"
-            "<th>% of TNA</th><th>% of Assets</th><th>Ex-Ante MV</th><th>Ex-Post MV</th>"
-            "<th>MV Delta</th></tr>"
-            + "".join(rows) + "</table>"
+                "<h3>Trade Activity Summary</h3>"
+                "<table><tr><th>Fund</th><th>Asset Class</th><th>Trade Value</th>"
+                "<th>% of TNA</th><th>% of Assets</th><th>Ex-Ante MV</th><th>Ex-Post MV</th>"
+                "<th>MV Delta</th></tr>"
+                + "".join(rows) + "</table>"
         )
 
     # ------------------------------------------------------------------
@@ -263,6 +276,13 @@ td.fail {{ background-color: #f5b8b8; text-align: center; font-weight: bold; }}
             return ""
 
     @staticmethod
+    def _is_zero(value: Any) -> bool:
+        try:
+            return float(value or 0) == 0.0
+        except (TypeError, ValueError):
+            return True
+
+    @staticmethod
     def _break_cell(value: Any, *, kind: str = "holdings") -> str:
         try:
             count = int(float(value))
@@ -285,17 +305,57 @@ td.fail {{ background-color: #f5b8b8; text-align: center; font-weight: bold; }}
     # ------------------------------------------------------------------
     # SMTP send
     # ------------------------------------------------------------------
+    def _display_via_outlook(
+            self,
+            recipients: Sequence[str],
+            subject: str,
+            body_html: str,
+            attachments: Iterable[Path],
+    ) -> None:
+        """Pop the message up in Outlook as a draft; user reviews and clicks Send."""
+        try:
+            import win32com.client  # pywin32
+        except ImportError:
+            logger.error(
+                "pywin32 is required to display Outlook drafts. "
+                "Install with: pip install pywin32"
+            )
+            raise
+
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        mail = outlook.CreateItem(0)  # 0 = olMailItem
+        mail.To = "; ".join(recipients)
+        mail.Subject = subject
+        mail.HTMLBody = body_html
+
+        for path in attachments:
+            p = Path(path)
+            if not p.exists():
+                logger.warning("Skipping missing attachment %s", p)
+                continue
+            # Outlook requires an absolute path string.
+            mail.Attachments.Add(str(p.resolve()))
+
+        mail.Display(True)  # opens the draft window in the foreground
+        logger.info("Opened Outlook draft '%s' for %s with %d attachment(s)",
+                    subject, list(recipients), sum(1 for _ in attachments))
+
     def _send_email(
-        self,
-        recipients: Sequence[str],
-        subject: str,
-        body_html: str,
-        attachments: Iterable[Path],
+            self,
+            recipients: Sequence[str],
+            subject: str,
+            body_html: str,
+            attachments: Iterable[Path],
     ) -> None:
         if not recipients:
             logger.warning("No recipients configured; skipping email '%s'", subject)
             return
 
+        if EMAIL_MODE == "display":
+            self._display_via_outlook(recipients, subject, body_html, attachments)
+            return
+
+        # ----- original SMTP path -----
         msg = EmailMessage()
         msg["Subject"] = subject
         msg["From"] = FROM_ADDRESS
@@ -318,8 +378,7 @@ td.fail {{ background-color: #f5b8b8; text-align: center; font-weight: bold; }}
                 if SMTP_USER and SMTP_PASSWORD:
                     smtp.login(SMTP_USER, SMTP_PASSWORD)
                 smtp.send_message(msg)
-            logger.info("Sent email '%s' to %s with %d attachment(s)",
-                        subject, list(recipients), len(list(attachments)))
+            logger.info("Sent email '%s' to %s", subject, list(recipients))
         except Exception:
             logger.exception("Failed to send email '%s'", subject)
             raise

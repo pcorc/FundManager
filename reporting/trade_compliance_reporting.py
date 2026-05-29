@@ -93,9 +93,9 @@ def _build_asset_sections(trade_info: Mapping[str, Any]) -> Sequence[Dict[str, A
 @dataclass
 class GeneratedTradingComplianceReport:
     """Excel/PDF artefacts for trading compliance."""
-
     excel_path: Optional[str]
     pdf_path: Optional[str]
+    comparison_data: Optional[Mapping[str, Any]] = None
 
 
 def _format_percent(value: float) -> str:
@@ -1295,7 +1295,7 @@ def generate_trading_compliance_reports(
     """Generate Excel and PDF outputs for trading compliance comparisons."""
 
     if not comparison_data:
-        return GeneratedTradingComplianceReport(None, None)
+        return GeneratedTradingComplianceReport(None, None, None)
 
     date_str = normalize_report_date(report_date)
     output_path = Path(output_dir)
@@ -1311,7 +1311,7 @@ def generate_trading_compliance_reports(
         generate_trading_pdf_report(comparison_data, str(pdf_path))
         pdf_result = str(pdf_path)
 
-    return GeneratedTradingComplianceReport(str(excel_path), pdf_result)
+    return GeneratedTradingComplianceReport(str(excel_path), pdf_result, comparison_data)
 
 
 __all__ = [
