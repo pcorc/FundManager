@@ -1,0 +1,188 @@
+================================================================================
+build_run() — Configuration Examples
+================================================================================
+
+Every run of FundManager starts with build_run(...). It returns one or more
+cfg dicts that main.execute_run(cfg) consumes. Below is a catalogue of common
+invocation patterns and what each one produces.
+
+
+--------------------------------------------------------------------------------
+1. EOD all reports, single day, single cohort
+--------------------------------------------------------------------------------
+
+    cfg = build_run("eod", cohorts=[ETF_FUNDS], start_date="2026-05-14")
+
+For every ticker in ETF_FUNDS on 2026-05-14: runs the full EOD trio —
+compliance, holdings recon, NAV recon — and produces the combined PDF and
+Excel set. Files land in:
+
+    ...\Compliance\
+    ...\Holdings and NAV Recon\
+
+on the shared drive. Email goes out (default send_email=True).
+
+
+--------------------------------------------------------------------------------
+2. Just NAV recon, single day, one fund
+--------------------------------------------------------------------------------
+
+    cfg = build_run("nav", funds=["KNG"], start_date="2026-05-14")
+
+"nav" is a mode shortcut for NAV reconciliation only — skips compliance and
+holdings recon. Runs only against KNG. Useful for isolated debugging when
+you want to inspect one fund's gain/loss attribution without sitting through
+the whole EOD run.
+
+
+--------------------------------------------------------------------------------
+3. Trading compliance over a week, multiple cohorts
+--------------------------------------------------------------------------------
+
+    cfg = build_run(
+        "trading_compliance",
+        cohorts=[ETF_FUNDS, CLOSED_END_FUNDS],
+        start_date="2026-05-14",
+        end_date="2026-05-21",
+    )
+
+Iterates every business day from 2026-05-14 through 2026-05-21. For each
+day, runs the ex-ante vs ex-post comparison across the union of ETF_FUNDS
+and CLOSED_END_FUNDS. Each day produces its own trading-analysis PDF +
+Excel + combined report + email. Use when you want to back-test a week's
+worth of intraday compliance for trend analysis or audit.
+
+
+--------------------------------------------------------------------------------
+4. Time-series stacked compliance over a month
+--------------------------------------------------------------------------------
+
+    cfg = build_run(
+        "time_series",
+        cohorts=[CLOSED_END_FUNDS],
+        start_date="2026-04-21",
+        end_date="2026-05-21",
+    )
+
+Different shape than the others: instead of one workbook per day,
+time_series mode runs compliance for every business day in the range and
+stacks the results into a single workbook with one row per (date, fund,
+rule). generate_daily_reports=False by default in this mode — you only
+get the aggregated time-series file, not per-day artefacts. Useful for
+board-deck-style "compliance over time" views.
+
+
+--------------------------------------------------------------------------------
+5. All EOD report flavors chained
+--------------------------------------------------------------------------------
+
+    cfg = build_run(
+        ["compliance", "reconciliation", "nav"],
+        cohorts=[ETF_FUNDS],
+        start_date="2026-05-14",
+        output_tag="etfs",
+    )
+
+Passing a list of modes makes build_run return a list of cfgs (one per
+mode). main.execute_run iterates them sequentially: compliance first, then
+reconciliation, then NAV. Each gets its own output_tag derived from the
+base:
+
+    etfs_compliance
+    etfs_reconciliation
+    etfs_nav
+
+Use when you want each report family run independently — e.g., compliance
+failed and you want to keep separate file artefacts per mode rather than
+the bundled EOD combined PDF.
+
+
+--------------------------------------------------------------------------------
+6. Compliance only, date range, ETF cohort
+--------------------------------------------------------------------------------
+
+    cfg = build_run(
+        mode="compliance",
+        cohorts=[ETF_FUNDS],
+        start_date="2026-05-14",
+        end_date="2026-05-22",
+        output_tag="etfs",
+    )
+
+Iterates business days from 2026-05-14 through 2026-05-22 and runs only
+compliance for each day across the ETF cohort. One compliance PDF + Excel
+per day, all tagged "etfs".
+
+The exclude_funds(cohort, ticker) helper is the alternative pattern when
+you want to start from a cohort and drop specific tickers:
+
+    funds=exclude_funds(CLOSED_END_FUNDS, "FTMIX"),
+
+
+--------------------------------------------------------------------------------
+7. EOD for ETFs, single day, no email
+--------------------------------------------------------------------------------
+
+    cfg = build_run(
+        mode="eod",
+        cohorts=[ETF_FUNDS],
+        start_date="2026-06-09",
+        end_date="2026-06-09",
+        output_tag="etfs",
+        send_email=False,
+    )
+
+Runs the full EOD trio for the ETF cohort on 2026-06-09 only (start = end
+means single date). Files write to the shared drive tagged "etfs". Email
+is suppressed — nothing pops up in Outlook, no SMTP send.
+
+
+--------------------------------------------------------------------------------
+8. Trading compliance, ETFs, no email
+--------------------------------------------------------------------------------
+
+    cfg = build_run(
+        "trading_compliance",
+        cohorts=[ETF_FUNDS],
+        start_date="2026-05-29",
+        output_tag="etfs",
+        send_email=False,
+    )
+
+Runs the intraday ex-ante / ex-post comparison for the ETF cohort on
+2026-05-29. With no end_date, defaults to a single date (the same one).
+Suppresses the email; the trading-analysis PDF + combined PDF + Excels
+still land under ...\Trading Compliance\.
+
+
+================================================================================
+Parameter cheat-sheet
+================================================================================
+
+mode
+    String (one mode) or list (chain modes). Must be a key in MODES.
+    Available: "eod", "compliance", "reconciliation", "nav",
+               "trading_compliance", "time_series"
+
+cohorts / funds
+    Set the universe. If both are given, the intersection wins.
+    exclude_funds(cohort, ticker) lets you remove one fund from a cohort
+    inline.
+
+start_date / end_date
+    end_date or start_date defaults to single-day.
+    If the mode is date_mode="single" (eod, trading_compliance), a range
+        iterates days.
+    If the mode is date_mode="range" (time_series), the range is
+        processed as one stacked job.
+
+output_tag
+    Appended to every filename. Example:
+        reconciliation_summary_etfs_2026-05-14.pdf
+    Use to keep cohort runs separate on the share.
+
+send_email
+    Defaults to True. Pass False to suppress notification for ad-hoc runs.
+
+compliance_tests
+    Optional override of the test list; defaults to FULL_COMPLIANCE_TESTS.
