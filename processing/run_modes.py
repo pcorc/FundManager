@@ -28,6 +28,12 @@ from reporting.trade_compliance_reporter import (
     combine_trading_and_compliance_reports,
 )
 
+def _subdir(base: Path, name: str) -> Path:
+    """Return base / name, creating the directory if needed."""
+    out = Path(base) / name
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
 @dataclass(frozen=True)
 class DataLoadRequest:
     """Describe a unique combination of target/previous dates to fetch."""
@@ -134,7 +140,7 @@ def run_eod_mode(
         artefacts["compliance"] = build_compliance_reports(
             results,
             report_date=params.trade_date,
-            output_dir=str(output_dir),
+            output_dir=str(_subdir(output_dir, "Compliance")),
             file_name_prefix=_build_prefix("compliance_results"),
             test_functions=params.compliance_tests or None,
             gics_mapping=gics_mapping,
@@ -142,26 +148,25 @@ def run_eod_mode(
         )
 
     if any(name in params.operations for name in ("reconciliation", "nav_reconciliation")):
-        # Extract fund registry for property-based reconciliation reporting
         fund_registry = _extract_fund_registry(results)
-
         artefacts["reconciliation"] = build_nav_reconciliation_reports(
             holdings_results=reconciliation_payload if "reconciliation" in params.operations else None,
             nav_results=nav_payload if "nav_reconciliation" in params.operations else None,
             report_date=params.trade_date,
-            output_dir=str(output_dir),
+            output_dir=str(_subdir(output_dir, "Holdings and NAV Recon")),
             file_name_prefix=_build_prefix("reconciliation_summary"),
-            create_pdf=params.create_pdf
+            create_pdf=params.create_pdf,
         )
 
     # Send the EOD notification email (HTML body + PDF/Excel attachments).
-    try:
-        EmailManager().send(
-            _build_eod_email_payload(results, artefacts, params),
-            OperationConfig.create(OperationMode.EOD),
-        )
-    except Exception:
-        logging.getLogger(__name__).exception("EOD email notification failed")
+    if getattr(params, "send_email", True):
+        try:
+            EmailManager().send(
+                _build_eod_email_payload(results, artefacts, params),
+                OperationConfig.create(OperationMode.EOD),
+            )
+        except Exception:
+            logging.getLogger(__name__).exception("EOD email notification failed")
 
     return results, artefacts
 

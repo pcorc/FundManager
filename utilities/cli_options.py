@@ -27,6 +27,7 @@ class CLIOptions:
     ex_post_date: Optional[date]
     custodian_date: Optional[date]
     custodian_previous_date: Optional[date]
+    send_email: bool = True          # NEW
 
 
 @dataclass
@@ -39,6 +40,7 @@ class EODRunParameters:
     compliance_tests: List[str]
     output_tag: str | None
     create_pdf: bool
+    send_email: bool = True          # NEW
 
 
 @dataclass
@@ -183,6 +185,7 @@ def resolve_eod_parameters(options: CLIOptions) -> EODRunParameters:
         compliance_tests=list(options.compliance_tests),
         output_tag=options.output_tag,
         create_pdf=options.create_pdf,
+        send_email=options.send_email,   # NEW
     )
 
 
