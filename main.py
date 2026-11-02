@@ -314,14 +314,14 @@ if __name__ == "__main__":
     #     end_date="2026-05-21",
     # )
     #
-    # # Time-series stacked compliance over a month
+    # Time-series stacked compliance over a month
     # cfg = build_run(
     #     "time_series",
     #     cohorts=[CLOSED_END_FUNDS],
     #     start_date="2026-04-21",
     #     end_date="2026-05-21",
     # )
-    #
+
     # # All four EOD report flavors on the same day — chain them
     # cfg = build_run(
     #     ["compliance", "reconciliation", "nav"],
@@ -337,24 +337,37 @@ if __name__ == "__main__":
     #     start_date="2026-05-14",
     #     end_date="2026-05-22",
     #     output_tag="etfs",
-    # )
-
-    # Just NAV recon, single day, one fund
-    # cfg = build_run(
-    #                 mode="eod",
-    #                 funds=exclude_funds(CLOSED_END_FUNDS, "FTMIX"),
-    #                 start_date="2026-05-26",
-    #                 end_date="2026-05-27",
-    #                 output_tag="cefs"
-    #                 )
+    # )+
 
     cfg = build_run(
-        "trading_compliance",
-        funds=["p2726", "RDVI"],
-        start_date="2026-05-22",
-        #end_date="2026-05-21",
-        output_tag="may22"
+                    mode="eod",
+                    # funds=exclude_funds(CLOSED_END_FUNDS, "FTMIX"),
+                    cohorts=[ETF_FUNDS],
+                    start_date="2026-10-30",
+                    end_date="2026-10-30",
+                    output_tag="etfs",
+                    send_email=False,
     )
+
+    # cfg = build_run(
+    #     "trading_compliance",
+    #     cohorts=[ETF_FUNDS],
+    #     start_date="2026-05-29",
+    #     #end_date="2026-05-21",
+    #     output_tag="etfs",
+    #     send_email=False,
+    # )
+
+    # cfg = build_run(
+    #     "time_series",
+    #     # cohorts=[CLOSED_END_FUNDS],
+    #     funds=exclude_funds(CLOSED_END_FUNDS, "FTMIX"),
+    #     start_date="2026-07-01",
+    #     end_date="2026-09-30",
+    #     compliance_tests=["diversification_40act_check", "diversification_IRS_check"],
+    #     output_tag="cefs_q3_TR2A1",
+    #     send_email=False,
+    # )
 
     # 3) Execute
     exit_code = execute_run(cfg)

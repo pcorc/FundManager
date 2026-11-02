@@ -325,19 +325,28 @@ class TradingComplianceAnalyzer:
             asset_trade_totals[key] = trade_total
             total_traded += trade_total
 
-        # Pull TNA / TA straight from the fund snapshot the bulk loader populated.
-        # Single source of truth; no dependency on the "summary_metrics" compliance
-        # test being scheduled.
-        snapshot = getattr(getattr(fund, "data", None), "current", None)
+        # Trading analysis runs intraday — the custodian hasn't reported T's TNA/TA yet,
+        # so fund.data.current.{tna,ta} would be zero. Use the previous (T-1) snapshot
+        # the bulk loader populated with the prior-day custodian numbers, falling back
+        # to current only if T-1 is missing (e.g., a Monday after a holiday).
+        data = getattr(fund, "data", None)
+        previous_snapshot = getattr(data, "previous", None)
+        current_snapshot = getattr(data, "current", None)
 
-        def _from_snapshot(attr: str) -> float:
+        def _from_snapshot(snapshot: Any, attr: str) -> float:
             try:
                 return float(getattr(snapshot, attr, 0.0) or 0.0)
             except (TypeError, ValueError):
                 return 0.0
 
-        total_net_assets = _from_snapshot("tna")
-        total_assets = _from_snapshot("ta")
+        total_net_assets = (
+                _from_snapshot(previous_snapshot, "tna")
+                or _from_snapshot(current_snapshot, "tna")
+        )
+        total_assets = (
+                _from_snapshot(previous_snapshot, "ta")
+                or _from_snapshot(current_snapshot, "ta")
+        )
 
         asset_trade_summary: Dict[str, Dict[str, float]] = {}
 

@@ -22,7 +22,7 @@ from config.fund_definitions import (
 )
 
 
-DEFAULT_OUTPUT_DIR = "./outputs"
+DEFAULT_OUTPUT_DIR = r"G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\2026"
 
 
 # ============================================================================
@@ -169,6 +169,7 @@ def build_run(
     end_date: Optional[str] = None,
     output_tag: Optional[str] = None,
     compliance_tests: Optional[List[str]] = None,
+    send_email: bool = True,
 ) -> Dict[str, Any] | List[Dict[str, Any]]:
     """Build one config (str) or a list of configs (list of str)."""
     # If a list of modes is passed, return one config per mode.
@@ -182,6 +183,7 @@ def build_run(
                 end_date=end_date,
                 output_tag=f"{output_tag}_{m}" if output_tag else m,
                 compliance_tests=compliance_tests,
+                send_email=send_email,
             )
             for m in mode
         ]
@@ -207,6 +209,8 @@ def build_run(
 
     if compliance_tests is not None:
         cfg["compliance_tests"] = compliance_tests
+
+    cfg["send_email"] = send_email
 
     return cfg
 

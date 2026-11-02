@@ -85,7 +85,7 @@ class NAVReconciliator:
         Returns:
             Structured NAVReconciliationResults object
         """
-        self.logger.info("Starting NAV reconciliation for %s", self.fund.name)
+        # self.logger.info("Starting NAV reconciliation for %s", self.fund.name)
 
         # Check if this is an option settlement/assignment day
         is_assignment_day = self.fund.is_option_settlement_date(self.analysis_date)
