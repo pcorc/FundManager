@@ -1088,7 +1088,8 @@ class ComplianceChecker:
         # Every group is judged at industry level only.
         fund_over_industries = set(exceeding_fund_gics.get("GICS_INDUSTRY_NAME", {}).keys())
         index_over_industries = set(exceeding_index_gics.get("GICS_INDUSTRY_NAME", {}).keys())
-        industry_within_limit = len(fund_over_industries) == 0
+        # Reported only: no compliance group is judged on industry groups.
+        fund_over_industry_groups = exceeding_fund_gics.get("GICS_INDUSTRY_GROUP_NAME", {})
         industry_mismatches = fund_over_industries - index_over_industries
         if compliance_group == "dogg":
             # DOGG: no industry may exceed 25%
@@ -1121,7 +1122,8 @@ class ComplianceChecker:
             "rule": rule,
             "fund": fund.name,
             "overall_gics_compliance": overall_status,
-            "industry_exceeds_25": industry_within_limit,
+            "industry_exceeds_25": bool(fund_over_industries),
+            "industry_group_exceeds_25": bool(fund_over_industry_groups),
             "exceeding_fund_gics": exceeding_fund_gics,
             "exceeding_index_gics": exceeding_index_gics,
             "fund_exposures": gics_summary_fund,

@@ -387,5 +387,33 @@ class RuleSheetsFollowCheckerTests(unittest.TestCase):
             self.assertEqual([prospectus.fund_filter(f) for f in ("P30128", "TR2B1", "HE3B1")],
                              [False, False, True])
 
+
+class GicsIndustryGroupTests(unittest.TestCase):
+    """D12: the checker reports whether any industry group exceeds 25% (reported, not judged)."""
+
+    def _gics(self, groups, industries):
+        equity = _equity(eqyticker=[f"T{i}" for i in range(len(groups))], equity_market_value=[25.0] * len(groups),
+                         nav_shares=[1.0] * len(groups), EQY_SH_OUT_million=[1_000.0] * len(groups))
+        equity["GICS_INDUSTRY_GROUP_NAME"] = groups
+        equity["GICS_INDUSTRY_NAME"] = industries
+        fund = _fund("RDVI", equity=equity, ta=100.0, tna=100.0)
+        return ComplianceChecker({fund.name: fund}).gics_compliance(fund)
+
+    def test_group_over_25_with_industries_within(self):
+        from reporting.compliance_reporting import _gics_flags
+        result = self._gics(["G1", "G1", "G2", "G3"], ["I1", "I2", "I3", "I4"])  # G1 = 50%, industries 25%
+        self.assertIs(result.details["industry_exceeds_25"], False)
+        self.assertIs(result.details["industry_group_exceeds_25"], True)
+        self.assertTrue(result.is_compliant)  # groups are not judged
+        self.assertEqual(_gics_flags("RDVI", result.details)[:2], (False, True))
+
+    def test_industry_over_25(self):
+        from reporting.compliance_reporting import _gics_flags
+        result = self._gics(["G1", "G2", "G3", "G4"], ["I1", "I1", "I3", "I4"])
+        self.assertIs(result.details["industry_exceeds_25"], True)
+        self.assertIs(result.details["industry_group_exceeds_25"], False)
+        self.assertEqual(_gics_flags("RDVI", result.details)[:2], (True, False))
+        self.assertEqual(_gics_flags("RDVI", {})[:2], (False, False))  # error results carry no flags
+
 if __name__ == "__main__":
     unittest.main()

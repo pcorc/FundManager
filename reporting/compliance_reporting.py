@@ -83,8 +83,8 @@ def _gics_flags(fund_key: str, gics: Mapping[str, Any]) -> tuple:
     """(industry, group, index industry, index group) flags, can-exceed and exceptions text."""
     exceeding_index = gics.get("exceeding_index_gics", {}) or {}
     return (
-        not bool(gics.get("industry_exceeds_25", True)),
-        not bool(gics.get("industry_group_exceeds_25", True)),
+        bool(gics.get("industry_exceeds_25")),
+        bool(gics.get("industry_group_exceeds_25")),
         len(exceeding_index.get("GICS_INDUSTRY_NAME") or {}) > 0,
         len(exceeding_index.get("GICS_INDUSTRY_GROUP_NAME") or {}) > 0,
         "Yes" if fund_key in _GICS_CAN_EXCEED else "No",
