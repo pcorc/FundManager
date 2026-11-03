@@ -781,7 +781,7 @@ _PDF_SECTIONS = (
             ("Condition 2a 50%", "status", "detail", "condition_IRS_2_a_50"),
             ("Condition 2a 5%", "status", "detail", "condition_IRS_2_a_5"),
             ("Condition 2a 10%", "status", "detail", "condition_IRS_2_a_10_status"),
-            ("Condition 2b", "status", "detail", "condition_IRS_2_b"),
+            ("Condition 2b", "status", "detail_or_na", "condition_IRS_2_b"),  # the checker has no 2b test
             ("Sum Large Securities %", "pct", "calc", "sum_large_securities_weights"),
             ("Large Securities Count", "int", "calc", "large_securities_count"),
         ),
@@ -946,6 +946,11 @@ class ComplianceReportPDF(BaseReportPDF):
             value = self._first_not_none(*(self._get_calculation(payload, key) for key in field))
         elif source == "detail":
             value = self._get_detail(payload, field)
+        elif source == "detail_or_na":
+            # A condition the checker does not evaluate reads N/A, as in the workbook, instead of blank.
+            value = self._get_detail(payload, field)
+            if value is None and payload:
+                value = "N/A (not evaluated)"
         elif source == "first_detail":
             value = self._first_not_none(*(self._get_detail(payload, key) for key in field))
         elif source == "registrations_match":
