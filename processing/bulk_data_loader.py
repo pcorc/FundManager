@@ -106,6 +106,12 @@ class BulkDataLoader:
         dates = [d for d in (target_date, previous_date) if d is not None]
 
         self._load_metadata(store, funds)
+        # Merge first: the index load (and everything downstream) reads fund.index_ticker_join / fund.vehicle.
+        for name, fund in self.fund_registry.items():
+            metadata = store.fund_metadata.get(name)
+            if metadata:
+                fund.config.update({k: v for k, v in metadata.items() if v is not None})
+                fund.expense_ratio = float(fund.config.get("expense_ratio") or 0.0)
 
         for spec in VIEWS:
             spec_dates = [target_date] if spec.target_only else dates
@@ -117,12 +123,6 @@ class BulkDataLoader:
         )
         self._load_index_data(store, target_date, previous_date)
         self._split_equity_trades(store)
-
-        for name, fund in self.fund_registry.items():
-            metadata = store.fund_metadata.get(name)
-            if metadata:
-                fund.config.update({k: v for k, v in metadata.items() if v is not None})
-                fund.expense_ratio = float(fund.config.get("expense_ratio") or 0.0)
 
         self.logger.info("Bulk loaded data for %d funds", len(store.loaded_funds))
         return store
@@ -269,9 +269,16 @@ class BulkDataLoader:
             current = code_df[code_df["date"] == cur_date].copy() if cur_date else pd.DataFrame()
             previous = code_df[code_df["date"] == prev_date].copy() if prev_date else pd.DataFrame()
             for fund in funds:
-                self._stash(store, fund.name, "index", current.copy())
+                # The view repeats the constituents once per fund_ticker on the index; keep this fund's copy.
+                self._stash(store, fund.name, "index", self._own_rows(current, fund.name))
                 if previous_date is not None:
-                    self._stash(store, fund.name, "index_t1", previous.copy())
+                    self._stash(store, fund.name, "index_t1", self._own_rows(previous, fund.name))
+
+    @staticmethod
+    def _own_rows(df: pd.DataFrame, fund_name: str) -> pd.DataFrame:
+        if df.empty or "fund_ticker" not in df.columns:
+            return df.copy()
+        return df[df["fund_ticker"] == fund_name].copy()
 
     @staticmethod
     def _bday_shift(anchor: Optional[date], offset: int) -> Optional[date]:

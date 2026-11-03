@@ -4,9 +4,11 @@ Only policy flags with no equivalent column in the reconciliation.* views live
 here; expense ratio, benchmark, vehicle, custodian etc. come from v_fund_metadata.
 """
 from __future__ import annotations
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import pandas as pd
 from sqlalchemy import text
+
+from config.constants import VEHICLE_CLOSED_END, VEHICLE_ETF, VEHICLE_PRIVATE, VEHICLE_VIT
 
 
 _ABSENT = object()  # leave the key out of the fund's definition entirely
@@ -83,6 +85,27 @@ _STRATEGY_TO_COHORT = {
     "PF":  PRIVATE_FUNDS,
     "VIT": VIT_AND_MUTUAL_FUNDS,
 }
+
+# v_fund_metadata.eod_report_strategy -> vehicle wrapper (the old vehicle_wrapper field).
+STRATEGY_VEHICLES = {
+    "TIF": VEHICLE_ETF,
+    "CEF": VEHICLE_CLOSED_END,
+    "PF":  VEHICLE_PRIVATE,
+    "VIT": VEHICLE_VIT,
+}
+
+
+def vehicle_for_strategy(strategy: Any) -> Optional[str]:
+    """Vehicle wrapper for an eod_report_strategy value (None when unknown)."""
+    return STRATEGY_VEHICLES.get(strategy) if isinstance(strategy, str) else None
+
+
+def vehicle_wrapper(fund_name: str) -> str:
+    """Lower-case vehicle wrapper of a fund from its loaded cohort ('' before the cohort load or when unknown)."""
+    for strategy, cohort in _STRATEGY_TO_COHORT.items():
+        if fund_name in cohort:
+            return STRATEGY_VEHICLES[strategy]
+    return ""
 
 
 def load_cohorts_from_db(session) -> None:

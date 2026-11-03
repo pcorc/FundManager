@@ -1,7 +1,7 @@
 """Generate Excel and PDF summaries for compliance results."""
 
 from __future__ import annotations
-from functools import lru_cache, partial
+from functools import partial
 
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, Iterable, Mapping, NamedTuple, Optional
 
 import pandas as pd
 
-from config.fund_definitions import FUND_DEFINITIONS
+from config.fund_definitions import vehicle_wrapper as _vehicle_wrapper
 from reporting.base_report_pdf import BaseReportPDF, draw_header_row
 from reporting.footnotes import FOOTNOTES
 from reporting.report_utils import (
@@ -24,10 +24,6 @@ from utilities.logger import setup_logger
 from utilities.numbers import float_or, num, resolve_number, to_float
 
 logger = setup_logger("compliance_report", "logs/compliance.log")
-@lru_cache(maxsize=None)
-def _vehicle_wrapper(fund_name: str) -> str:
-    """Return the lowercase vehicle_wrapper for a fund. Cached for the process."""
-    return str(FUND_DEFINITIONS.get(fund_name, {}).get("vehicle_wrapper", "") or "").lower()
 
 
 def _is_vit_fund(fund_name: str) -> bool:

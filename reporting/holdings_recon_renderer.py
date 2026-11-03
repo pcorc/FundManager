@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Sequence
+from config.fund_definitions import vehicle_wrapper
 from reporting.base_report_pdf import draw_header_row
-from reporting.reconciliation_reporting import top_option_prices, vehicle_wrapper
+from reporting.reconciliation_reporting import top_option_prices
 from reporting.report_utils import non_empty
 
 import numpy as np
