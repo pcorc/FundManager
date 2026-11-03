@@ -135,13 +135,7 @@ class FundManager:
     # Operations
     # ------------------------------------------------------------------
     def _run_compliance(self, fund: Fund, tests: List[str]) -> Dict[str, Any]:
-        checker = ComplianceChecker(
-            getattr(self.data_store, "session", None),
-            funds={fund.name: fund},
-            date=getattr(self.data_store, "date", None),
-            base_cls=getattr(self.data_store, "base_cls", None),
-            analysis_type=self.analysis_type,
-        )
+        checker = ComplianceChecker(funds={fund.name: fund}, analysis_type=self.analysis_type)
         checker_results = checker.run_compliance_tests(test_functions=tests or None)
         fund_results = dict(checker_results.get(fund.name, {}))
         fund_results["fund_object"] = fund

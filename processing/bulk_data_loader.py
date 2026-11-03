@@ -25,7 +25,6 @@ from pandas.tseries.offsets import BDay
 from sqlalchemy import bindparam, text
 
 from processing.fund import Fund
-from utilities.ticker_utils import normalize_all_holdings
 
 
 VIEW_SCHEMA = "reconciliation"
@@ -47,7 +46,6 @@ class BulkDataStore:
     fund_metadata: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     gics_mapping: pd.DataFrame = field(default_factory=pd.DataFrame)
     loaded_funds: Set[str] = field(default_factory=set)
-    loaded_data_types: Set[str] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -56,7 +54,6 @@ class ViewSpec:
     view: str
     key: str
     key_t1: Optional[str] = None
-    extra_where: Optional[str] = None
     target_only: bool = False  # ignore previous_date (e.g. distributions)
     analysis_type_filter: bool = False  # apply analysis_type filter (vest views)
 
@@ -68,8 +65,6 @@ VIEWS: Tuple[ViewSpec, ...] = (
     ViewSpec("v_custodian_treasury",          "custodian_treasury", "custodian_treasury_t1"),
     ViewSpec("v_custodian_nav",               "nav",                "nav_t1"),
     ViewSpec("v_custodian_cash",              "cash",               "cash_t1"),
-    ViewSpec("v_recon_bbg_equity",            "bbg_unresolved",     "bbg_unresolved_t1",
-             extra_where="resolution_status = 'Unresolved'"),
 
     # Vest (OMS) holdings
     ViewSpec("v_vest_equity",                 "vest_equity",        "vest_equity_t1", analysis_type_filter=True),
@@ -78,19 +73,13 @@ VIEWS: Tuple[ViewSpec, ...] = (
 
     # Lifecycle events
     ViewSpec("v_fund_distributions",          "distributions",      None, target_only=True),
-    ViewSpec("v_option_custodian_assignment", "assignments",        "assignments_t1"),
     ViewSpec("v_overlap",                     "overlap",            "overlap_t1"),
 
     # Trades
     ViewSpec("v_emsx_trades",                 "trades",             "trades_t1"),
-    ViewSpec("v_block_options",               "block_options",      "block_options_t1"),
 
     # ETF-specific
-    ViewSpec("v_etf_basket",                  "basket",             "basket_t1"),
     ViewSpec("v_etf_flows",                   "flows",              "flows_t1"),
-
-    # SG cross-check
-    ViewSpec("v_sg_custodian_holdings",       "sg_holdings",        "sg_holdings_t1"),
 )
 
 
@@ -127,19 +116,13 @@ class BulkDataLoader:
             f"SELECT * FROM {VIEW_SCHEMA}.v_gics_mapping"
         )
         self._load_index_data(store, target_date, previous_date)
-        self._split_trades_into_asset_classes(store, previous_date)
+        self._split_equity_trades(store)
 
         for name, fund in self.fund_registry.items():
             metadata = store.fund_metadata.get(name)
             if metadata:
                 fund.config.update({k: v for k, v in metadata.items() if v is not None})
                 fund.expense_ratio = float(fund.config.get("expense_ratio") or 0.0)
-            store.fund_data[name] = normalize_all_holdings(
-                name,
-                store.fund_data.get(name, {}),
-                fund_definition=fund.config,
-                logger=self.logger,
-            )
 
         self.logger.info("Bulk loaded data for %d funds", len(store.loaded_funds))
         return store
@@ -169,8 +152,6 @@ class BulkDataLoader:
             return pd.DataFrame()
         where = "`date` IN :dates AND fund_ticker IN :funds"
         params: Dict[str, Any] = {"dates": dates, "funds": funds}
-        if spec.extra_where:
-            where += f" AND {spec.extra_where}"
         if spec.analysis_type_filter and analysis_type:
             where += " AND LOWER(TRIM(analysis_type)) = :analysis_type"
             params["analysis_type"] = analysis_type.lower()
@@ -226,41 +207,18 @@ class BulkDataLoader:
     def _stash(store: BulkDataStore, fund_name: str, key: str, df: pd.DataFrame) -> None:
         store.fund_data.setdefault(fund_name, {})[key] = df
         store.loaded_funds.add(fund_name)
-        store.loaded_data_types.add(key)
 
     # ------------------------------------------------------------------
-    # Trades: split combined v_emsx_trades into equity/option/treasury slices
-    # so existing services don't need to change their access keys.
+    # Trades: the T equity slice of v_emsx_trades is the only one services read.
     # ------------------------------------------------------------------
-    def _split_trades_into_asset_classes(
-        self, store: BulkDataStore, previous_date: Optional[date]
-    ) -> None:
-        slices = (
-            ("trades",    "equity_trades",   "option_trades",   "treasury_trades"),
-            ("trades_t1", "equity_trades_t1","option_trades_t1","treasury_trades_t1"),
-        )
-        for source_key, eq_key, opt_key, tsy_key in slices:
-            if source_key == "trades_t1" and previous_date is None:
+    def _split_equity_trades(self, store: BulkDataStore) -> None:
+        for fund in self.fund_registry.values():
+            trades = store.fund_data.get(fund.name, {}).get("trades")
+            if trades is None or trades.empty:
+                self._stash(store, fund.name, "equity_trades", pd.DataFrame())
                 continue
-            for fund in self.fund_registry.values():
-                trades = store.fund_data.get(fund.name, {}).get(source_key)
-                if trades is None or trades.empty:
-                    self._stash(store, fund.name, eq_key, pd.DataFrame())
-                    self._stash(store, fund.name, opt_key, pd.DataFrame())
-                    self._stash(store, fund.name, tsy_key, pd.DataFrame())
-                    continue
-                cls = trades["asset_class"].fillna("")
-                self._stash(store, fund.name, eq_key,  trades[cls == "Equity"].copy())
-                self._stash(store, fund.name, opt_key, self._with_optticker(trades[cls == "Option"]))
-                self._stash(store, fund.name, tsy_key, trades[cls.str.contains("Treasury", case=False, na=False)].copy())
-
-    @staticmethod
-    def _with_optticker(options: pd.DataFrame) -> pd.DataFrame:
-        if options.empty:
-            return options
-        out = options.copy()
-        out.rename(columns={"ticker": "optticker"}, inplace=True)
-        return out
+            cls = trades["asset_class"].fillna("")
+            self._stash(store, fund.name, "equity_trades", trades[cls == "Equity"].copy())
 
     # ------------------------------------------------------------------
     # Index data — kept separate because of per-source T vs T+1 routing

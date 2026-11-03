@@ -90,10 +90,7 @@ class ComplianceChecker:
     """Runs compliance checks against :class:`Fund` domain objects."""
     def __init__(
         self,
-        session,
         funds: Optional[Dict[str, Fund]] = None,
-        date=None,
-        base_cls=None,
         *,
         analysis_type: Optional[str] = None,
     ) -> None:
