@@ -350,6 +350,14 @@ def _12d2_row(report_date, fund_name, payload, calc, r):
     }
 
 
+# The checker's 12d3 limits; the Excel columns and the PDF rows share these labels.
+_12D3_RULE_LABELS = (
+    f"Rule 1 (<={RULE_12D3_EQUITY_LIMIT:.0%} equities)",
+    f"Rule 2 (<={RULE_12D3_DEBT_LIMIT:.0%} debt)",
+    f"Rule 3 (<={RULE_12D3_ASSET_LIMIT:.0%} total assets)",
+)
+
+
 def _12d3_row(report_date, fund_name, payload, calc, r):
     sec_related_str = _join(
         calc.get("sec_related_businesses", []) or [],
@@ -367,11 +375,9 @@ def _12d3_row(report_date, fund_name, payload, calc, r):
         [
             ("Date", report_date),
             ("Fund", fund_name),
-            (f"Rule 1 (<={RULE_12D3_EQUITY_LIMIT:.0%} equities)",
-             rule_1_na or _pf(payload.get("rule_1_pass"))),
-            (f"Rule 2 (<={RULE_12D3_DEBT_LIMIT:.0%} debt)", _pf(payload.get("rule_2_pass"))),
-            (f"Rule 3 (<={RULE_12D3_ASSET_LIMIT:.0%} total assets)",
-             f'=IF(K{r}<={RULE_12D3_ASSET_LIMIT:g},"PASS","FAIL")'),
+            (_12D3_RULE_LABELS[0], rule_1_na or _pf(payload.get("rule_1_pass"))),
+            (_12D3_RULE_LABELS[1], _pf(payload.get("rule_2_pass"))),
+            (_12D3_RULE_LABELS[2], f'=IF(K{r}<={RULE_12D3_ASSET_LIMIT:g},"PASS","FAIL")'),
             ("12d3 Sec Biz Compliant", _pf(payload.get("twelve_d3_sec_biz_compliant")) if rule_1_na
              else f'=IF(AND(C{r}="PASS",D{r}="PASS",E{r}="PASS"),"PASS","FAIL")'),
             ("SEC-Related Businesses (Shs Out %)", sec_related_str),
@@ -832,9 +838,9 @@ _PDF_SECTIONS = (
         "Rule 12d3", "twelve_d3_sec_biz", "12d3", (),
         (
             ("Overall Status", "status", "top", "is_compliant"),
-            ("Rule 1 (<=5%)", "status", "first_detail", ("rule_1_status", "rule_1_pass")),
-            ("Rule 2 (<=10%)", "status", "detail", "rule_2_pass"),
-            ("Rule 3 (<=5%)", "status", "detail", "rule_3_pass"),
+            (_12D3_RULE_LABELS[0], "status", "first_detail", ("rule_1_status", "rule_1_pass")),
+            (_12D3_RULE_LABELS[1], "status", "detail", "rule_2_pass"),
+            (_12D3_RULE_LABELS[2], "status", "detail", "rule_3_pass"),
         ),
     ),
 )
