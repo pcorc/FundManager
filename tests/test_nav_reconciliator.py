@@ -1,4 +1,4 @@
-"""NAVReconciliator summary arithmetic on hand-built snapshots (no DB).
+"""NAV reconciliation on hand-built snapshots (no DB): summary arithmetic and the NAV workbook.
 
     python -m unittest discover tests -v
 """
@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -13,9 +14,11 @@ os.environ.setdefault("DB_CONNECTION_STRING", "sqlite:///:memory:")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pandas as pd  # noqa: E402
+from openpyxl import Workbook, load_workbook  # noqa: E402
 
 from processing.fund import FundData, FundSnapshot, build_fund_registry  # noqa: E402
-from services.nav_recon_dataclasses import AssetClassGainLoss, NAVComponents  # noqa: E402
+from reporting.nav_recon_reporter import build_nav_reconciliation_reports  # noqa: E402
+from services.nav_recon_dataclasses import AssetClassGainLoss, NAVComponents, NAVReconciliationResults  # noqa: E402
 from services.nav_reconciliator import NAVReconciliator  # noqa: E402
 
 
@@ -59,6 +62,49 @@ class FlowsAdjustmentTests(unittest.TestCase):
         self.assertAlmostEqual(summary.expected_tna, summary.custodian_tna)
         self.assertAlmostEqual(summary.expected_nav, 20.0)
         self.assertTrue(summary.nav_good_4_decimal)
+
+
+def _nav_results():
+    recon = _reconciliator(net_units=0)
+    components = _components(0.0)
+    return {"KNG": NAVReconciliationResults(
+        fund_name="KNG", analysis_date="2026-10-30", prior_date="2026-10-29",
+        components=components, summary=recon._calculate_nav_summary(components),
+    )}
+
+
+def _sheetnames(path):
+    wb = load_workbook(path, read_only=True)  # read-only so close() releases the file on Windows
+    try:
+        return wb.sheetnames
+    finally:
+        wb.close()
+
+
+class NavWorkbookRerunTests(unittest.TestCase):
+    """D19: a NAV-only run never appends to a workbook left in the folder by an earlier run."""
+
+    def _build(self, out):
+        return build_nav_reconciliation_reports(
+            report_date="2026-10-30", output_dir=out, file_name_prefix="reconciliation_summary_nav",
+            create_pdf=False, nav_results=_nav_results(),
+        )
+
+    def test_rerun_into_same_folder_writes_fresh_sheet_names(self):
+        with tempfile.TemporaryDirectory() as out:
+            first = self._build(out)
+            second = self._build(out)
+            self.assertEqual(first.nav.excel_path, second.nav.excel_path)
+            self.assertEqual(_sheetnames(second.nav.excel_path), ["NAV Summary", "KNG"])
+
+    def test_stale_workbook_from_an_earlier_run_is_replaced(self):
+        with tempfile.TemporaryDirectory() as out:
+            stale = Workbook()
+            stale.active.title = "Equity Holdings"
+            stale.create_sheet("KNG")
+            stale.save(Path(out) / "reconciliation_summary_nav_2026-10-30.xlsx")
+            result = self._build(out)
+            self.assertEqual(_sheetnames(result.nav.excel_path), ["NAV Summary", "KNG"])
 
 
 if __name__ == "__main__":
