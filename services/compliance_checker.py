@@ -35,6 +35,8 @@ from config.constants import (
 from processing.fund import Fund
 
 GICS_CONCENTRATION_THRESHOLD = 0.25
+# Ownership-test status when no holding breaches the limit but some held issuers lack shares outstanding.
+MISSING_SHARES_OUT_STATUS = "N/A (no shares outstanding data)"
 GICS_CLASS_COLUMNS: Tuple[str, ...] = (
     "GICS_SECTOR_NAME",
     "GICS_INDUSTRY_GROUP_NAME",
@@ -74,6 +76,12 @@ def _options_per_underlying(opt_df: pd.DataFrame) -> pd.DataFrame:
         {column: "first" for column in opt_df.columns if column not in numeric_columns + ["equity_underlying_ticker"]}
     )
     return opt_df.groupby("equity_underlying_ticker", as_index=False, sort=False, dropna=False).agg(aggregation)
+
+
+def _ownership_status(exceeds: pd.Series, missing: pd.Series) -> str:
+    if exceeds.any():
+        return "FAIL"
+    return MISSING_SHARES_OUT_STATUS if missing.any() else "PASS"
 
 
 def _ownership_pct(numerator: pd.Series, shares_out: pd.Series) -> pd.Series:
@@ -473,12 +481,15 @@ class ComplianceChecker:
         bottom_50_df["exceeds_5_percent"] = bottom_50_df["tna_wgt"] > IRS_BOTTOM_50_LIMIT
         condition_IRS_2_a_5_original = not bool(bottom_50_df["exceeds_5_percent"].any())
 
+        # Missing/zero shares outstanding is NaN: those issuers are flagged and left out of the 10% test.
         if "EQY_SH_OUT_million" not in bottom_50_df.columns:
-            bottom_50_df["EQY_SH_OUT_million"] = 1.0
-        denom = bottom_50_df["EQY_SH_OUT_million"].replace(0, 1)
+            bottom_50_df["EQY_SH_OUT_million"] = np.nan
+        shares_out = pd.to_numeric(bottom_50_df["EQY_SH_OUT_million"], errors="coerce").replace(0, np.nan)
         share_series = self._held_shares(bottom_50_df)
-        bottom_50_df["exceeds_10_percent"] = (share_series / denom) > IRS_OWNERSHIP_LIMIT
+        bottom_50_df["missing_shares_out"] = shares_out.isna() & share_series.ne(0)
+        bottom_50_df["exceeds_10_percent"] = (share_series / shares_out) > IRS_OWNERSHIP_LIMIT
         condition_IRS_2_a_10 = not bool(bottom_50_df["exceeds_10_percent"].any())
+        missing_shares_out = bottom_50_df.loc[bottom_50_df["missing_shares_out"], "eqyticker"].tolist()
 
         details = {
             "rule": "IRS Diversification",
@@ -487,6 +498,9 @@ class ComplianceChecker:
             "condition_IRS_2_a_5": condition_IRS_2_a_5_new,
             "condition_IRS_2_a_5_original": condition_IRS_2_a_5_original,
             "condition_IRS_2_a_10": condition_IRS_2_a_10,
+            "condition_IRS_2_a_10_status": _ownership_status(
+                bottom_50_df["exceeds_10_percent"], bottom_50_df["missing_shares_out"]
+            ),
         }
         calculations = {
             "total_assets": total_assets,
@@ -506,6 +520,8 @@ class ComplianceChecker:
             "expenses": expenses,
             "bottom_50_exceeds_5_percent": int(bottom_50_df["exceeds_5_percent"].sum()),
             "bottom_50_exceeds_10_percent": int(bottom_50_df["exceeds_10_percent"].sum()),
+            "missing_shares_out": len(missing_shares_out),
+            "missing_shares_out_tickers": missing_shares_out,
             "large_securities": large_securities.to_dict("records"),
             "overlap": overlap_details_df.to_dict("records"),
             "overlap_weight_sum": float(overlap_details_df["overlap_weight"].sum()),
@@ -579,10 +595,11 @@ class ComplianceChecker:
         occ_weight_mkt_val = abs(float(vest_opt_holdings["option_market_value"].sum()))
         condition_2a_occ_met = occ_weight_mkt_val <= 0.05 * total_net_assets if total_net_assets else False
 
+        # Missing/zero shares outstanding is NaN: those issuers are flagged and left out of the 2b test.
         if "EQY_SH_OUT_million" not in remaining_securities.columns:
-            remaining_securities["EQY_SH_OUT_million"] = 1.0
+            remaining_securities["EQY_SH_OUT_million"] = np.nan
         remaining_securities["EQY_SH_OUT_million"] = (
-            pd.to_numeric(remaining_securities["EQY_SH_OUT_million"], errors="coerce").replace(0, 1)
+            pd.to_numeric(remaining_securities["EQY_SH_OUT_million"], errors="coerce").replace(0, np.nan)
         )
 
         share_col = self._share_col
@@ -597,11 +614,14 @@ class ComplianceChecker:
                 if ticker in remaining_securities["eqyticker"].values:
                     remaining_securities.loc[remaining_securities["eqyticker"] == ticker, "EQY_SH_OUT_million"] = value
 
+        held = remaining_securities[share_col]
+        missing_2b = remaining_securities["EQY_SH_OUT_million"].isna() & held.ne(0)
         remaining_securities["vest_ownership_of_float"] = (
-                remaining_securities[share_col] / remaining_securities["EQY_SH_OUT_million"]
-        ).fillna(0.0)
-        issuer_compliance_2b = remaining_securities["vest_ownership_of_float"] <= ACT_40_OWNERSHIP_LIMIT
+                held / remaining_securities["EQY_SH_OUT_million"]
+        ).mask(held.eq(0), 0.0)  # NaN only where shares are held but shares outstanding is missing
+        issuer_compliance_2b = (remaining_securities["vest_ownership_of_float"] <= ACT_40_OWNERSHIP_LIMIT) | missing_2b
         condition_2b_met = bool(issuer_compliance_2b.all())
+        missing_shares_out = remaining_securities.loc[missing_2b, "eqyticker"].tolist()
 
         cumulative_weight_excluded = (
             excluded_bucket_total / total_net_assets
@@ -645,6 +665,8 @@ class ComplianceChecker:
             "remaining_stocks_details": remaining_stocks_details,
             "share_column_used": share_col,
             "max_ownership_float": float(remaining_securities["vest_ownership_of_float"].max()),
+            "missing_shares_out": len(missing_shares_out),
+            "missing_shares_out_tickers": missing_shares_out,
             "condition_2a_occ_met": condition_2a_occ_met,
             "occ_market_value": occ_weight_mkt_val,
             "occ_weight": occ_weight_mkt_val / total_assets if total_assets else 0.0,
@@ -654,6 +676,7 @@ class ComplianceChecker:
             "condition_40act_1": condition_1_met,
             "condition_40act_2a": condition_2a_met,
             "condition_40act_2b": condition_2b_met,
+            "condition_40act_2b_status": _ownership_status(~issuer_compliance_2b, missing_2b),
             "condition_40act_2a_occ": condition_2a_occ_met,
             "diversified_since_inception_40act": condition_1_met and condition_2a_met and condition_2b_met,
             "diversification_failure_duration_40act": 0 if actual_diversified else 1,

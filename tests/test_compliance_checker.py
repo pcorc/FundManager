@@ -128,5 +128,57 @@ class RealOwnershipTests(unittest.TestCase):
         self.assertTrue(result.is_compliant and result.details["real_estate_check_compliant"])
 
 
+class MissingSharesOutstandingTests(unittest.TestCase):
+    """D7: missing shares outstanding is flagged as N/A, never divided by 1."""
+
+    def setUp(self):
+        # A is 60% of TNA (top 50%); B (no shares outstanding) and C are the bottom 50% / 75% bucket.
+        self.equity = _equity(eqyticker=["A", "B", "C"], equity_market_value=[600.0, 250.0, 40.0],
+                              nav_shares=[1.0, 500.0, 1.0], EQY_SH_OUT_million=[1_000.0, 0.0, 1_000.0])
+
+    def test_irs_10pct_missing_is_na_not_fail(self):
+        fund = _fund("RDVI", equity=self.equity)
+        result = ComplianceChecker({fund.name: fund}).diversification_IRS_check(fund)
+        self.assertTrue(result.details["condition_IRS_2_a_10"])
+        self.assertEqual(result.details["condition_IRS_2_a_10_status"], "N/A (no shares outstanding data)")
+        self.assertEqual(result.calculations["missing_shares_out"], 1)
+        self.assertEqual(result.calculations["missing_shares_out_tickers"], ["B"])
+
+    def test_irs_10pct_real_breach_still_fails(self):
+        self.equity.loc[2, "nav_shares"] = 200.0  # 20% of C
+        fund = _fund("RDVI", equity=self.equity)
+        result = ComplianceChecker({fund.name: fund}).diversification_IRS_check(fund)
+        self.assertFalse(result.details["condition_IRS_2_a_10"])
+        self.assertEqual(result.details["condition_IRS_2_a_10_status"], "FAIL")
+
+    def test_40act_2b_missing_is_na_and_excluded(self):
+        fund = _fund("RDVI", equity=self.equity, ta=10_000.0, tna=10_000.0)  # every issuer < 5%
+        result = ComplianceChecker({fund.name: fund}).diversification_40act_check(fund)
+        self.assertTrue(result.details["condition_40act_2b"])
+        self.assertEqual(result.details["condition_40act_2b_status"], "N/A (no shares outstanding data)")
+        self.assertEqual(result.calculations["missing_shares_out_tickers"], ["B"])
+        self.assertAlmostEqual(result.calculations["max_ownership_float"], 0.001)  # not 500 / 1
+        ownership = {e["eqyticker"]: e["vest_ownership_of_float"] for e in result.calculations["remaining_stocks_details"]}
+        self.assertTrue(pd.isna(ownership["B"]))
+
+        from reporting.compliance_reporting import _forty_act_row
+        payload = {**result.details, "calculations": result.calculations}
+        row = _forty_act_row("2026-10-30", fund.name, payload, result.calculations, 2)
+        self.assertEqual(row["Condition 40 Act 2b"], "N/A (no shares outstanding data)")
+        remaining = next(v for k, v in row.items() if k.startswith("Remaining Securities"))
+        self.assertIn("(B, 500, 2.50%, N/A (no shares out))", remaining)
+
+    def test_40act_2b_all_known_keeps_formula(self):
+        self.equity.loc[1, "EQY_SH_OUT_million"] = 1_000_000.0
+        fund = _fund("RDVI", equity=self.equity, ta=10_000.0, tna=10_000.0)
+        result = ComplianceChecker({fund.name: fund}).diversification_40act_check(fund)
+        self.assertEqual(result.details["condition_40act_2b_status"], "PASS")
+        self.assertEqual(result.calculations["missing_shares_out"], 0)
+
+        from reporting.compliance_reporting import _forty_act_row
+        row = _forty_act_row("2026-10-30", fund.name, dict(result.details), result.calculations, 2)
+        self.assertTrue(str(row["Condition 40 Act 2b"]).startswith("=IF("))
+
+
 if __name__ == "__main__":
     unittest.main()

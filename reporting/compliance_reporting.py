@@ -77,6 +77,17 @@ def _pf(value: object) -> str:
     return "PASS" if value else "FAIL"
 
 
+def _ownership_text(value: Any, spec: str) -> str:
+    # The checker leaves ownership NaN where shares are held but shares outstanding is missing.
+    if value is not None and pd.isna(value):
+        return "N/A (no shares out)"
+    return format(float(value or 0.0), spec)
+
+
+def _na_status(value: Any) -> Optional[str]:
+    return value if isinstance(value, str) and value.startswith("N/A") else None
+
+
 def _join(items: Any, fmt: Callable[[Any], str]) -> str:
     return ", ".join(fmt(item) for item in items) if items else "None"
 
@@ -134,7 +145,7 @@ def _forty_act_row(report_date, fund_name, payload, calc, r):
         calc.get("remaining_stocks_details", []) or [],
         lambda e: (
             f"({e.get('eqyticker')}, {_extract_share_value(e):,.0f}, "
-            f"{num(e, 'vest_weight'):.2%}, {num(e, 'vest_ownership_of_float'):.7%})"
+            f"{num(e, 'vest_weight'):.2%}, {_ownership_text(e.get('vest_ownership_of_float'), '.7%')})"
         ),
     )
 
@@ -158,7 +169,8 @@ def _forty_act_row(report_date, fund_name, payload, calc, r):
             ("Registration Match", f'=IF(C{r}=D{r},"PASS","FAIL")'),
             ("Condition 40 Act 1", f'=IF(L{r}>=0.75,"PASS","FAIL")'),
             ("Condition 40 Act 2a", f'=IF(O{r}=0,"PASS","FAIL")'),
-            ("Condition 40 Act 2b", f'=IF(VALUE(U{r})="","",IF(VALUE(U{r})<=0.1,"PASS","FAIL"))'),
+            ("Condition 40 Act 2b", _na_status(payload.get("condition_40act_2b_status"))
+             or f'=IF(VALUE(U{r})="","",IF(VALUE(U{r})<=0.1,"PASS","FAIL"))'),
             ("Condition 2a OCC", f'=IF(V{r}=0,"PASS",IF(V{r}<=0.05*M{r},"PASS","FAIL"))'),
             ("Total Assets", num(calc, "total_assets")),
             ("Non-Qualifying Assets Weight", num(calc, "non_qualifying_assets_1_wgt")),
@@ -206,7 +218,8 @@ def _irs_row(report_date, fund_name, payload, calc, r):
             ("condition_IRS_1", _pf(payload.get("condition_IRS_1"))),
             ("condition_IRS_2_a_50", f'=IF((I{r}+S{r})/H{r}>=0.5,"PASS","FAIL")'),
             ("condition_IRS_2_a_5", f'=IF(L{r}<=0.5,"PASS","FAIL")'),
-            ("condition_IRS_2_a_10", _pf(payload.get("condition_IRS_2_a_10"))),
+            ("condition_IRS_2_a_10", _na_status(payload.get("condition_IRS_2_a_10_status"))
+             or _pf(payload.get("condition_IRS_2_a_10"))),
             ("condition_IRS_2_b", _pf(payload.get("condition_IRS_2_b", True))),
             ("total_assets", num(calc, "total_assets")),
             ("qualifying_assets_value", num(calc, "qualifying_assets_value")),
@@ -693,7 +706,7 @@ _PDF_SECTIONS = (
             ("Registration Match", "status", "registrations_match", None),
             ("Condition 1", "status", "detail", "condition_40act_1"),
             ("Condition 2a", "status", "detail", "condition_40act_2a"),
-            ("Condition 2b", "status", "detail", "condition_40act_2b"),
+            ("Condition 2b", "status", "detail", "condition_40act_2b_status"),
             ("Condition 2a OCC", "status", "detail", "condition_40act_2a_occ"),
             ("Max Ownership %", "pct", "calc", "max_ownership_float"),
         ),
@@ -705,7 +718,7 @@ _PDF_SECTIONS = (
             ("Condition 1", "status", "detail", "condition_IRS_1"),
             ("Condition 2a 50%", "status", "detail", "condition_IRS_2_a_50"),
             ("Condition 2a 5%", "status", "detail", "condition_IRS_2_a_5"),
-            ("Condition 2a 10%", "status", "detail", "condition_IRS_2_a_10"),
+            ("Condition 2a 10%", "status", "detail", "condition_IRS_2_a_10_status"),
             ("Condition 2b", "status", "detail", "condition_IRS_2_b"),
             ("Sum Large Securities %", "pct", "calc", "sum_large_securities_weights"),
             ("Large Securities Count", "int", "calc", "large_securities_count"),
@@ -1034,6 +1047,8 @@ class ComplianceReportPDF(BaseReportPDF):
             upper = value.strip().upper()
             if upper in {"PASS", "FAIL"}:
                 return upper
+            if upper.startswith("N/A"):  # e.g. no shares outstanding data for an ownership test
+                return "N/A"
         # Unknown / missing test result: surface it rather than silently passing.
         return ""
 
