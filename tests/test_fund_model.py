@@ -138,6 +138,15 @@ class SnapshotBuildTests(unittest.TestCase):
         self.assertEqual(list(fund.data.previous.overlap["security_ticker"]), ["MSFT"])
 
 
+class FundOrderTests(unittest.TestCase):
+    def test_available_funds_follow_registry_order_not_set_order(self):
+        registry = {n: f for n, f in build_fund_registry().items() if n in ("DOGG", "KNG", "RDVI", "TDVI")}
+        store = BulkDataStore(date=str(DAY), loaded_funds={"TDVI", "KNG", "DOGG", "RDVI", "ZZZ", "AAA"})
+        manager = FundManager(registry, store)
+        # registry order first; loaded funds missing from the registry last (sorted) so they still error out
+        self.assertEqual(manager.available_funds, ["DOGG", "KNG", "RDVI", "TDVI", "AAA", "ZZZ"])
+
+
 class IndexFlexOverlapTests(unittest.TestCase):
     def test_overlap_spreads_long_flex_value_over_constituents(self):
         from processing.fund import FundData, FundHoldings, FundSnapshot
