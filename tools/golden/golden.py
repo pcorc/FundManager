@@ -5,7 +5,8 @@
 
 capture runs each scenario twice: once against the live DB (recording) and once
 replaying the recording (the baseline), then diffs the two as a harness
-self-test. check never touches the DB's business views.
+self-test. check never touches the DB's business views. Set GOLDEN_WORK to
+share one recording/baseline between git worktrees.
 
 Scenario runs use GOLDEN_PYTHON (default: the project's Python 3.11) with
 PYTHONHASHSEED=0. The differ needs openpyxl + pypdf in the interpreter that
@@ -25,7 +26,8 @@ sys.path.insert(0, str(HERE.parents[1]))
 from tools.golden.differ import diff_roots  # noqa: E402
 from tools.golden.scenarios import EQUIVALENT_REQUESTS, SCENARIOS  # noqa: E402
 
-WORK = HERE / "_work"
+WORK = Path(os.getenv("GOLDEN_WORK", HERE / "_work"))  # recorded data + baseline (shareable across worktrees)
+CURRENT = HERE / "_work" / "current"  # this checkout's outputs
 PYTHON = os.getenv(
     "GOLDEN_PYTHON", r"C:\Users\PatrickCorcoran\AppData\Local\Programs\Python\Python311\python.exe"
 )
@@ -65,8 +67,8 @@ def main(argv) -> int:
             _run(name, "replay", WORK / "baseline" / name)
             ok &= _report(f"{name} (replay fidelity)", diff_roots(WORK / "record" / name, WORK / "baseline" / name))
         else:
-            _run(name, "replay", WORK / "current" / name)
-            ok &= _report(name, diff_roots(WORK / "baseline" / _base(name), WORK / "current" / name))
+            _run(name, "replay", CURRENT / name)
+            ok &= _report(name, diff_roots(WORK / "baseline" / _base(name), CURRENT / name))
     return 0 if ok else 1
 
 
