@@ -179,6 +179,25 @@ class MissingSharesOutstandingTests(unittest.TestCase):
         row = _forty_act_row("2026-10-30", fund.name, dict(result.details), result.calculations, 2)
         self.assertTrue(str(row["Condition 40 Act 2b"]).startswith("=IF("))
 
+    def test_shares_outstanding_overrides_apply_to_irs_and_40act(self):
+        # TDVI-like: TU, RCI and LOGI have no EQY_SH_OUT_million but a known override; GIB has neither.
+        equity = _equity(eqyticker=["A", "TU", "RCI", "LOGI", "GIB"],
+                         equity_market_value=[600.0, 150.0, 100.0, 80.0, 70.0],
+                         nav_shares=[1.0, 1_374_157.0, 217_999.0, 23_158.0, 11_646.0],
+                         EQY_SH_OUT_million=[1_000.0, None, None, None, None])
+        fund = _fund("TDVI", equity=equity, ta=10_000.0, tna=1_000.0)
+        checker = ComplianceChecker({fund.name: fund})
+        irs = checker.diversification_IRS_check(fund)
+        forty = checker.diversification_40act_check(fund)
+        self.assertEqual(irs.calculations["missing_shares_out_tickers"], ["GIB"])
+        self.assertEqual(forty.calculations["missing_shares_out_tickers"], ["GIB"])
+        self.assertEqual(irs.details["condition_IRS_2_a_10_status"], "N/A (no shares outstanding data)")
+
+        fund.data.current.vest.equity.loc[4, "EQY_SH_OUT_million"] = 100_000_000.0
+        irs = ComplianceChecker({fund.name: fund}).diversification_IRS_check(fund)
+        self.assertEqual(irs.details["condition_IRS_2_a_10_status"], "PASS")
+        self.assertEqual(irs.calculations["missing_shares_out"], 0)
+
 
 class FortyActRegistrationTests(unittest.TestCase):
     """D8: only a fund registered diversified that is not operating as diversified fails."""

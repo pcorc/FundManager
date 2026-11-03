@@ -29,6 +29,7 @@ from config.constants import (
     RULE_12D3_ASSET_LIMIT,
     RULE_12D3_DEBT_LIMIT,
     RULE_12D3_EQUITY_LIMIT,
+    SHARES_OUTSTANDING_OVERRIDES,
     VEHICLE_PRIVATE,
     VEHICLE_VIT,
 )
@@ -82,6 +83,18 @@ def _ownership_status(exceeds: pd.Series, missing: pd.Series) -> str:
     if exceeds.any():
         return "FAIL"
     return MISSING_SHARES_OUT_STATUS if missing.any() else "PASS"
+
+
+def _shares_outstanding(df: pd.DataFrame) -> pd.Series:
+    """Issuer shares outstanding per row: EQY_SH_OUT_million (a raw share count, despite the name) with
+    SHARES_OUTSTANDING_OVERRIDES applied by eqyticker. Missing or zero is NaN."""
+    if "EQY_SH_OUT_million" in df.columns:
+        shares_out = pd.to_numeric(df["EQY_SH_OUT_million"], errors="coerce")
+    else:
+        shares_out = pd.Series(np.nan, index=df.index, dtype=float)
+    if "eqyticker" in df.columns:
+        shares_out = df["eqyticker"].map(SHARES_OUTSTANDING_OVERRIDES).astype(float).fillna(shares_out)
+    return shares_out.replace(0, np.nan)
 
 
 def _ownership_pct(numerator: pd.Series, shares_out: pd.Series) -> pd.Series:
@@ -484,7 +497,7 @@ class ComplianceChecker:
         # Missing/zero shares outstanding is NaN: those issuers are flagged and left out of the 10% test.
         if "EQY_SH_OUT_million" not in bottom_50_df.columns:
             bottom_50_df["EQY_SH_OUT_million"] = np.nan
-        shares_out = pd.to_numeric(bottom_50_df["EQY_SH_OUT_million"], errors="coerce").replace(0, np.nan)
+        shares_out = _shares_outstanding(bottom_50_df)
         share_series = self._held_shares(bottom_50_df)
         bottom_50_df["missing_shares_out"] = shares_out.isna() & share_series.ne(0)
         bottom_50_df["exceeds_10_percent"] = (share_series / shares_out) > IRS_OWNERSHIP_LIMIT
@@ -596,23 +609,13 @@ class ComplianceChecker:
         condition_2a_occ_met = occ_weight_mkt_val <= 0.05 * total_net_assets if total_net_assets else False
 
         # Missing/zero shares outstanding is NaN: those issuers are flagged and left out of the 2b test.
-        if "EQY_SH_OUT_million" not in remaining_securities.columns:
-            remaining_securities["EQY_SH_OUT_million"] = np.nan
-        remaining_securities["EQY_SH_OUT_million"] = (
-            pd.to_numeric(remaining_securities["EQY_SH_OUT_million"], errors="coerce").replace(0, np.nan)
-        )
+        remaining_securities["EQY_SH_OUT_million"] = _shares_outstanding(remaining_securities)
 
         share_col = self._share_col
         if share_col not in remaining_securities.columns:
             remaining_securities[share_col] = 0.0
         else:
             remaining_securities[share_col] = pd.to_numeric(remaining_securities[share_col], errors="coerce").fillna(0.0)
-
-        if not remaining_securities.empty:
-            ticker_overrides = {"LOGI": 160784460, "RCI": 429073267, "TU": 1550930636}
-            for ticker, value in ticker_overrides.items():
-                if ticker in remaining_securities["eqyticker"].values:
-                    remaining_securities.loc[remaining_securities["eqyticker"] == ticker, "EQY_SH_OUT_million"] = value
 
         held = remaining_securities[share_col]
         missing_2b = remaining_securities["EQY_SH_OUT_million"].isna() & held.ne(0)
