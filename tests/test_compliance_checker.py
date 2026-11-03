@@ -449,5 +449,37 @@ class SkippedRuleTests(unittest.TestCase):
                                            "condition_IRS_1"), "N/A")
         self.assertEqual(pdf._metric_value(fund_data, "real_estate_check", "status", "top", "is_compliant"), "PASS")
 
+
+class IrcPdfSectionTests(unittest.TestCase):
+    """D11: the IRC PDF section renders for a run with a VIT fund, from the checker's keys."""
+
+    def setUp(self):
+        equity = _equity(eqyticker=["AAA", "BBB", "CCC", "DDD"], equity_market_value=[30.0, 25.0, 25.0, 20.0],
+                         nav_shares=[1.0] * 4, EQY_SH_OUT_million=[1_000.0] * 4)
+        fund = _fund("KNG", equity=equity, ta=200.0, tna=200.0)
+        from reporting.report_utils import normalize_compliance_results
+        result = ComplianceChecker({fund.name: fund}).diversification_IRC_check(fund)
+        self.results = {"2026-10-30": normalize_compliance_results({fund.name: {"diversification_IRC_check": result}})}
+
+    def _sections(self, vehicle):
+        from unittest import mock
+        from reporting.compliance_reporting import ComplianceReportPDF
+        rendered = {}
+
+        def render(pdf, title, test_key, metrics, footnote, skip):
+            rendered[title] = [pdf._metric_value(pdf.grouped_results["KNG"], test_key, fmt, source, field)
+                               for _, fmt, source, field in metrics]
+        with mock.patch.object(ComplianceReportPDF, "save_pdf"),                 mock.patch.object(ComplianceReportPDF, "_render_metric_section", render),                 mock.patch("reporting.compliance_reporting._vehicle_wrapper", return_value=vehicle):
+            ComplianceReportPDF(self.results, "unused.pdf", allowed_tests=["diversification_IRC_check"])
+        return rendered
+
+    def test_vit_run_renders_irc_metrics(self):
+        rendered = self._sections("vit")
+        self.assertEqual(rendered["IRC Diversification"],
+                         ["PASS", "PASS", "PASS", "PASS", "PASS", "15.00000%", "50.00000%"])
+
+    def test_non_vit_run_has_no_irc_section(self):
+        self.assertNotIn("IRC Diversification", self._sections("etf"))
+
 if __name__ == "__main__":
     unittest.main()

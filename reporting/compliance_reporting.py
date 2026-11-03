@@ -737,11 +737,6 @@ class ComplianceReport:
 # PDF metric tables: (title, test_key, footnote_key, labels exempt from FAIL
 # highlighting, metrics). Each metric is (label, formatter, source, field).
 # ----------------------------------------------------------------------
-_IRC_LABELS = (
-    "Overall Status", "Condition 55", "Condition 70", "Condition 80", "Condition 90",
-    "Top 1 Exposure", "Top 4 Exposure",
-)
-
 _PDF_SECTIONS = (
     (
         "Summary Metrics", "summary_metrics", None, (),
@@ -785,10 +780,14 @@ _PDF_SECTIONS = (
             ("Large Securities Count", "int", "calc", "large_securities_count"),
         ),
     ),
-    # Never rendered today (see _is_test_selected); its metric helpers were never implemented.
     (
         "IRC Diversification", "diversification_IRC_check", "irc", (),
-        tuple((label, None, "unimplemented", None) for label in _IRC_LABELS),
+        (
+            ("Overall Status", "status", "top", "is_compliant"),
+            *((f"Condition {n}", "status", "detail", f"condition_IRC_{n}") for n in (55, 70, 80, 90)),
+            ("Top 1 Exposure", "pct", "calc", "top_1"),
+            ("Top 4 Exposure", "pct", "calc", "top_4"),
+        ),
     ),
     (
         "15% Illiquid Assets", "max_15pct_illiquid_sai", "illiquid", (),
@@ -1031,14 +1030,9 @@ class ComplianceReportPDF(BaseReportPDF):
         return summary_result.get(key, 0.0)
 
     def _is_test_selected(self, test_name: str) -> bool:
-        # Known quirk: self.results is keyed by (fund, date), so this iterates test
-        # names rather than funds and the IRC section never renders.
+        # The IRC section only appears when the run has a VIT fund (self.results is keyed by (fund, date)).
         if test_name == "diversification_IRC_check":
-            has_vit_wrapper = any(
-                _vehicle_wrapper(fund_name) == "vit"
-                for funds in self.results.values()
-                for fund_name in funds.keys()
-            )
+            has_vit_wrapper = any(_vehicle_wrapper(fund_name) == "vit" for fund_name, _ in self.results)
             if not has_vit_wrapper:
                 return False
         if not self.allowed_tests:
