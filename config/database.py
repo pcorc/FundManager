@@ -1,18 +1,19 @@
 # config/database.py
-from sqlalchemy import create_engine, MetaData, Table, Column, String
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.automap import automap_base
+"""Database access. The connection string comes from the environment
+(``DB_CONNECTION_STRING``), optionally via a gitignored ``.env`` file in the
+repo root; see ``.env.example``. Nothing connects at import time: the engine
+and reflected metadata are built on the first ``initialize_database()`` call.
+"""
 import os
+from functools import lru_cache
+from pathlib import Path
 
-DB_CONNECTION_STRING = os.getenv("DB_CONNECTION_STRING", "mysql+pymysql://trevorlack:muo1kw1eke77xijp@db-mysql-nyc1-91761-do-user-8924672-0.b.db.ondigitalocean.com:25060/first_trust_usa")
+from dotenv import load_dotenv
+from sqlalchemy import Column, MetaData, String, Table, create_engine
+from sqlalchemy.ext.automap import automap_base
+from sqlalchemy.orm import sessionmaker
 
-
-# Create the SQLAlchemy engine
-engine = create_engine(DB_CONNECTION_STRING, echo=False)
-
-# Reflect metadata
-metadata = MetaData()
-Base = automap_base(metadata=metadata)
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 # Table schemas to reflect
 schemas = {
@@ -41,32 +42,34 @@ schema_views = {
     ]
 }
 
-# Reflect tables
+
 def reflect_tables(engine, metadata, schemas):
     for schema, tables in schemas.items():
         metadata.reflect(engine, schema=schema, only=tables)
 
-# Reflect views with manual PKs
+
 def reflect_views(engine, metadata, schema_views):
     for schema, views in schema_views.items():
         for view in views:
-            view_name = view["name"]
-            pk_defs = [
-                Column(pk["name"], pk["type"], primary_key=True)
-                for pk in view.get("primary_keys", [])
-            ]
-            Table(view_name, metadata, *pk_defs, autoload_with=engine, schema=schema)
+            pk_defs = [Column(pk["name"], pk["type"], primary_key=True) for pk in view.get("primary_keys", [])]
+            Table(view["name"], metadata, *pk_defs, autoload_with=engine, schema=schema)
 
-# Run reflections
-reflect_tables(engine, metadata, schemas)
-reflect_views(engine, metadata, schema_views)
 
-# Prepare automap base
-Base.prepare()
+@lru_cache(maxsize=None)
+def _session_factory():
+    url = os.getenv("DB_CONNECTION_STRING")
+    if not url:
+        raise RuntimeError("DB_CONNECTION_STRING is not set; copy .env.example to .env and fill it in")
+    engine = create_engine(url, echo=False)
+    metadata = MetaData()
+    base = automap_base(metadata=metadata)
+    reflect_tables(engine, metadata, schemas)
+    reflect_views(engine, metadata, schema_views)
+    base.prepare()
+    return sessionmaker(bind=engine), base
 
-# Session maker
-Session = sessionmaker(bind=engine)
 
 def initialize_database():
-    """Initialize and return a new SQLAlchemy session and Base."""
-    return Session(), Base
+    """Return a new SQLAlchemy session and the automap Base."""
+    session_cls, base = _session_factory()
+    return session_cls(), base

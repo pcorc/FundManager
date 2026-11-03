@@ -9,12 +9,15 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Any, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
 
+from dotenv import load_dotenv
+
 from config.operation_config import OperationConfig, OperationMode
 
 logger = logging.getLogger(__name__)
 
 
 # SMTP config — env-driven so credentials never live in the repo.
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 SMTP_HOST = os.environ.get("FUNDMANAGER_SMTP_HOST", "smtp.office365.com")
 SMTP_PORT = int(os.environ.get("FUNDMANAGER_SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("FUNDMANAGER_SMTP_USER", "")
