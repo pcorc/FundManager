@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional, Sequence
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 import pandas as pd
 
@@ -14,6 +14,42 @@ from services.reconciliator import Reconciliator
 
 from processing.fund import Fund, FundData, FundSnapshot, FundHoldings, FundRegistry
 from processing.bulk_data_loader import BulkDataStore
+from utilities.workdays import business_day_offset
+
+_progress_logger = logging.getLogger("fund_manager.progress")
+
+
+@dataclass(frozen=True)
+class ProgressEvent:
+    """One progress step. ``stage``: day, db, load, process, fund, operation, reports, email or done."""
+
+    stage: str
+    day: Optional[str] = None
+    fund: Optional[str] = None
+    index: Optional[int] = None
+    total: Optional[int] = None
+    message: str = ""
+
+
+ProgressCallback = Callable[[ProgressEvent], None]
+
+
+def emit_progress(on_progress: Optional[ProgressCallback], stage: str, **fields: Any) -> None:
+    """Send one event; a failing callback is logged at debug level and never breaks the run."""
+    if on_progress is None:
+        return
+    event = ProgressEvent(stage, **fields)
+    try:
+        on_progress(event)
+    except Exception:
+        _progress_logger.debug("Progress callback failed for %s", event, exc_info=True)
+
+
+def progress_for_day(on_progress: Optional[ProgressCallback], day: str) -> Optional[ProgressCallback]:
+    """Wrap ``on_progress`` so events that carry no day are stamped with ``day``."""
+    if on_progress is None:
+        return None
+    return lambda event: on_progress(event if event.day else replace(event, day=day))
 
 
 @dataclass
@@ -73,8 +109,10 @@ _NAV_FIELDS = {
 class FundManager:
     """Runs the daily operations across every fund in a registry."""
 
-    def __init__(self, fund_registry: FundRegistry, data_store: BulkDataStore, analysis_type: str = "eod"):
+    def __init__(self, fund_registry: FundRegistry, data_store: BulkDataStore, analysis_type: str = "eod",
+                 *, on_progress: Optional[ProgressCallback] = None):
         self.fund_registry = fund_registry
+        self.on_progress = on_progress
         self.data_store = data_store
         self.analysis_type = analysis_type
         self.logger = logging.getLogger(__name__)
@@ -96,8 +134,11 @@ class FundManager:
             "Starting %s processing for %d funds", self.analysis_type, len(self.available_funds)
         )
 
-        for fund_name in self.available_funds:
+        total = len(self.available_funds)
+        for index, fund_name in enumerate(self.available_funds, 1):
             self.logger.info("[%s] Processing %s...", self.analysis_type, fund_name)
+            progress = dict(fund=fund_name, index=index, total=total)
+            emit_progress(self.on_progress, "fund", message=self.analysis_type, **progress)
             fund_result = FundResult(fund_name=fund_name)
 
             try:
@@ -111,10 +152,13 @@ class FundManager:
                 fund_result.fund = fund
 
                 if "compliance" in operations:
+                    emit_progress(self.on_progress, "operation", message="compliance", **progress)
                     fund_result.compliance_results = self._run_compliance(fund, tests)
                 if "reconciliation" in operations:
+                    emit_progress(self.on_progress, "operation", message="reconciliation", **progress)
                     fund_result.reconciliation_results = self._run_reconciliation(fund)
                 if "nav_reconciliation" in operations:
+                    emit_progress(self.on_progress, "operation", message="nav_reconciliation", **progress)
                     fund_result.nav_results = self._run_nav_reconciliation(fund)
 
                 summary["processed_funds"] += 1
@@ -231,7 +275,4 @@ class FundManager:
             current = current_date
         else:
             current = pd.Timestamp(current_date).date()
-        prior = current - timedelta(days=1)
-        while prior.weekday() >= 5:
-            prior -= timedelta(days=1)
-        return prior
+        return business_day_offset(current, -1)

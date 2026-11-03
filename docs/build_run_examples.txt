@@ -186,3 +186,31 @@ send_email
 
 compliance_tests
     Optional override of the test list; defaults to FULL_COMPLIANCE_TESTS.
+    Each entry must be a key of services.compliance_checker.RULE_KEYS
+    (see processing.api.rule_catalog() for labels) or "all".
+
+
+================================================================================
+Running, validation and progress
+================================================================================
+
+    from processing.api import bundle, run, validate
+
+    request = validate(cfg)        # ValueError listing the valid choices
+    result = run(request, on_progress=lambda event: print(event.stage, event.fund))
+    bundle(result, "reports.zip")  # each existing report once
+
+run() validates every request itself, so unknown operations, rules,
+cohorts or tickers, end_date < start_date, trading mixed with EOD
+operations or stacked, and a selection that resolves to no funds are
+rejected before anything touches the database. result.files lists the
+reports actually written (ReportFile(day, label, path, kind)); result.errors
+collects failures that are otherwise only logged.
+
+A UI runs each request in its own process:
+
+    python -m processing.worker request.json --result result.json
+
+request.json is processing.api.request_to_json(request). Progress events
+arrive on stdout as JSON lines; result.json holds exit_code, summaries,
+paths, files and errors.

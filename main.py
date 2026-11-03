@@ -16,6 +16,7 @@ import sys
 from config.fund_definitions import ETF_FUNDS
 from config.run_configurations import COHORTS, MODES
 from processing.api import build_run, execute_run, load_cohorts
+from services.compliance_checker import RULE_KEYS
 
 
 def _parse_cli(argv):
@@ -25,7 +26,8 @@ def _parse_cli(argv):
     parser.add_argument("--fund", action="append", default=[])
     parser.add_argument("--start", required=True, help="YYYY-MM-DD (as-of date, or range start)")
     parser.add_argument("--end", help="YYYY-MM-DD range end (default: --start)")
-    parser.add_argument("--test", action="append", help="compliance rule to run (repeatable; default: all)")
+    parser.add_argument("--test", action="append", choices=[*RULE_KEYS, "all"],
+                        help="compliance rule to run (repeatable; default: all)")
     parser.add_argument("--tag", help="output tag added to report file names")
     parser.add_argument("--no-email", action="store_true")
     args = parser.parse_args(argv)

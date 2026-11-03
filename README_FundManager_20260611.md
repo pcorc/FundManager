@@ -84,9 +84,12 @@ notifications.email_manager.EmailManager (Outlook draft / SMTP send)
   (compliance / reconciliation / nav_reconciliation) per fund and packs the
   outputs into `ProcessingResults`.
 - **`processing/api.py`** — `RunRequest` / `RunResult`, `build_run(...)`
-  presets, `run(...)`, and `catalog()` (cohorts, funds, operations and
-  compliance rules a UI can offer). **This is the single entry point** for
-  kicking off any run (script, scheduler, or UI).
+  presets, `validate(...)`, `run(...)`, `bundle(...)`, and `catalog()` /
+  `rule_catalog()` (cohorts, funds, operations and compliance rules a UI can
+  offer). **This is the single entry point** for kicking off any run
+  (script, scheduler, or UI).
+- **`processing/worker.py`** — runs one JSON request in its own process and
+  streams progress as JSON lines (what a UI launches).
 - **`config/run_configurations.py`** — `MODES` presets, `COHORTS`, rule suites.
 - **`processing/run_modes.py`** — orchestration. `run_eod_mode`,
   `run_trading_mode`, `run_eod_range_mode` — each loads data, runs
@@ -185,6 +188,32 @@ build `processing.api.RunRequest(...)` directly — e.g. any subset of
 rule, `cohorts=("ETF_FUNDS",)`, and `date_mode="per_day"` or `"stacked"` over
 `start_date`..`end_date` — and call `run(request)`. See
 `docs/build_run_examples.txt` for a fuller catalogue of invocation patterns.
+
+### Validation, progress and report files
+
+- `run()` first calls `validate(request)`, which raises `ValueError` listing
+  the valid choices for an unknown operation, `date_mode`, compliance rule
+  (`services.compliance_checker.RULE_KEYS`; `"all"` means every rule),
+  cohort or fund ticker; for `end_date < start_date`; for trading mixed with
+  EOD operations or run stacked; and for a fund selection that resolves to
+  nothing. An `exclude` with no cohorts/funds is applied to all funds.
+  `python main.py --test` accepts only rule keys (or `all`).
+- `run(request, on_progress=callback)` calls `callback(ProgressEvent(stage,
+  day, fund, index, total, message))` per day, per phase (`db`, `load`,
+  `process`, `reports`, `email`, `done`), per fund (`index`/`total`) and per
+  operation. A failing callback is logged at debug level and never breaks
+  the run.
+- `RunResult.files` lists each written report as `ReportFile(day, label,
+  path, kind)` (only files that exist; `paths` keeps the raw labels), and
+  `RunResult.errors` collects the failures that are otherwise only logged.
+  `bundle(result, "reports.zip")` zips each distinct file once.
+- `python -m processing.worker request.json [--result result.json]` runs one
+  request (`request_to_json` / `request_from_json` format) in a fresh
+  process, prints each `ProgressEvent` as a JSON line on stdout (logs go to
+  stderr) and writes the exit code, summaries, paths, files and errors to
+  `result.json` (default `<request>.result.json`). Exit code 2 means the
+  request was invalid.
+- Tests: `python -m unittest discover tests -v` (no DB access).
 
 ---
 
