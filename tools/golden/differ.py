@@ -26,16 +26,26 @@ def _norm_text(text: str, root: Path) -> str:
     return _TIMESTAMP.sub("<TS>", text)
 
 
+def _color(c):
+    return None if c is None else (c.type, c.rgb if c.type == "rgb" else c.value, c.tint)
+
+
+_STYLE_PARTS = {
+    "font": lambda f: (f.name, f.sz, f.b, f.i, f.u, _color(f.color)),
+    "fill": lambda fl: (fl.fill_type, _color(getattr(fl, "fgColor", None)), _color(getattr(fl, "bgColor", None))),
+    "border": lambda b: tuple((s.style, _color(s.color)) for s in (b.left, b.right, b.top, b.bottom)),
+    "alignment": lambda a: (a.horizontal, a.vertical, a.wrap_text, a.indent),
+}
+
+
 def _style(cell) -> tuple:
-    f, fl, b, a = cell.font, cell.fill, cell.border, cell.alignment
-    color = lambda c: None if c is None else (c.type, c.rgb if c.type == "rgb" else c.value, c.tint)
-    return (
-        cell.number_format,
-        (f.name, f.sz, f.b, f.i, f.u, color(f.color)),
-        (fl.fill_type, color(getattr(fl, "fgColor", None)), color(getattr(fl, "bgColor", None))),
-        tuple((s.style, color(s.color)) for s in (b.left, b.right, b.top, b.bottom)),
-        (a.horizontal, a.vertical, a.wrap_text, a.indent),
-    )
+    parts = [cell.number_format]
+    for name, describe in _STYLE_PARTS.items():
+        try:
+            parts.append(describe(getattr(cell, name)))
+        except IndexError:  # dangling style index (sheets copied between workbooks): compare the raw ids
+            parts.append(f"<dangling {name} {cell._style!r}>")
+    return tuple(parts)
 
 
 def diff_xlsx(a: Path, b: Path) -> List[str]:
