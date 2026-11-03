@@ -62,6 +62,7 @@ class ValidateTests(CohortPatch):
             req(operations=api.OPERATIONS[:3], funds=("kng", "RDVI,TDVI"), compliance_tests=("all",)),
             req(compliance_tests=("diversification_IRS_check, prospectus_80pct_policy",)),
             req(compliance_tests=("summary_metrics",)),
+            req(compliance_tests=("summary", "summary_metrics", "gics_compliance")),
             req(compliance_tests=()),
             req(operations=("trading_compliance",), end_date=date(2026, 11, 3)),
             req(date_mode="stacked", end_date=date(2026, 11, 3), cohorts=("ETF_FUNDS",), exclude=("KNG",)),
@@ -84,7 +85,6 @@ class ValidateTests(CohortPatch):
 
     def test_rules(self):
         self.assertInvalid(req(compliance_tests=("gics_compliance, bogus_rule",)), "'bogus_rule'", "twelve_d3_sec_biz")
-        self.assertInvalid(req(compliance_tests=("summary",)), "'summary'")
         self.assertInvalid(req(compliance_tests=("GICS_COMPLIANCE",)), "'GICS_COMPLIANCE'")
         self.assertInvalid(req(compliance_tests="gics_compliance"), "compliance_tests must be a list")
 
@@ -92,15 +92,29 @@ class ValidateTests(CohortPatch):
         self.assertInvalid(req(cohorts=("ETFS",)), "'ETFS'", "ETF_FUNDS")
         self.assertInvalid(req(funds=("KNG", "XXX")), "'XXX'", "KNG")
         self.assertInvalid(req(exclude=("YYY",)), "'YYY'")
-        self.assertInvalid(req(funds=("KNG",), exclude=("kng",)), "Fund selection is empty")
+        self.assertInvalid(req(funds=("KNG",), exclude=("KNG",)), "Fund selection is empty")
         self.assertInvalid(req(exclude=tuple(fund_definitions.FUND_DEFINITIONS)), "Fund selection is empty")
+
+    def test_inexact_tickers_with_cohorts_or_exclude(self):
+        for request in (req(cohorts=("ETF_FUNDS",), funds=("kng",)), req(cohorts=("ETF_FUNDS",), funds=("KNG,RDVI",)),
+                        req(cohorts=("ETF_FUNDS",), funds=("all",)), req(cohorts=("ETF_FUNDS",), exclude=("kng",)),
+                        req(funds=("KNG", "RDVI"), exclude=("kng",)), req(funds=("ALL",), exclude=("KNG",)),
+                        req(funds=("kng",), exclude=("RDVI",))):
+            with self.assertRaises(api.InvalidRequest) as ctx:
+                api.validate(request)
+            self.assertIn("exact upper-case tickers", str(ctx.exception))
+        api.validate(req(funds=("kng", "RDVI,TDVI", "all")))  # without cohorts/exclude these are split and upper-cased
+
+    def test_errors_are_invalid_request(self):
+        self.assertTrue(issubclass(api.InvalidRequest, ValueError))
+        self.assertRaises(api.InvalidRequest, api.validate, req(operations=("bogus",)))
 
     def test_cohort_selection_resolving_to_empty_raises_in_run(self):
         request = req(cohorts=("ETF_FUNDS",), funds=("FTMIX",))
         api.validate(request)  # cohort members are only known after load_cohorts()
         with mock.patch.object(api, "initialize_database") as db:
-            self.assertRaises(ValueError, api.run, request)
-            self.assertRaises(ValueError, api.run, req(cohorts=("VIT_AND_MUTUAL_FUNDS",)))
+            self.assertRaises(api.InvalidRequest, api.run, request)
+            self.assertRaises(api.InvalidRequest, api.run, req(cohorts=("VIT_AND_MUTUAL_FUNDS",)))
         db.assert_not_called()
 
 
@@ -114,8 +128,10 @@ class SelectionTests(CohortPatch):
         self.assertEqual((direct.cohorts, direct.exclude), ((), ()))
 
     def test_cohort_with_funds_and_exclude(self):
-        resolved = api._resolve_selection(req(cohorts=("ETF_FUNDS",), funds=("tdvi", "KNG"), exclude=("kng",)))
+        resolved = api._resolve_selection(req(cohorts=("ETF_FUNDS",), funds=("TDVI", "KNG"), exclude=("KNG",)))
         self.assertEqual(resolved.funds, ("TDVI",))
+        resolved = api._resolve_selection(req(cohorts=("ETF_FUNDS",), exclude=("KNG",)))
+        self.assertEqual(resolved.funds, ("RDVI", "TDVI"))
 
     def test_exclude_without_selection_applies_to_all_funds(self):
         resolved = api._resolve_selection(req(exclude=("KNG",)))
@@ -133,6 +149,17 @@ class SelectionTests(CohortPatch):
             api.build_run("eod", cohorts=[{"KNG"}], funds=["RDVI"], start_date="2026-10-30")
         with self.assertRaises(ValueError):
             api.build_run("eod", cohorts=[set()], start_date="2026-10-30")
+
+    def test_build_run_cohort_with_inexact_funds_raises(self):
+        for funds in (["kng"], ["KNG,RDVI"], ["all"], ["KNG", "rdvi"]):
+            with self.assertRaises(api.InvalidRequest) as ctx:
+                api.build_run("compliance", cohorts=[api.COHORTS["ETF_FUNDS"]], funds=funds, start_date="2026-10-30")
+            self.assertIn("exact upper-case tickers", str(ctx.exception), funds)
+        preset = api.build_run("compliance", cohorts=[api.COHORTS["ETF_FUNDS"]], funds=["RDVI", "KNG"],
+                               start_date="2026-10-30")
+        self.assertEqual(preset.funds, ("KNG", "RDVI"))
+        self.assertEqual(api.build_run("compliance", funds=["rdvi", "KNG,TDVI"], start_date="2026-10-30").funds,
+                         ("KNG,TDVI", "rdvi"))  # no cohort: kept raw and sorted, as before
 
 
 class BuildRunTests(CohortPatch):
@@ -187,8 +214,8 @@ class TokensAndCatalogTests(CohortPatch):
 
     def test_rule_catalog(self):
         catalog = api.rule_catalog()
-        self.assertEqual([r["key"] for r in catalog], list(RULE_KEYS))
-        self.assertEqual(catalog[0], {"key": "summary_metrics", "label": RULE_LABELS["summary_metrics"]})
+        self.assertEqual([r["key"] for r in catalog], ["summary", *RULE_KEYS])
+        self.assertEqual(catalog[1], {"key": "summary_metrics", "label": RULE_LABELS["summary_metrics"]})
         self.assertTrue(all(r["label"] for r in catalog))
 
     def test_catalog(self):
@@ -203,6 +230,9 @@ class TokensAndCatalogTests(CohortPatch):
         self.assertEqual(main._parse_cli(["compliance", "--fund", "KNG", "--start", "2026-10-30",
                                           "--test", "gics_compliance", "--test", "all"]).compliance_tests,
                          ("gics_compliance", "all"))
+        self.assertEqual(main._parse_cli(["compliance", "--fund", "KNG", "--start", "2026-10-30",
+                                          "--test", "summary", "--test", "summary_metrics"]).compliance_tests,
+                         ("summary", "summary_metrics"))
         with mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit):
             main._parse_cli(["compliance", "--start", "2026-10-30", "--test", "bogus"])
 
@@ -299,6 +329,33 @@ class RunModesProgressTests(unittest.TestCase):
             run_modes.run_eod_mode({}, SimpleNamespace(), params, Path("."), on_progress=self.seen.append)
         self.assertEqual([e.stage for e in self.seen], ["process", "reports"])
 
+    def test_email_failures_are_recorded(self):
+        params = SimpleNamespace(operations=["compliance"], compliance_tests=[], trade_date=DAY, create_pdf=False,
+                                 send_email=True)
+        errors = []
+        failing = mock.Mock(**{"return_value.send.side_effect": RuntimeError("smtp down")})
+        with mock.patch.object(run_modes, "_run_operations", return_value=self.results), \
+                mock.patch.object(run_modes, "_build_eod_artefacts", return_value={}), \
+                mock.patch.object(run_modes, "_build_eod_email_payload"), \
+                mock.patch.object(run_modes, "EmailManager", failing), \
+                self.assertLogs("processing.run_modes", "ERROR"):
+            run_modes.run_eod_mode({}, SimpleNamespace(), params, Path("."), errors=errors)
+            run_modes.run_eod_mode({}, SimpleNamespace(), params, Path("."))  # no list: only logged
+        self.assertEqual(errors, ["EOD email notification failed: smtp down"])
+        fund = SimpleNamespace(compliance_results={"fund_object": object()})
+        results = SimpleNamespace(fund_results={"KNG": fund}, summary={})
+        params = SimpleNamespace(compliance_tests=[], ex_post_date=DAY, create_pdf=False)
+        with mock.patch.object(run_modes, "_run_operations", return_value=results), \
+                mock.patch.object(run_modes, "build_trading_compliance_reports"), \
+                mock.patch.object(run_modes, "build_compliance_reports"), \
+                mock.patch.object(run_modes, "combine_trading_and_compliance_reports"), \
+                mock.patch.object(run_modes, "_build_trading_email_payload"), \
+                mock.patch.object(run_modes, "EmailManager", failing), \
+                self.assertLogs("processing.run_modes", "ERROR"):
+            run_modes.run_trading_mode({}, ex_ante_store=SimpleNamespace(), ex_post_store=SimpleNamespace(),
+                                       params=params, output_dir=Path("."), errors=errors)
+        self.assertEqual(errors[1:], ["Trading-analysis email notification failed: smtp down"])
+
     def test_trading_mode(self):
         fund = SimpleNamespace(compliance_results={"fund_object": object()})
         results = SimpleNamespace(fund_results={"KNG": fund}, summary={})
@@ -353,6 +410,7 @@ class RunTests(CohortPatch):
         self.compliance = self.tmp / "compliance_results_2026-10-30.xlsx"
         self.compliance.write_bytes(b"y")
         self.seen = []
+        self.email_errors = []
         self.registry = {name: SimpleNamespace(name=name) for name in fund_definitions.FUND_DEFINITIONS}
         for patcher in (
             mock.patch.object(api, "initialize_database", side_effect=lambda: (FakeSession(), None)),
@@ -363,8 +421,9 @@ class RunTests(CohortPatch):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def eod_mode(self, registry, data_store, params, output_dir, *, output_tag=None, on_progress=None):
+    def eod_mode(self, registry, data_store, params, output_dir, *, output_tag=None, on_progress=None, errors=None):
         emit_progress(on_progress, "process", message="eod")
+        errors.extend(self.email_errors)
         artefacts = {
             "compliance": SimpleNamespace(excel_path=str(self.compliance), pdf_path=str(self.tmp / "missing.pdf")),
             "reconciliation": SimpleNamespace(holdings=SimpleNamespace(excel_path=str(self.workbook)),
@@ -408,8 +467,10 @@ class RunTests(CohortPatch):
                          [("day", ""), ("db", ""), ("done", "failed")])
 
     def test_trading_day(self):
-        def trading_mode(registry, *, ex_ante_store, ex_post_store, params, output_dir, output_tag, on_progress):
+        def trading_mode(registry, *, ex_ante_store, ex_post_store, params, output_dir, output_tag, on_progress,
+                         errors):
             emit_progress(on_progress, "process", message="ex_ante")
+            errors.append("Trading-analysis email notification failed: smtp down")
             report = SimpleNamespace(excel_path=str(self.compliance), pdf_path=None)
             return (SimpleNamespace(summary={}), SimpleNamespace(summary={}),
                     SimpleNamespace(report=report, ex_post_compliance=None, combined_report=None))
@@ -420,6 +481,15 @@ class RunTests(CohortPatch):
                          [("load", "ex_ante"), ("load", "ex_post"), ("process", "ex_ante")])
         self.assertEqual(set(result.summaries), {"2026-10-30 ex-ante", "2026-10-30 ex-post"})
         self.assertEqual([f.label for f in result.files], ["trading_compliance_excel"])
+        self.assertEqual((result.exit_code, result.errors),
+                         (0, ["2026-10-30: Trading-analysis email notification failed: smtp down"]))
+
+    def test_email_error_is_recorded_without_failing_the_run(self):
+        self.email_errors = ["EOD email notification failed: smtp down"]
+        with mock.patch.object(api, "run_eod_mode", side_effect=self.eod_mode):
+            result = api.run(req(funds=("KNG",), output_dir=str(self.tmp)))
+        self.assertEqual((result.exit_code, result.errors),
+                         (0, ["2026-10-30: EOD email notification failed: smtp down"]))
 
     def test_stacked(self):
         range_results = run_modes.RangeRunResults(
@@ -490,6 +560,12 @@ class JsonAndWorkerTests(unittest.TestCase):
                 api.request_from_json(text)
             self.assertIn(fragment, str(ctx.exception))
         self.assertRaises(ValueError, api.request_from_json, '{"operations": [], "start_date": "10/30/2026"}')
+        for extra in (dict(funds=5), dict(operations=5), dict(compliance_tests=True), dict(funds=[5]),
+                      dict(cohorts=[["ETF_FUNDS"]]), dict(create_pdf="no"), dict(output_dir=3), dict(output_tag=1)):
+            text = json.dumps(dict({"operations": ["compliance"], "start_date": "2026-10-30"}, **extra))
+            with self.assertRaises(ValueError) as ctx:
+                api.request_from_json(text)
+            self.assertIn(f"{next(iter(extra))} must be", str(ctx.exception))
 
     def run_worker(self, request_text, fake_run=None):
         tmp = tempfile.TemporaryDirectory()
@@ -532,6 +608,23 @@ class JsonAndWorkerTests(unittest.TestCase):
         self.assertEqual((code, out), (2, ""))
         self.assertIn("'holdings'", result["errors"][0])
         run.assert_not_called()
+
+    def test_worker_bad_field_type_writes_a_result(self):
+        code, out, _, result, run = self.run_worker('{"operations": ["compliance"], "start_date": "2026-10-30", '
+                                                    '"funds": 5}')
+        self.assertEqual((code, out, result["exit_code"]), (2, "", 2))
+        self.assertIn("funds must be a list", result["errors"][0])
+        run.assert_not_called()
+
+    def test_worker_selection_empty_after_cohort_load(self):
+        def fake_run(request, on_progress):
+            raise api.InvalidRequest("Fund selection is empty (cohorts=['ETF_FUNDS'], funds=['FTMIX'], exclude=[])")
+        request = api.request_to_json(req(cohorts=("ETF_FUNDS",), funds=("FTMIX",)))
+        code, _, err, result, _ = self.run_worker(request, fake_run)
+        self.assertEqual(code, 2)
+        self.assertEqual(result["errors"], ["Invalid request: Fund selection is empty (cohorts=['ETF_FUNDS'], "
+                                            "funds=['FTMIX'], exclude=[])"])
+        self.assertNotIn("Traceback", err)
 
     def test_worker_run_exception(self):
         def fake_run(request, on_progress):

@@ -39,19 +39,29 @@ from processing.run_modes import (
 from services.compliance_checker import RULE_KEYS, RULE_LABELS
 from utilities.workdays import business_date_range, business_day_offset
 
-__all__ = ["DATE_MODES", "OPERATIONS", "ProgressEvent", "ReportFile", "RunRequest", "RunResult", "build_run",
-           "bundle", "catalog", "execute_run", "filter_registry", "load_cohorts", "request_from_json",
-           "request_to_json", "rule_catalog", "run", "select_funds", "validate"]
+__all__ = ["COMPLIANCE_TEST_KEYS", "DATE_MODES", "InvalidRequest", "OPERATIONS", "ProgressEvent", "ReportFile",
+           "RunRequest", "RunResult", "build_run", "bundle", "catalog", "execute_run", "filter_registry",
+           "load_cohorts", "request_from_json", "request_to_json", "rule_catalog", "run", "select_funds",
+           "validate"]
 
 EOD_OPERATIONS = ("compliance", "reconciliation", "nav_reconciliation")
 TRADING_COMPLIANCE = "trading_compliance"
 OPERATIONS = EOD_OPERATIONS + (TRADING_COMPLIANCE,)
 DATE_MODES = ("per_day", "stacked")
+# "summary" is a report-only step (the Summary sheet of a filtered compliance workbook), not a checker rule.
+COMPLIANCE_TEST_KEYS = ("summary",) + RULE_KEYS
+_STEP_LABELS = {"summary": "Summary sheet (report only)"}
 _TUPLE_FIELDS = ("operations", "funds", "cohorts", "exclude", "compliance_tests")
 _DATE_FIELDS = ("start_date", "end_date", "previous_date", "ex_ante_date", "ex_post_date",
                 "custodian_date", "custodian_previous_date")
+_SCALAR_TYPES = {"date_mode": (str,), "generate_daily_reports": (bool,), "create_pdf": (bool,),
+                 "send_email": (bool,), "output_dir": (str,), "output_tag": (str, type(None))}
 _EOD_REPORT_ALIASES = {"compliance": "compliance", "holdings": "reconciliation", "reconciliation": "reconciliation",
                        "nav": "nav_reconciliation", "nav_reconciliation": "nav_reconciliation"}
+
+
+class InvalidRequest(ValueError):
+    """A request ``run`` rejects before doing any work (bad choices, or a selection with no funds)."""
 
 
 @dataclass(frozen=True)
@@ -137,10 +147,12 @@ def build_run(
         raise ValueError("start_date is required")
     preset = MODES[mode]
     trading = preset["analysis_type"] == TRADING_COMPLIANCE
+    if cohorts:
+        _require_exact_tickers("funds", funds or ())
     selected = select_funds(cohorts or (), funds or ())
-    if (cohorts or funds) and not selected:
-        raise ValueError("Fund selection is empty: the cohorts/funds given share no tickers "
-                         "(cohort sets are filled by load_cohorts())")
+    if cohorts and not selected:
+        raise InvalidRequest("Fund selection is empty: the cohorts/funds given share no tickers "
+                             "(cohort sets are filled by load_cohorts())")
     return RunRequest(
         operations=(TRADING_COMPLIANCE,) if trading else _eod_operations(preset["eod_reports"]),
         start_date=date.fromisoformat(str(start_date)),
@@ -170,8 +182,8 @@ def catalog() -> Dict[str, object]:
 
 
 def rule_catalog() -> List[Dict[str, str]]:
-    """Every rule key ``compliance_tests`` accepts, with its display label, in run order."""
-    return [{"key": key, "label": RULE_LABELS[key]} for key in RULE_KEYS]
+    """Every key ``compliance_tests`` accepts, with its display label, in run order."""
+    return [{"key": key, "label": _STEP_LABELS.get(key) or RULE_LABELS[key]} for key in COMPLIANCE_TEST_KEYS]
 
 
 def load_cohorts() -> None:
@@ -188,29 +200,32 @@ def load_cohorts() -> None:
 # ---------------------------------------------------------------------------
 
 def validate(request: RunRequest) -> RunRequest:
-    """Raise ``ValueError`` (listing the valid choices) for anything ``run`` would reject or mis-read."""
+    """Raise ``InvalidRequest`` (listing the valid choices) for anything ``run`` would reject or mis-read."""
     for name in _TUPLE_FIELDS:
         if isinstance(getattr(request, name), str):
-            raise ValueError(f"{name} must be a list or tuple of strings, not a string")
+            raise InvalidRequest(f"{name} must be a list or tuple of strings, not a string")
     _check_choices("operation", request.operations, OPERATIONS)
     if not request.operations:
-        raise ValueError(f"At least one operation must be selected. Valid choices: {', '.join(OPERATIONS)}")
+        raise InvalidRequest(f"At least one operation must be selected. Valid choices: {', '.join(OPERATIONS)}")
     if TRADING_COMPLIANCE in request.operations and len(request.operations) > 1:
-        raise ValueError("trading_compliance cannot be combined with EOD operations in one request")
+        raise InvalidRequest("trading_compliance cannot be combined with EOD operations in one request")
     if request.date_mode not in DATE_MODES:
-        raise ValueError(f"Unknown date_mode {request.date_mode!r}. Valid choices: {', '.join(DATE_MODES)}")
+        raise InvalidRequest(f"Unknown date_mode {request.date_mode!r}. Valid choices: {', '.join(DATE_MODES)}")
     if request.date_mode == "stacked" and TRADING_COMPLIANCE in request.operations:
-        raise ValueError("run_time_series only supports analysis_type='eod'")
+        raise InvalidRequest("run_time_series only supports analysis_type='eod'")
     for name in _DATE_FIELDS:
         value = getattr(request, name)
         if not isinstance(value, date) and (value is not None or name == "start_date"):
-            raise ValueError(f"{name} must be a date, got {value!r}")
+            raise InvalidRequest(f"{name} must be a date, got {value!r}")
     if request.end_date is not None and request.end_date < request.start_date:
-        raise ValueError(f"end_date {request.end_date} is before start_date {request.start_date}")
-    _check_choices("compliance rule", _tokens(request.compliance_tests), RULE_KEYS)
+        raise InvalidRequest(f"end_date {request.end_date} is before start_date {request.start_date}")
+    _check_choices("compliance rule", _tokens(request.compliance_tests), COMPLIANCE_TEST_KEYS)
     _check_choices("cohort", request.cohorts, COHORTS)
     _check_choices("fund", _tokens(request.funds, upper=True) + _tokens(request.exclude, upper=True),
                    fund_definitions.FUND_DEFINITIONS)
+    if request.cohorts or request.exclude:  # these selections match tickers exactly (no upper-casing/splitting)
+        _require_exact_tickers("funds", request.funds)
+        _require_exact_tickers("exclude", request.exclude)
     if not request.cohorts:  # cohort members come from the DB, so run() checks those selections
         _resolve_selection(request)
     return request
@@ -220,12 +235,20 @@ def _check_choices(kind: str, values: Iterable[object], valid: Iterable[str]) ->
     valid = list(valid)
     unknown = [value for value in values if value not in valid]
     if unknown:
-        raise ValueError(f"Unknown {kind}(s): {', '.join(map(repr, unknown))}. Valid choices: {', '.join(valid)}")
+        raise InvalidRequest(f"Unknown {kind}(s): {', '.join(map(repr, unknown))}. "
+                             f"Valid choices: {', '.join(valid)}")
+
+
+def _require_exact_tickers(name: str, values: Iterable[object]) -> None:
+    inexact = [value for value in values if _tokens([value], upper=True) != [value]]
+    if inexact:
+        raise InvalidRequest(f"{name} must hold exact upper-case tickers, one per entry and no 'all', when cohorts "
+                             f"or exclude are given; got {', '.join(map(repr, inexact))}")
 
 
 def _resolve_selection(request: RunRequest) -> RunRequest:
     """Resolve cohorts/exclude into an explicit sorted fund list; raise if nothing is left to run."""
-    funds, exclude = _tokens(request.funds, upper=True), _tokens(request.exclude, upper=True)
+    funds, exclude = request.funds, request.exclude
     if request.cohorts:
         load_cohorts()
         selected = select_funds([COHORTS[name] for name in request.cohorts], funds, exclude)
@@ -234,8 +257,8 @@ def _resolve_selection(request: RunRequest) -> RunRequest:
     else:
         return request
     if not selected:
-        raise ValueError(f"Fund selection is empty (cohorts={list(request.cohorts)}, funds={funds}, "
-                         f"exclude={exclude})")
+        raise InvalidRequest(f"Fund selection is empty (cohorts={list(request.cohorts)}, funds={list(funds)}, "
+                             f"exclude={list(exclude)})")
     return replace(request, cohorts=(), exclude=(), funds=tuple(selected))
 
 
@@ -265,7 +288,14 @@ def request_from_json(text: str) -> RunRequest:
     for name in _TUPLE_FIELDS:
         if name in data:
             value = data[name]
+            if value is not None and not isinstance(value, (str, list)):
+                raise ValueError(f"{name} must be a list of strings, got {value!r}")
             data[name] = (value,) if isinstance(value, str) else tuple(value or ())
+            if not all(isinstance(item, str) for item in data[name]):
+                raise ValueError(f"{name} must be a list of strings, got {value!r}")
+    for name, types in _SCALAR_TYPES.items():
+        if name in data and not isinstance(data[name], types):
+            raise ValueError(f"{name} must be {' or '.join(t.__name__ for t in types)}, got {data[name]!r}")
     for name in _DATE_FIELDS:
         if data.get(name) is not None:
             data[name] = date.fromisoformat(str(data[name]))
@@ -348,6 +378,7 @@ def _run_day(req: RunRequest, trade_date: date, result: RunResult,
     finally:
         session.close()
 
+    email_errors: List[str] = []  # failures run_*_mode only logs
     if trading:
         logger.info(
             "Trading compliance dates — ex-ante: %s, ex-post: %s, vest T-1: %s, custodian: %s/%s",
@@ -356,7 +387,7 @@ def _run_day(req: RunRequest, trade_date: date, result: RunResult,
         )
         results_ex_ante, results_ex_post, artefacts = run_trading_mode(
             registry, ex_ante_store=ex_ante, ex_post_store=ex_post, params=params,
-            output_dir=output_dir, output_tag=req.output_tag, on_progress=on_progress,
+            output_dir=output_dir, output_tag=req.output_tag, on_progress=on_progress, errors=email_errors,
         )
         _log_summary(logger, "ex-ante", results_ex_ante.summary)
         _log_summary(logger, "ex-post", results_ex_post.summary)
@@ -368,11 +399,12 @@ def _run_day(req: RunRequest, trade_date: date, result: RunResult,
                     params.trade_date, params.previous_trade_date)
         processing_results, artefacts = run_eod_mode(
             registry, data_store=store, params=params, output_dir=output_dir, output_tag=req.output_tag,
-            on_progress=on_progress,
+            on_progress=on_progress, errors=email_errors,
         )
         _log_summary(logger, "eod", processing_results.summary)
         result.summaries[day] = processing_results.summary
         _record_paths(result, day, _log_paths(logger, flatten_eod_paths(artefacts)))
+    result.errors.extend(f"{day}: {error}" for error in email_errors)
     logger.info("Run completed successfully")
     return 0
 

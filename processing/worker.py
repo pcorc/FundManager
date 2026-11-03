@@ -6,7 +6,8 @@ Each ``ProgressEvent`` is printed to stdout as one JSON line; anything else the
 run prints goes to stderr with the logs. The result (exit code, summaries,
 paths, files, errors) is written to ``--result``, default
 ``<request stem>.result.json`` next to the request. Exit code: the run's, or
-2 when the request is invalid.
+2 when the request is invalid (including a cohort selection that resolves to no funds,
+which is only known once ``run`` has loaded the cohorts).
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, Optional, Sequence, TextIO
 
-from processing.api import ProgressEvent, RunResult, _logger, request_from_json, run, validate
+from processing.api import InvalidRequest, ProgressEvent, RunResult, _logger, request_from_json, run, validate
 
 
 def result_to_dict(result: RunResult) -> Dict[str, object]:
@@ -58,6 +59,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         else:
             try:
                 result = run(request, on_progress=_printer(events))
+            except InvalidRequest as exc:
+                _logger("fund_manager.worker").error("Invalid request: %s", exc)
+                result.exit_code = 2
+                result.errors.append(f"Invalid request: {exc}")
             except Exception as exc:
                 _logger("fund_manager.worker").exception("Run failed: %s", exc)
                 result.exit_code = 1

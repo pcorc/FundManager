@@ -142,8 +142,9 @@ def run_eod_mode(
     *,
     output_tag: str | None = None,
     on_progress: Optional[ProgressCallback] = None,
+    errors: Optional[List[str]] = None,
 ) -> Tuple[ProcessingResults, Mapping[str, object]]:
-    """Execute the full EOD workflow for the provided data."""
+    """Execute the full EOD workflow for the provided data (a failed email is appended to ``errors``)."""
     emit_progress(on_progress, "process", message="eod")
     results = _run_operations(registry, data_store, params.operations, "eod", params.compliance_tests,
                               on_progress=on_progress)
@@ -168,8 +169,10 @@ def run_eod_mode(
                 _build_eod_email_payload(results, artefacts, params),
                 OperationConfig.create(OperationMode.EOD),
             )
-        except Exception:
+        except Exception as exc:
             logging.getLogger(__name__).exception("EOD email notification failed")
+            if errors is not None:
+                errors.append(f"EOD email notification failed: {exc}")
 
     return results, artefacts
 
@@ -183,8 +186,9 @@ def run_trading_mode(
     output_dir: Path,
     output_tag: str | None = None,
     on_progress: Optional[ProgressCallback] = None,
+    errors: Optional[List[str]] = None,
 ):
-    """Execute the trading compliance comparison."""
+    """Execute the trading compliance comparison (a failed email is appended to ``errors``)."""
     emit_progress(on_progress, "process", message="ex_ante")
     results_ex_ante = _run_operations(registry, ex_ante_store, ["compliance"], "ex_ante", params.compliance_tests,
                                       on_progress=on_progress)
@@ -249,8 +253,10 @@ def run_trading_mode(
             _build_trading_email_payload(results_ex_ante, results_ex_post, combined_artefacts, params),
             OperationConfig.create(OperationMode.TRADING_COMPLIANCE),
         )
-    except Exception:
+    except Exception as exc:
         logging.getLogger(__name__).exception("Trading-analysis email notification failed")
+        if errors is not None:
+            errors.append(f"Trading-analysis email notification failed: {exc}")
 
     return results_ex_ante, results_ex_post, combined_artefacts
 
