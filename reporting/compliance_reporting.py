@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 from functools import lru_cache
-from numbers import Real
 
-import os
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
-import re
 import pandas as pd
 
 from config.fund_definitions import FUND_DEFINITIONS
@@ -19,16 +16,11 @@ from reporting.base_report_pdf import BaseReportPDF
 from reporting.footnotes import FOOTNOTES
 from reporting.report_utils import (
     flatten_compliance_results,
-    format_number,
     normalize_compliance_results,
 )
 from utilities.logger import setup_logger
 
 logger = setup_logger("compliance_report", "logs/compliance.log")
-_PERCENT_RE = re.compile(r"^\s*-?\d+(?:\.\d+)?%$")
-_IRS_DIVERSIFICATION_FUNDS = {"FTCSH"}
-
-
 @lru_cache(maxsize=None)
 def _vehicle_wrapper(fund_name: str) -> str:
     """Return the lowercase vehicle_wrapper for a fund. Cached for the process."""
@@ -125,10 +117,6 @@ class ComplianceReport:
             return prepared
 
         return {self.report_date: normalize_compliance_results(raw_results)}
-
-    @staticmethod
-    def _get_vehicle_wrapper(fund_name: str) -> str:
-        return _vehicle_wrapper(fund_name)
 
     def _is_vit_fund(self, fund_name: str) -> bool:
         return _is_vit_fund(fund_name)
@@ -1108,12 +1096,6 @@ class ComplianceReportPDF(BaseReportPDF):
     def _get_vehicle_wrapper(fund_name: str) -> str:
         return _vehicle_wrapper(fund_name)
 
-    def _is_vit_fund(self, fund_name: str) -> bool:
-        return _is_vit_fund(fund_name)
-
-    def _is_etf_fund(self, fund_name: str) -> bool:
-        return _is_etf_fund(fund_name)
-
     def save_pdf(self) -> None:
         """Save the PDF to the specified output path."""
         try:
@@ -1588,13 +1570,6 @@ class ComplianceReportPDF(BaseReportPDF):
                     self.pdf.ln(8)
 
     # ------------------------------------------------------------------
-    @staticmethod
-    def _parse_date(value: str) -> object:
-        try:
-            return datetime.fromisoformat(value).date()
-        except Exception:  # pragma: no cover - fallback
-            return value
-
     def _group_results_by_fund(self) -> Dict[str, Dict[str, Any]]:
         grouped: Dict[str, Dict[str, Any]] = {}
         for (fund_name, date_str), payload in sorted(
@@ -1657,56 +1632,6 @@ class ComplianceReportPDF(BaseReportPDF):
         self.pdf.set_font("Arial", "B", 14)
         self.pdf.cell(0, 10, self._sanitize_text(title), ln=True, align="C")
         self.pdf.ln(4)
-
-    def _add_fund_section(self, fund_name: str, report_date: object, fund_data: Mapping[str, object]) -> None:
-        exclude_funds = {"PF227", "PD227", "R21126", "FTMIX"}
-        exclude_prefixes = ("TR",)
-
-        self.pdf.set_font("Arial", "B", 12)
-        header_text = f"Fund: {fund_name}  |  Date: {report_date}"
-        self.pdf.cell(0, 8, self._sanitize_text(header_text), ln=True)
-        self.pdf.ln(2)
-
-        self.print_summary_table(fund_data)
-
-        tests = [
-            ("gics_compliance", self.print_gics_compliance),
-            ("prospectus_80pct_policy", self.print_prospectus_80pct_policy),
-            ("diversification_40act_check", self.print_40act_diversification),
-            ("diversification_IRS_check", self.print_irs_diversification),
-            ("diversification_IRC_check", self.print_irc_diversification),
-            ("max_15pct_illiquid_sai", self.print_max_15pct_illiquid),
-            ("real_estate_check", self.print_real_estate_check),
-            ("commodities_check", self.print_commodities_check),
-            ("twelve_d1a_other_inv_cos", self.print_12d1_other_inv_cos),
-            ("twelve_d2_insurance_cos", self.print_12d2_insurance_cos),
-            ("twelve_d3_sec_biz", self.print_12d3_sec_biz),
-        ]
-
-        for key, renderer in tests:
-            if not self._is_test_selected(key):
-                continue
-            if key == "prospectus_80pct_policy" and (
-                fund_name.startswith(exclude_prefixes) or fund_name in exclude_funds
-            ):
-                continue
-            if key == "diversification_IRS_check" and fund_name not in _IRS_DIVERSIFICATION_FUNDS:
-                continue
-            if key == "diversification_IRC_check" and not self._is_vit_fund(fund_name):
-                continue
-            if key == "max_15pct_illiquid_sai" and not self._is_etf_fund(fund_name):
-                continue
-
-            test_data = fund_data.get(key)
-            if test_data:
-                self._print_test_header(key.replace("_", " ").title())
-                renderer(test_data)
-                self.pdf.ln(4)
-
-        y = self.pdf.get_y()
-        self.pdf.set_draw_color(150, 150, 150)
-        self.pdf.line(10, y, 200, y)
-        self.pdf.ln(6)
 
     def _print_test_header(self, title: str) -> None:
         self.pdf.set_font("Arial", "B", 10)
@@ -1845,25 +1770,6 @@ class ComplianceReportPDF(BaseReportPDF):
             current = current.get(key)
         return current
 
-    def _get_40act_status(self, condition_met: bool, fund_registration: str) -> str:
-        """
-        Returns status for 40 Act conditions based on fund registration.
-        Non-diversified funds show N/A for failed conditions, but PASS if they pass.
-
-        Args:
-            condition_met: Whether the condition is met
-            fund_registration: The fund's registration status (e.g., "diversified", "non-diversified")
-
-        Returns:
-            "PASS" if condition is met, "N/A" if non-diversified fund fails, "FAIL" otherwise
-        """
-        if condition_met:
-            return "PASS"
-        elif fund_registration == "non-diversified":
-            return "N/A"
-        else:
-            return "FAIL"
-
     @staticmethod
     def _title_case(value: object) -> str:
         if value is None:
@@ -1992,468 +1898,7 @@ class ComplianceReportPDF(BaseReportPDF):
             self.pdf.multi_cell(0, 4.5, self._sanitize_text(f"* {note}"))
         self.pdf.ln(2)
 
-    def _draw_two_column_table(self, rows: Iterable[Tuple[object, object]]) -> None:
-        if not rows:
-            return
-
-        usable_width = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
-        label_width = min(usable_width * 0.4, 80)
-        value_width = usable_width - label_width
-        line_height = 5
-
-        header_x = self.pdf.get_x()
-        header_y = self.pdf.get_y()
-        self.pdf.set_font("Arial", "B", 8)
-        self.pdf.set_fill_color(230, 230, 230)
-        self.pdf.multi_cell(
-            label_width,
-            line_height,
-            self._sanitize_text("Metric"),
-            border=1,
-            fill=True,
-        )
-        header_label_end = self.pdf.get_y()
-
-        self.pdf.set_xy(header_x + label_width, header_y)
-        self.pdf.multi_cell(
-            value_width,
-            line_height,
-            self._sanitize_text("Value"),
-            border=1,
-            fill=True,
-            align="R",
-        )
-        header_value_end = self.pdf.get_y()
-        header_end_y = max(header_label_end, header_value_end)
-        self.pdf.set_xy(header_x, header_end_y)
-
-        self.pdf.set_fill_color(255, 255, 255)
-        self.pdf.set_font("Arial", "", 8)
-        for label, value in rows:
-            sanitized_label = self._sanitize_text(label)
-            display_value = value
-            if isinstance(display_value, Real) and not isinstance(display_value, bool):
-                numeric_value = float(display_value)
-                if pd.isna(numeric_value):
-                    numeric_value = 0.0
-                display_value = f"{numeric_value:,.0f}"
-            sanitized_value = self._sanitize_text(display_value)
-
-            x_start = self.pdf.get_x()
-            y_start = self.pdf.get_y()
-
-            self.pdf.multi_cell(label_width, line_height, sanitized_label, border=1)
-            label_end_y = self.pdf.get_y()
-
-            self.pdf.set_xy(x_start + label_width, y_start)
-            value_align = "R"
-            if "\n" in sanitized_value or any(ch.isalpha() for ch in sanitized_value):
-                value_align = "L"
-            self.pdf.multi_cell(
-                value_width,
-                line_height,
-                sanitized_value,
-                border=1,
-                align=value_align,
-            )
-            value_end_y = self.pdf.get_y()
-
-            row_end_y = max(label_end_y, value_end_y)
-            self.pdf.set_xy(x_start, row_end_y)
-
-        self.pdf.ln(2)
-
     # ------------------------------------------------------------------
-    def print_summary_table(self, fund_data: Mapping[str, object]) -> None:
-        cash_value = self._extract_numeric(fund_data.get("cash_data"))
-        prospectus_calc = (
-            fund_data.get("prospectus_80pct_policy", {})
-            .get("calculations", {})
-        )
-        treasury = prospectus_calc.get("total_tbill_value", 0)
-        equity = prospectus_calc.get("total_equity_market_value", 0)
-        std_option_dan = prospectus_calc.get("total_opt_delta_notional_value", 0)
-        std_option_mv = prospectus_calc.get("total_opt_market_value", 0)
-
-        def format_num(value: object) -> str:
-            try:
-                return f"${int(round(float(value or 0))):,}"
-            except Exception:  # pragma: no cover - fallback formatting
-                return str(value)
-
-        rows = [
-            ("Cash", format_num(cash_value)),
-            ("Treasury", format_num(treasury)),
-            ("Equity", format_num(equity)),
-            ("Std Options (DAN)", format_num(std_option_dan)),
-            ("Std Options (MV)", format_num(std_option_mv)),
-        ]
-
-        self._draw_two_column_table(rows)
-        self.pdf.ln(4)
-
-    def print_gics_compliance(self, data: Mapping[str, object]) -> None:
-        industry_within_limit = bool(data.get("industry_exceeds_25", True))
-        industry_group_within_limit = bool(data.get("industry_group_exceeds_25", True))
-        rows = [
-            ("Overall Gics Compliance", data.get("overall_gics_compliance", "N/A")),
-            ("Industry Exceeds 25%", "YES" if not industry_within_limit else "NO"),
-            (
-                "Industry Group Exceeds 25%",
-                "YES" if not industry_group_within_limit else "NO",
-            ),
-        ]
-        self._draw_two_column_table(rows)
-        self._draw_footnotes_section("gics")
-
-    def print_prospectus_80pct_policy(self, data: Mapping[str, object]) -> None:
-        calculations = data.get("calculations", {})
-        total_eqy_mv = calculations.get("total_equity_market_value", 0)
-        total_opt_dan = calculations.get("total_opt_delta_notional_value", 0)
-        total_opt_mv = calculations.get("total_opt_market_value", 0)
-        total_tbill = calculations.get("total_tbill_value", 0)
-        total_cash = calculations.get("total_cash_value", 0)
-
-        denom = calculations.get("denominator") or 0
-        numer = calculations.get("numerator") or 0
-        names_test = calculations.get("names_test", numer / denom if denom else 0)
-
-        denom_mv = calculations.get("denominator_mv") or 0
-        numer_mv = calculations.get("numerator_mv") or 0
-        names_test_mv = calculations.get(
-            "names_test_mv", numer_mv / denom_mv if denom_mv else 0
-        )
-
-        options_in_scope = calculations.get("options_in_scope", "No")
-
-        rows = [
-            ("Prospectus 80% Compliance (DAN)", "PASS" if names_test >= 0.80 else "FAIL"),
-            ("Total Equity Market Value", f"{total_eqy_mv:,.0f}"),
-            ("Total Option Delta Notional Value (DAN)", f"{total_opt_dan:,.0f}"),
-            ("Total T-Bill Value", f"{total_tbill:,.0f}"),
-            ("Total Cash Value", f"{total_cash:,.0f}"),
-            ("Denominator (DAN)", f"{denom:,.0f}"),
-            ("Numerator (DAN)", f"{numer:,.0f}"),
-            ("Formula Result (DAN)", f"{names_test:.2%}"),
-            ("Options in Scope for 80%?", options_in_scope),
-            ("---", "---"),
-            (
-                "Prospectus 80% Compliance (Market Value)",
-                "PASS" if names_test_mv >= 0.80 else "FAIL",
-            ),
-            ("Total Option Market Value", f"{total_opt_mv:,.0f}"),
-            ("Denominator (MV)", f"{denom_mv:,.0f}"),
-            ("Numerator (MV)", f"{numer_mv:,.0f}"),
-            ("Formula Result (MV)", f"{names_test_mv:.2%}"),
-        ]
-        self._draw_two_column_table(rows)
-        self._draw_footnotes_section("prospectus_80pct")
-
-    def print_40act_diversification(self, data: Mapping[str, object]) -> None:
-        calculations = data.get("calculations", {})
-
-        total_assets = calculations.get("total_assets", 0)
-        non_qual_weight = calculations.get("non_qualifying_assets_pct", 0)
-        issuer_limited_sum = calculations.get("issuer_limited_sum", 0)
-        cumulative_excluded = calculations.get("cumulative_weight_excluded", 0)
-        cumulative_remaining = calculations.get("cumulative_weight_remaining", 0)
-        occ_mkt_val = calculations.get("occ_market_value", 0)
-        fund_registration = calculations.get("fund_registration", "").lower()
-
-        issuer_limited_assets_list = calculations.get("issuer_limited_securities", [])
-        if isinstance(issuer_limited_assets_list, list) and issuer_limited_assets_list:
-            issuer_limited_assets_str = ", ".join(
-                f"({item.get('eqyticker')}, {abs(item.get('net_market_value', 0)) / total_assets:.2%})"
-                for item in issuer_limited_assets_list
-                if total_assets
-            )
-        else:
-            issuer_limited_assets_str = "None"
-
-        rows = [
-            ("Fund Registration", calculations.get("fund_registration")),
-            # ("Condition 40 Act 1", "PASS" if data.get("condition_40act_1") else "FAIL"),
-            # ("Condition 40 Act 2a", "PASS" if data.get("condition_40act_2a") else "FAIL"),
-            # ("Condition 40 Act 2b", "PASS" if data.get("condition_40act_2b") else "FAIL"),
-            ("Condition 40 Act 1", self._get_40act_status(data.get("condition_40act_1"), fund_registration)),
-            ("Condition 40 Act 2a", self._get_40act_status(data.get("condition_40act_2a"), fund_registration)),
-            ("Condition 40 Act 2b", self._get_40act_status(data.get("condition_40act_2b"), fund_registration)),
-            ("Total Assets", f"{total_assets:,.0f}"),
-            ("Non-Qualifying Assets Weight", f"{non_qual_weight:.2%}"),
-            ("Issuer Limited Assets (Sum)", f"{issuer_limited_sum:,.0f}"),
-            ("Issuer Limited Assets (Detail)", issuer_limited_assets_str),
-            ("", ""),
-            ("", ""),
-            ("Cumulative Weight Excluded", f"{cumulative_excluded:.2%}"),
-            ("Cumulative Weight Remaining", f"{cumulative_remaining:.2%}"),
-            ("OCC Market Value", f"{occ_mkt_val:,.0f}"),
-        ]
-
-        self._draw_two_column_table(rows)
-        self._draw_footnotes_section("40act")
-
-    def print_irs_diversification(self, data: Mapping[str, object]) -> None:
-        calculations = data.get("calculations", {})
-        largest_holding = calculations.get("largest_holding", {})
-
-        large_securities = calculations.get("large_securities", []) or []
-        if large_securities:
-            large_lines: list[str] = []
-            for sec in large_securities:
-                ticker = str(sec.get("eqyticker", ""))
-                market_value = float(sec.get("net_market_value", 0) or 0)
-                if pd.isna(market_value):
-                    market_value = 0.0
-                weight = float(sec.get("tna_wgt", 0) or 0)
-                if pd.isna(weight):
-                    weight = 0.0
-                large_lines.append(
-                    " | ".join(
-                        [
-                            ticker,
-                            f"${market_value:,.0f}",
-                            f"{weight:.2%}",
-                        ]
-                    )
-                )
-            large_securities_str = "\n".join(large_lines)
-        else:
-            large_securities_str = "None"
-
-        large_securities_count = calculations.get("large_securities_count", 0)
-        if isinstance(large_securities_count, (int, float)) and not pd.isna(
-            large_securities_count
-        ):
-            large_count_display = f"{int(float(large_securities_count))}"
-        else:
-            large_count_display = str(large_securities_count or 0)
-
-        rows = [
-            ("Condition IRS 1", "PASS" if data.get("condition_IRS_1") else "FAIL"),
-            ("Condition IRS 2a_50%", "PASS" if data.get("condition_IRS_2_a_50") else "FAIL"),
-            ("2a_50% Weight", f"{calculations.get('weight_2a_50', 0):.2%}"),
-            ("Condition IRS 2a_5%", "PASS" if data.get("condition_IRS_2_a_5") else "FAIL"),
-            ("Condition IRS 2a_10%", "PASS" if data.get("condition_IRS_2_a_10") else "FAIL"),
-            ("Total Assets", f"{calculations.get('total_assets', 0):,.0f}"),
-            ("Expenses", f"{calculations.get('expenses', 0):,.0f}"),
-            ("Qualifying Assets Value", f"{calculations.get('qualifying_assets_value', 0):,.0f}"),
-            ("Largest Holding $", f"{largest_holding.get('net_market_value', 0):,.0f}"),
-            ("Largest Holding %", f"{largest_holding.get('tna_wgt', 0):.2%}"),
-            ("Condition IRS 2b", "PASS" if data.get("condition_IRS_2_b") else "FAIL"),
-            ("5% Gross Assets", f"{calculations.get('five_pct_gross_assets', 0):,.0f}"),
-            ("Sum Large Securities %", f"{calculations.get('sum_large_securities_weights', 0):.2%}"),
-            ("Large Securities Count", large_count_display),
-            (
-                "Large Securities",
-                large_securities_str,
-            ),
-            ("Total Treasury", f"{calculations.get('total_tbill_value', 0):,.0f}"),
-        ]
-
-        self._draw_two_column_table(rows)
-        self.pdf.ln(6)
-
-        if self.pdf.get_y() > 250:
-            self.pdf.add_page()
-
-        self._draw_footnotes_section("irs")
-
-    def print_12d1_other_inv_cos(self, data: Mapping[str, object]) -> None:
-        """Print Rule 12d1-1 Other Investment Companies."""
-
-        calculations = data.get("calculations", {})
-        holdings = calculations.get("investment_companies", []) or []
-
-        holdings_str = ", ".join(
-            f"{holding.get('ticker', '')} ({float(holding.get('ownership_pct') or 0):.2%})"
-            for holding in holdings
-        ) or "None"
-
-        status = "PASS" if data.get("twelve_d1a_other_inv_cos_compliant", data.get("is_compliant", True)) else "FAIL"
-
-        rows = [
-            ("Total Assets", f"{calculations.get('total_assets', 0):,.0f}"),
-            ("Investment Companies", holdings_str),
-            ("Max Ownership %", f"{calculations.get('ownership_pct_max', 0):.7%}"),
-            ("Equity Market Value Sum", f"{calculations.get('equity_market_value_sum', 0):,.0f}"),
-            ("Test 1 (<=3% Ownership)", "PASS" if data.get("test_1_pass") else "FAIL"),
-            ("Test 2 (<=5% Total Assets)", "PASS" if data.get("test_2_pass") else "FAIL"),
-            ("Test 3 (<=10% Total Assets)", "PASS" if data.get("test_3_pass") else "FAIL"),
-            ("Rule 12d1-1 Compliance Status", status),
-        ]
-
-        self._draw_two_column_table(rows)
-        self._draw_footnotes_section("12d1")
-
-    def print_max_15pct_illiquid(self, data: Mapping[str, object]) -> None:
-        """Print 15% illiquid assets compliance details - FIXED"""
-        calculations = data.get("calculations", {})
-
-        total_assets = calculations.get("total_assets", 0)
-        illiquid_value = calculations.get("total_illiquid_value", 0)
-        illiquid_pct = calculations.get("illiquid_percentage", 0)
-        equity_pct = calculations.get("equity_holdings_percentage", 0)
-
-        rows = [
-            ("Total Assets", f"{total_assets:,.0f}"),
-            ("Total Illiquid Value", f"{illiquid_value:,.0f}"),
-            ("Illiquid Percentage", f"{illiquid_pct:.2%}"),
-            ("Equity Holdings Percentage", f"{equity_pct:.2%}"),
-            # FIXED: Check is_compliant instead of max_15pct_illiquid_sai
-            ("Max 15% Illiquid Compliance", "PASS" if data.get("is_compliant") else "FAIL"),
-            (
-                "Equity Holdings 85% Compliance",
-                "PASS" if data.get("equity_holdings_85pct_compliant") else "FAIL",
-            ),
-        ]
-
-        self._draw_two_column_table(rows)
-        self._draw_footnotes_section("illiquid")
-
-    def print_real_estate_check(self, data: Mapping[str, object]) -> None:
-        """Print real estate exposure compliance - FIXED to show PASS/FAIL"""
-        calculations = data.get("calculations", {})
-        real_estate_pct = calculations.get("real_estate_percentage", 0)
-        is_compliant = data.get("real_estate_check_compliant", data.get("is_compliant", True))
-
-        # Show PASS if no real estate exposure, FAIL if there is exposure
-        status = "PASS" if is_compliant else "FAIL"
-        exposure_str = f"{real_estate_pct:.2%}" if real_estate_pct > 0 else "None"
-
-        rows = [
-            ("Real Estate Exposure", exposure_str),
-            ("Compliance Status", status)
-        ]
-
-        self._draw_two_column_table(rows)
-        self._draw_footnotes_section("real_estate")
-
-    def print_commodities_check(self, data: Mapping[str, object]) -> None:
-        """Print commodities exposure compliance - FIXED to show PASS/FAIL"""
-        calculations = data.get("calculations", {})
-        commodities_pct = calculations.get("commodities_percentage", 0)
-        is_compliant = data.get("commodities_check_compliant", data.get("is_compliant", True))
-
-        # Show PASS if no commodities exposure, FAIL if there is exposure
-        status = "PASS" if is_compliant else "FAIL"
-        exposure_str = f"{commodities_pct:.2%}" if commodities_pct > 0 else "None"
-
-        rows = [
-            ("Commodities Exposure", exposure_str),
-            ("Compliance Status", status)
-        ]
-
-        self._draw_two_column_table(rows)
-        self._draw_footnotes_section("commodities")
-
-    def print_irc_diversification(self, data: Mapping[str, object]) -> None:
-        """Print IRC diversification - FIXED to handle non-VIT funds"""
-        # Check if this test was skipped (not a VIT fund)
-        if data.get("skipped"):
-            rows = [
-                ("Status", "N/A - Not applicable (VIT funds only)"),
-            ]
-            self._draw_two_column_table(rows)
-            return
-
-        calculations = data.get("calculations", {})
-        rows = [
-            ("Condition 55", "PASS" if data.get("condition_IRC_55") else "FAIL"),
-            ("Condition 70", "PASS" if data.get("condition_IRC_70") else "FAIL"),
-            ("Condition 80", "PASS" if data.get("condition_IRC_80") else "FAIL"),
-            ("Condition 90", "PASS" if data.get("condition_IRC_90") else "FAIL"),
-            ("Top 1 Exposure", f"{calculations.get('top_1', 0):.2%}"),
-            ("Top 2 Exposure", f"{calculations.get('top_2', 0):.2%}"),
-            ("Top 3 Exposure", f"{calculations.get('top_3', 0):.2%}"),
-            ("Top 4 Exposure", f"{calculations.get('top_4', 0):.2%}"),
-            ("Total Assets", f"{calculations.get('total_assets', 0):,.0f}"),
-        ]
-
-        self._draw_two_column_table(rows)
-        self._draw_footnotes_section("irc")
-
-    def print_12d2_insurance_cos(self, data: Mapping[str, object]) -> None:
-        """Print Rule 12d2 Insurance Companies - FIXED to show status"""
-        calculations = data.get("calculations", {})
-        holdings = calculations.get("insurance_holdings", [])
-
-        # Check compliance status
-        is_compliant = data.get("twelve_d2_insurance_cos_compliant", data.get("is_compliant", True))
-        status = "PASS" if is_compliant else "FAIL"
-
-        holdings_str = ", ".join(
-            f"{h.get('eqyticker', '')} ({float(h.get('ownership_pct', 0) or 0):.2%})"
-            for h in holdings
-        ) or "None"
-
-        rows = [
-            ("Total Assets", f"{calculations.get('total_assets', 0):,.0f}"),
-            ("Insurance Holdings", holdings_str),
-            ("Max Ownership %", f"{calculations.get('max_ownership_pct', 0):.6%}"),
-            ("Rule 12d2 Compliance Status", status),
-        ]
-
-        self._draw_two_column_table(rows)
-        self._draw_footnotes_section("12d2")
-
-    def print_12d3_sec_biz(self, data: Mapping[str, object]) -> None:
-        """Print Rule 12d3 Securities Business - FIXED to show all rules"""
-        calculations = data.get("calculations", {})
-        combined = calculations.get("combined_holdings", [])
-
-        if self.pdf.get_y() > 230:
-            self.pdf.add_page()
-
-        # Ensure we display the correct status for each rule
-        rule_1_status = "PASS" if data.get("rule_1_pass") else "FAIL"
-        rule_2_status = "PASS" if data.get("rule_2_pass") else "FAIL"
-        rule_3_status = "PASS" if data.get("rule_3_pass") else "FAIL"
-        overall_status = "PASS" if data.get("twelve_d3_sec_biz_compliant") else "FAIL"
-
-        summary_rows = [
-            ("Rule 1 (<=5% equities)", rule_1_status),
-            ("Rule 2 (<=10% debt)", rule_2_status),
-            ("Rule 3 (<=5% total assets)", rule_3_status),
-            ("12d3 Sec Biz Compliant", overall_status),
-        ]
-        self._draw_two_column_table(summary_rows)
-
-        # Only show holdings table if there are holdings
-        if combined:
-            self.pdf.set_font("Arial", "B", 9)
-            self.pdf.cell(0, 6, self._sanitize_text("Investment Holdings"), ln=True)
-
-            headers = ["Ticker", "Vest Weight", "Ownership %"]
-            col_widths = [40, 40, 40]
-            self.pdf.set_font("Arial", "B", 9)
-            for i, header in enumerate(headers):
-                self.pdf.set_fill_color(230, 230, 230)
-                self.pdf.cell(col_widths[i], 6, self._sanitize_text(header), border=1, fill=True)
-            self.pdf.ln()
-
-            self.pdf.set_font("Arial", "", 9)
-            for holding in combined:
-                ticker = holding.get("ticker") or holding.get("eqyticker") or "N/A"
-                vest_weight = float(holding.get("vest_weight", 0) or 0)
-                ownership_pct = float(holding.get("ownership_pct", 0) or 0)
-
-                self.pdf.set_fill_color(255, 255, 255)
-                self.pdf.cell(col_widths[0], 6, self._sanitize_text(str(ticker)), border=1)
-                self.pdf.cell(col_widths[1], 6, f"{vest_weight:.2%}", border=1)
-                self.pdf.cell(col_widths[2], 6, f"{ownership_pct:.2%}", border=1)
-                self.pdf.ln()
-            self.pdf.ln(2)
-
-            # Bottom summary rows
-            rows_bottom = [
-                ("Total Assets", f"{calculations.get('total_assets', 0):,.0f}"),
-                ("Max Ownership %", f"{calculations.get('max_ownership_pct', 0):.6%}"),
-                ("Max Weight", f"{calculations.get('max_weight', 0):.2%}"),
-            ]
-            self._draw_two_column_table(rows_bottom)
-
-        self._draw_footnotes_section("12d3")
-
     def _render_gics_compliance_overview(self) -> None:
         """Render the Excel-like GICS_Compliance summary as a wrapped PDF table (no calculations)."""
         headers = [
@@ -2551,60 +1996,6 @@ class ComplianceReportPDF(BaseReportPDF):
         self._draw_table(headers, rows, col_widths=col_widths, row_height=6)
         self._draw_footnotes_section("gics")
         self.pdf.ln(4)
-
-    def _draw_wrapped_table(
-        self,
-        headers: list[str],
-        rows: list[list[str]],
-        *,
-        col_widths: list[float],
-        line_height: float = 5.2,
-        header_fill=(230, 230, 230),
-    ) -> None:
-        if not headers or not rows:
-            return
-
-        # Header
-        self.pdf.set_font("Arial", "B", 8)
-        self.pdf.set_fill_color(*header_fill)
-        for w, h in zip(col_widths, headers):
-            self.pdf.multi_cell(w, line_height, self._sanitize_text(h), border=1, align="C", fill=True, ln=3, max_line_height=line_height)
-            self.pdf.set_xy(self.pdf.get_x(), self.pdf.get_y())  # keep
-        self.pdf.ln(0.5)
-
-        # Rows
-        self.pdf.set_font("Arial", "", 7)
-        for row in rows:
-            x_start = self.pdf.get_x()
-            y_start = self.pdf.get_y()
-
-            # First pass: render each cell with MultiCell and track row height
-            cell_heights = []
-            x = x_start
-            y = y_start
-            for i, text in enumerate(row):
-                self.pdf.set_xy(x, y)
-                # Render cell to compute height
-                self.pdf.multi_cell(
-                    col_widths[i],
-                    line_height,
-                    self._sanitize_text(str(text) if text is not None else ""),
-                    border=1,
-                    align="L" if i not in (0, 2) else "C",  # center Date & Overall a bit
-                    ln=3,
-                    max_line_height=line_height,
-                )
-                cell_heights.append(self.pdf.get_y() - y)
-                x += col_widths[i]
-                self.pdf.set_xy(x, y)
-
-            # Move to the tallest cell end for the next row
-            row_height = max(cell_heights) if cell_heights else line_height
-            self.pdf.set_xy(x_start, y_start + row_height)
-
-
-
-
 
 def generate_compliance_reports(
     results: Mapping[str, Mapping[str, object]],

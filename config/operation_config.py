@@ -1,6 +1,6 @@
 # config/operation_config.py
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import List
 from enum import Enum
 
 

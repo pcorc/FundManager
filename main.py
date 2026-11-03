@@ -10,7 +10,7 @@ import logging
 import os
 from datetime import date
 from pathlib import Path
-from typing import (Dict, List, Mapping, Optional, Sequence)
+from typing import List, Mapping, Optional, Sequence
 from processing.fund import build_fund_registry
 from processing.run_modes import (
     fetch_data_stores,
@@ -38,13 +38,12 @@ from utilities.main_helpers import (
 
 from config.run_configurations import (
     build_run,
-    exclude_funds,
-    generate_business_date_range
+    generate_business_date_range,
 )
 from config.database import initialize_database
 from config.fund_definitions import (
     load_cohorts_from_db,
-    ETF_FUNDS, CLOSED_END_FUNDS, PRIVATE_FUNDS, VIT_AND_MUTUAL_FUNDS,
+    ETF_FUNDS,
 )
 
 # Optional runtime overrides for quick local tweaking without CLI arguments.

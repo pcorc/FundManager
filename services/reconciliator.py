@@ -4,15 +4,6 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, Optional
 from processing.fund import Fund
-from config.fund_definitions import (
-    FUND_DEFINITIONS,
-    CLOSED_END_FUNDS,
-    PRIVATE_FUNDS,
-    ETF_FUNDS,
-    DIVERSIFIED_FUNDS,
-    NON_DIVERSIFIED_FUNDS,
-    INDEX_FLEX_FUNDS,
-)
 
 
 @dataclass

@@ -1,5 +1,5 @@
 # config/database.py
-from sqlalchemy import create_engine, MetaData, Table, Column, String, and_, or_, insert
+from sqlalchemy import create_engine, MetaData, Table, Column, String
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.automap import automap_base
 import os

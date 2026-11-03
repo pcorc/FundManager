@@ -4,7 +4,6 @@ import datetime
 import logging
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping
-import pandas as pd
 
 from fpdf import FPDF
 
