@@ -251,7 +251,9 @@ which holds `request.json`, `progress.jsonl` (the worker's JSON-lines stdout),
 `run.log` (its stderr), `result.json`, `meta.json` (user, start/finish, request
 summary, exit code, cancelled / timed-out flags, publish history), `logs/` and
 `reports/`. Only one run happens per output root at a time (`.run.lock` holds the
-worker PID; a lock whose process is gone is cleared).
+worker PID; a lock whose process is gone is cleared). Keep the output root short:
+report paths over 260 characters are handled with the `\\?\` path form, but plain
+Windows tools may struggle with them.
 
 | Var | Default | Purpose |
 |---|---|---|

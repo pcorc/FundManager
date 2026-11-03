@@ -62,7 +62,9 @@ Results (on New run, History and Reports): status, errors, summary per day, down
 `meta.json` (user, started, finished, summary, pid, exit code, cancelled / timed-out / orphaned flags, publish
 history), `logs/`, `reports/` and, once the results are shown, `<run_id>.zip`. `<root>/.run.lock` holds the
 active run's worker PID and folder; a lock whose process is gone is stale and is cleared (its run is marked
-orphaned).
+orphaned). When `<run folder>/reports` is so deep that report paths would pass Windows MAX_PATH (260) on a host
+without long paths enabled, the runner passes `output_dir` in extended-length (`\\?\`) form; history, zip and
+publish handle both forms.
 
 ## Configuration and deployment
 - **Secrets:** the DB connection string and SMTP settings come from `.env` or the host environment (see `.env.example`). Nothing secret goes in the UI code or `st.secrets`, apart from the optional UI password. DB errors are shown and logged by type only.
