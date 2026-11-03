@@ -14,7 +14,8 @@ from reporting.report_utils import normalize_report_date
 from reporting.trade_compliance_analyzer import TradingComplianceAnalyzer
 from reporting.trade_compliance_reporting import (
     GeneratedTradingComplianceReport,
-    generate_trading_compliance_reports,
+    generate_trading_excel_report,
+    generate_trading_pdf_report,
 )
 
 
@@ -33,21 +34,24 @@ def build_trading_compliance_reports(
     if not (results_ex_ante or results_ex_post):
         return None
 
-    analyzer = TradingComplianceAnalyzer(
+    comparison_data = TradingComplianceAnalyzer(
         results_ex_ante=results_ex_ante,
         results_ex_post=results_ex_post,
         date=report_date,
         traded_funds_info=traded_funds_info or {},
-    )
-    comparison_data = analyzer.analyze()
+    ).analyze()
 
-    return generate_trading_compliance_reports(
-        comparison_data,
-        report_date,
-        output_dir,
-        file_name_prefix=file_name_prefix,
-        create_pdf=create_pdf,
-    )
+    date_str = normalize_report_date(report_date)
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    excel_path = str(output_path / f"{file_name_prefix}_{date_str}.xlsx")
+    pdf_path = str(output_path / f"{file_name_prefix}_{date_str}.pdf")
+
+    generate_trading_excel_report(comparison_data, excel_path)
+    if create_pdf:
+        generate_trading_pdf_report(comparison_data, pdf_path)
+
+    return GeneratedTradingComplianceReport(excel_path, pdf_path if create_pdf else None, comparison_data)
 
 @dataclass
 class CombinedTradingComplianceReport:
@@ -105,8 +109,7 @@ def _merge_excel_workbooks(
     compliance_wb = load_workbook(compliance_path)
 
     for sheet_name in compliance_wb.sheetnames:
-        source = compliance_wb[sheet_name]
-        _append_sheet(source, trading_wb)
+        _append_sheet(compliance_wb[sheet_name], trading_wb)
 
     trading_wb.save(output_path)
     return str(output_path)
@@ -126,15 +129,13 @@ def _append_sheet(source_sheet, target_wb):
                 target_cell.comment = copy_style(cell.comment)
 
     for key, dimension in source_sheet.column_dimensions.items():
-        target_dimension = target_sheet.column_dimensions[key]
-        target_dimension.width = dimension.width
+        target_sheet.column_dimensions[key].width = dimension.width
 
     for idx, dimension in source_sheet.row_dimensions.items():
         target_sheet.row_dimensions[idx].height = dimension.height
 
-    if source_sheet.merged_cells.ranges:
-        for merged_cell in source_sheet.merged_cells.ranges:
-            target_sheet.merge_cells(str(merged_cell))
+    for merged_cell in source_sheet.merged_cells.ranges:
+        target_sheet.merge_cells(str(merged_cell))
 
 
 def _merge_pdfs(trading_pdf: Path, compliance_pdf: Path, output_path: Path) -> Optional[str]:
