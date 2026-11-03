@@ -166,7 +166,8 @@ def _forty_act_row(report_date, fund_name, payload, calc, r):
             ("Fund", fund_name),
             ("Fund Registration", calc.get("fund_registration")),
             ("Fund Status Today", calc.get("fund_status_today")),
-            ("Registration Match", f'=IF(C{r}=D{r},"PASS","FAIL")'),
+            # The checker's rule: only a fund registered as diversified that is not operating as diversified fails.
+            ("Registration Match", f'=IF(OR(D{r}="diversified",C{r}<>"diversified"),"PASS","FAIL")'),
             ("Condition 40 Act 1", f'=IF(L{r}>=0.75,"PASS","FAIL")'),
             ("Condition 40 Act 2a", f'=IF(O{r}=0,"PASS","FAIL")'),
             ("Condition 40 Act 2b", _na_status(payload.get("condition_40act_2b_status"))
@@ -1037,7 +1038,8 @@ class ComplianceReportPDF(BaseReportPDF):
         actual = calculations.get("fund_status_today")
         if expected is None or actual is None:
             return None
-        return str(expected).strip().lower() == str(actual).strip().lower()
+        # Same rule as the checker: a non-diversified registration permits operating either way.
+        return str(actual).strip().lower() == "diversified" or str(expected).strip().lower() != "diversified"
 
     @staticmethod
     def _status_text(value: object) -> str:

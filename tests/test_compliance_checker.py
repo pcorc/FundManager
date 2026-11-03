@@ -207,6 +207,17 @@ class FortyActRegistrationTests(unittest.TestCase):
             self.assertIs(result.is_compliant, compliant, (registration, status_today))
             self.assertEqual(result.details["actual_registration_status"], status_today)
 
+    def test_registration_match_follows_checker(self):
+        from reporting.compliance_reporting import ComplianceReportPDF, _forty_act_row
+        for registration, holdings in [("diversified", self.DIVERSIFIED), ("diversified", self.CONCENTRATED),
+                                       ("non_diversified", self.DIVERSIFIED), (None, self.CONCENTRATED)]:
+            result = self._check(registration, holdings)
+            payload = {**result.details, "calculations": result.calculations}
+            # The PDF helper does not use the instance.
+            self.assertIs(ComplianceReportPDF._registrations_match(None, payload), result.is_compliant, registration)
+        row = _forty_act_row("2026-10-30", "RDVI", dict(result.details), result.calculations, 7)
+        self.assertEqual(row["Registration Match"], '=IF(OR(D7="diversified",C7<>"diversified"),"PASS","FAIL")')
+
 
 if __name__ == "__main__":
     unittest.main()
