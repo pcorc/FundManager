@@ -27,8 +27,6 @@ class Reconciliator:
         self.analysis_type = analysis_type
         self.results = {}
         self.logger = logging.getLogger(f"Reconciliator_{fund.name}")
-        self.summary_rows = []
-        self._detailed_calculations: Dict[str, Dict[str, pd.DataFrame]] = {}
 
     def run_all_reconciliations(self):
         """Run all reconciliations using Fund object data"""
@@ -45,12 +43,6 @@ class Reconciliator:
                 func()
             except Exception as e:
                 self.logger.error(f"Error in {name} reconciliation: {e}", exc_info=True)
-
-        # Build all detail structures
-        self._build_equity_details()
-        self._build_option_details()  # NEW
-        self._build_flex_option_details()  # NEW
-        self._build_treasury_details()  # NEW
 
     def reconcile_custodian_equity(self):
         """Reconcile custodian equity using Fund snapshots."""
@@ -171,9 +163,6 @@ class Reconciliator:
             price_discrepancies_T1=price_disc_T1.reset_index(drop=True),
             merged_data=df.copy()
         )
-
-        # Emit summary rows
-        self._emit_equity_summary_rows(df_issues, price_disc_T, price_disc_T1)
 
     def reconcile_custodian_option(self):
         """Reconcile custodian options (regular options only) using Fund snapshots."""
@@ -314,34 +303,6 @@ class Reconciliator:
             regular_options=df_issues.reset_index(drop=True),  # Same as final_recon for regular options
             flex_options=pd.DataFrame()  # Always empty - FLEX handled separately
         )
-
-        # Add summary rows
-        for _, row in df_issues.iterrows():
-            dtype = row.get('discrepancy_type', 'Unknown')
-            desc = row.get('breakdown', '')
-            value = row.get('trade_discrepancy', 'N/A') if dtype == 'Quantity Mismatch' else 'N/A'
-            self.add_summary_row(
-                f"Custodian Option: {dtype}",
-                row.get('optticker', ''),
-                desc,
-                value
-            )
-
-        for _, row in price_T.iterrows():
-            self.add_summary_row(
-                "Custodian Option Price (T)",
-                row['optticker'],
-                f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
-                row['price_diff']
-            )
-
-        for _, row in price_T1.iterrows():
-            self.add_summary_row(
-                "Custodian Option Price (T-1)",
-                row['optticker'],
-                f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
-                row['price_diff']
-            )
 
     def reconcile_custodian_flex_option(self):
         """Reconcile custodian FLEX options separately using Fund snapshots."""
@@ -513,34 +474,6 @@ class Reconciliator:
             merged_data=df.copy()
         )
 
-        # Add summary rows
-        for _, row in df_issues.iterrows():
-            dtype = row.get('discrepancy_type', 'Unknown')
-            desc = row.get('breakdown', '')
-            value = row.get('trade_discrepancy', 'N/A') if dtype == 'Quantity Mismatch' else 'N/A'
-            self.add_summary_row(
-                f"Custodian FLEX Option: {dtype}",
-                row.get('optticker', ''),
-                desc,
-                value
-            )
-
-        for _, row in price_T.iterrows():
-            self.add_summary_row(
-                "Custodian FLEX Option Price (T)",
-                row['optticker'],
-                f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
-                row['price_diff']
-            )
-
-        for _, row in price_T1.iterrows():
-            self.add_summary_row(
-                "Custodian FLEX Option Price (T-1)",
-                row['optticker'],
-                f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
-                row['price_diff']
-            )
-
     def reconcile_custodian_treasury(self):
         """Reconcile custodian treasury holdings using Fund snapshots."""
         current = self.fund.data.current
@@ -651,20 +584,6 @@ class Reconciliator:
             merged_data=df.copy()
         )
 
-        for _, row in df_issues.iterrows():
-            dtype = row.get('discrepancy_type', 'Unknown')
-            desc = row.get('breakdown', '')
-            value = row.get('quantity_diff', 'N/A') if dtype == 'Quantity Mismatch' else 'N/A'
-            self.add_summary_row(f"Custodian Treasury: {dtype}", row.get('cusip', ''), desc, value)
-
-        for _, row in price_disc_T.iterrows():
-            self.add_summary_row(
-                "Custodian Treasury Price (T)",
-                row.get('cusip', ''),
-                f"{row['price_vest']:.4f} vs {row['price_cust']:.4f}",
-                row.get('price_diff', 0.0),
-            )
-
     def reconcile_index_equity(self):
         """Reconcile index equity using Fund snapshots."""
         # Check for special fund first
@@ -718,18 +637,6 @@ class Reconciliator:
             'significant_diffs': sig
         }
 
-        # Add summary rows
-        for _, row in holdings_disc.iterrows():
-            note = 'Missing in OMS' if not row['in_vest'] else 'Missing in Index'
-            weight_info = f"OMS: {row['nav_wgt_begin']:.4f}, Index: {row['weight_index']:.4f}"
-            self.add_summary_row('Index Equity', row['eqyticker'],
-                                 f"{note} - {weight_info}", row['wgt_diff'])
-
-        for _, row in sig.iterrows():
-            weight_info = f"OMS: {row['nav_wgt_begin']:.4f}, Index: {row['weight_index']:.4f}"
-            self.add_summary_row('Index Weight Diff', row['eqyticker'],
-                                 f"Weight diff - {weight_info}", row['wgt_diff'])
-
     def get_summary(self) -> Dict:
         """Returns simplified counts without resolution tracking"""
         summary = {}
@@ -744,11 +651,6 @@ class Reconciliator:
             "custodian_flex_option": ["final_recon", "price_discrepancies_T", "price_discrepancies_T1"],  # NEW
         }
 
-        if self.analysis_type != "eod":
-            recon_keys["sg_option"] = ["final_recon", "price_discrepancies"]
-            if self.has_sg_equity:
-                recon_keys["sg_equity"] = ["final_recon", "price_discrepancies"]
-
         for recon_type, keys in recon_keys.items():
             result = self.results.get(recon_type)
             if result:
@@ -761,211 +663,6 @@ class Reconciliator:
                 summary[recon_type] = {k: 0 for k in keys}
 
         return summary
-
-    def get_detailed_calculations(self):
-        """Returns detailed ticker-level calculations for Excel reporting.
-
-        This aggregates all detailed calculations that were built by the
-        dedicated builder functions (_build_equity_details, etc.).
-        """
-        detailed_data = {
-            'summary': self.results,
-            'equity_details': pd.DataFrame(),
-            'option_details': pd.DataFrame(),
-            'flex_details': pd.DataFrame(),
-            'treasury_details': pd.DataFrame(),
-            'price_adjustments': {
-                'equity': pd.DataFrame(),
-                'option': pd.DataFrame(),
-                'flex_option': pd.DataFrame()
-            }
-        }
-
-        # Get the dataframes from snapshots
-        current = self.fund.data.current
-        previous = self.fund.data.previous
-
-        eq_today = current.vest.equity
-        eq_prior = previous.vest.equity
-        opt_today = current.vest.options
-        opt_prior = previous.vest.options
-        flex_today = current.vest.flex_options
-        flex_prior = previous.vest.flex_options
-
-        # Get expense ratio
-        expense_rat = self.fund.expense_ratio
-
-        # Process equity details
-        if not eq_today.empty and not eq_prior.empty:
-            df_eq = eq_today.merge(
-                eq_prior[["eqyticker", "price", "quantity"]],
-                on="eqyticker", how="inner", suffixes=("_t", "_t1")
-            ).dropna(subset=["price_t", "price_t1"])
-
-            qty_col = "quantity_t1" if self.analysis_type == "ex_ante" else "quantity_t"
-            df_eq["gl"] = (df_eq["price_t"] - df_eq["price_t1"]) * df_eq[qty_col]
-            df_eq = df_eq[df_eq["gl"].abs() > 0.01]
-
-            if not df_eq.empty:
-                df_eq_adj = self.apply_small_price_override(
-                    df_eq.copy(), kind="equity", key_col="eqyticker"
-                )
-
-                price_breaks = self.holdings_price_breaks.get('equity', pd.DataFrame()) if hasattr(self, 'holdings_price_breaks') else pd.DataFrame()
-                cust_price_map = {
-                    ticker: self._lookup_cust_price(price_breaks, ticker) for ticker in df_eq['eqyticker']
-                }
-                price_t1_cust = df_eq['eqyticker'].map(cust_price_map).fillna(df_eq['price_t1'])
-
-                equity_detail = pd.DataFrame({
-                    'ticker': df_eq['eqyticker'],
-                    'quantity_t1': df_eq['quantity_t1'],
-                    'quantity_t': df_eq['quantity_t'],
-                    'price_t1_raw': df_eq['price_t1'],
-                    'price_t_raw': df_eq['price_t'],
-                    'price_t1_cust': price_t1_cust,
-                    'price_t1_adj': price_t1_cust,
-                    'price_t_adj': df_eq_adj.get('price_t', df_eq['price_t']),
-                    'quantity_used': df_eq[qty_col],
-                    'gl': df_eq["gl"],
-                    'gl_adjusted': df_eq_adj.get("gl_adj", df_eq["gl"])
-                })
-                equity_detail['gl_adjusted'] = (equity_detail['price_t_adj'] - equity_detail['price_t1_cust']) * equity_detail['quantity_used']
-                detailed_data['equity_details'] = equity_detail
-
-                if not price_breaks.empty:
-                    detailed_data['price_adjustments']['equity'] = price_breaks
-
-        # Process regular option details
-        if not opt_today.empty and not opt_prior.empty:
-            df_opt = opt_today.merge(
-                opt_prior[["optticker", "price", "quantity"]],
-                on="optticker", how="inner", suffixes=("_t", "_t1")
-            ).dropna(subset=["price_t", "price_t1"])
-
-            qty_col = "quantity_t1" if self.analysis_type == "ex_ante" else "quantity_t"
-            df_opt["gl"] = (df_opt["price_t"] - df_opt["price_t1"]) * df_opt[qty_col] * 100
-            df_opt = df_opt[df_opt["gl"].abs() > 0.01]
-
-            if not df_opt.empty:
-                df_opt_adj = self.apply_small_price_override(
-                    df_opt.copy(), kind="option", key_col="optticker"
-                )
-
-                price_breaks = self.holdings_price_breaks.get('option', pd.DataFrame()) if hasattr(self, 'holdings_price_breaks') else pd.DataFrame()
-                cust_price_map = {
-                    ticker: self._lookup_cust_price(price_breaks, ticker) for ticker in df_opt['optticker']
-                }
-                price_t1_cust = df_opt['optticker'].map(cust_price_map).fillna(df_opt['price_t1'])
-
-                option_detail = pd.DataFrame({
-                    'ticker': df_opt['optticker'],
-                    'quantity_t1': df_opt['quantity_t1'],
-                    'quantity_t': df_opt['quantity_t'],
-                    'price_t1_raw': df_opt['price_t1'],
-                    'price_t_raw': df_opt['price_t'],
-                    'price_t1_cust': price_t1_cust,
-                    'price_t1_adj': price_t1_cust,
-                    'price_t_adj': df_opt_adj.get('price_t', df_opt['price_t']),
-                    'quantity_used': df_opt[qty_col],
-                    'gl': df_opt["gl"],
-                    'gl_adjusted': df_opt_adj.get("gl_adj", df_opt["gl"])
-                })
-                option_detail['gl_adjusted'] = (
-                                                       option_detail['price_t_adj'] - option_detail['price_t1_cust']
-                                               ) * option_detail['quantity_used'] * 100
-                detailed_data['option_details'] = option_detail
-
-                if not price_breaks.empty:
-                    detailed_data['price_adjustments']['option'] = price_breaks
-
-        # Process FLEX option details
-        if not flex_today.empty and not flex_prior.empty:
-            df_flex = flex_today.merge(
-                flex_prior[["optticker", "price", "quantity"]],
-                on="optticker", how="inner", suffixes=("_t", "_t1")
-            ).dropna(subset=["price_t", "price_t1"])
-
-            qty_col = "quantity_t1" if self.analysis_type == "ex_ante" else "quantity_t"
-            df_flex["gl"] = (df_flex["price_t"] - df_flex["price_t1"]) * df_flex[qty_col] * 100
-            df_flex = df_flex[df_flex["gl"].abs() > 0.01]
-
-            if not df_flex.empty:
-                df_flex_adj = self.apply_small_price_override(
-                    df_flex.copy(), kind="flex_option", key_col="optticker"
-                )
-
-                price_breaks = self.holdings_price_breaks.get('flex_option', pd.DataFrame()) if hasattr(self, 'holdings_price_breaks') else pd.DataFrame()
-                cust_price_map = {
-                    ticker: self._lookup_cust_price(price_breaks, ticker) for ticker in df_flex['optticker']
-                }
-                price_t1_cust = df_flex['optticker'].map(cust_price_map).fillna(df_flex['price_t1'])
-
-                flex_detail = pd.DataFrame({
-                    'ticker': df_flex['optticker'],
-                    'quantity_t1': df_flex['quantity_t1'],
-                    'quantity_t': df_flex['quantity_t'],
-                    'price_t1_raw': df_flex['price_t1'],
-                    'price_t_raw': df_flex['price_t'],
-                    'price_t1_cust': price_t1_cust,
-                    'price_t1_adj': price_t1_cust,
-                    'price_t_adj': df_flex_adj.get('price_t', df_flex['price_t']),
-                    'quantity_used': df_flex[qty_col],
-                    'gl': df_flex["gl"],
-                    'gl_adjusted': df_flex_adj.get("gl_adj", df_flex["gl"])
-                })
-                flex_detail['gl_adjusted'] = (
-                                                     flex_detail['price_t_adj'] - flex_detail['price_t1_cust']
-                                             ) * flex_detail['quantity_used'] * 100
-                detailed_data['flex_details'] = flex_detail
-
-                if not price_breaks.empty:
-                    detailed_data['price_adjustments']['flex_option'] = price_breaks
-
-        # Add NAV components
-        detailed_data['nav_components'] = {
-            'beg_tna': previous.tna,
-            'cust_tna': current.tna,
-            'cust_nav': current.nav,
-            'shares_outstanding': current.shares_outstanding,
-            'expense_ratio': expense_rat,
-            'analysis_date': getattr(self, 'analysis_date', None),
-            'prior_date': getattr(self, 'prior_date', None)
-        }
-
-        # Include the structured detailed calculations built by builder functions
-        detailed_data['detailed_calculations'] = dict(self._detailed_calculations)
-
-        return detailed_data
-
-    def add_summary_row(self, test_name, ticker, description, value):
-        self.logger.info(f"[SUMMARY] {test_name} | {ticker} | {description} | {value}")
-
-    def apply_small_price_override(self, df: pd.DataFrame, kind: str, key_col: str):
-        """Apply small price overrides from holdings_price_breaks"""
-        if not hasattr(self, 'holdings_price_breaks'):
-            return df.copy()
-
-        pb = self.holdings_price_breaks.get(kind, pd.DataFrame())
-        if pb.empty:
-            return df.copy()
-
-        # only diffs >0.005 and <1
-        mask = (pb["price_diff"] > 0.005) & (pb["price_diff"] < 1)
-        small = pb.loc[mask, [key_col, "price_cust"]]
-        price_map = small.set_index(key_col)["price_cust"].to_dict()
-        df2 = df.copy()
-        df2.loc[df2[key_col].isin(price_map), "price_t"] = df2[key_col].map(price_map)
-
-        # Recalculate gl_adj if we modified prices
-        if 'gl' in df2.columns:
-            qty_col = "quantity_t1" if self.analysis_type == "ex_ante" else "quantity_t"
-            if qty_col in df2.columns:
-                # Use multiplier of 100 for both options and flex_options
-                multiplier = 100 if kind in ("option", "flex_option") else 1
-                df2["gl_adj"] = (df2["price_t"] - df2.get("price_t1", 0)) * df2[qty_col] * multiplier
-
-        return df2
 
     @staticmethod
     def _coerce_numeric_series(series: pd.Series) -> pd.Series:
@@ -989,29 +686,6 @@ class Reconciliator:
 
             return price_discrepancies.reset_index(drop=True)
         return pd.DataFrame()
-
-    def _emit_equity_summary_rows(self, df_issues: pd.DataFrame,
-                                  price_disc_T: pd.DataFrame,
-                                  price_disc_T1: pd.DataFrame):
-        """Emit summary rows for equity reconciliation"""
-        for _, row in df_issues.iterrows():
-            dtype = row['discrepancy_type']
-            desc = row.get('breakdown', '')
-            val = row['final_discrepancy'] if dtype == 'Quantity Mismatch' else 'N/A'
-            self.add_summary_row(f"Custodian Equity: {dtype}",
-                                 row['eqyticker'], desc, val)
-
-        for _, row in price_disc_T.iterrows():
-            self.add_summary_row("Custodian Equity Price (T)",
-                                 row['eqyticker'],
-                                 f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
-                                 row['price_diff'])
-
-        for _, row in price_disc_T1.iterrows():
-            self.add_summary_row("Custodian Equity Price (T-1)",
-                                 row['eqyticker'],
-                                 f"{row['price_vest']:.2f} vs {row['price_cust']:.2f}",
-                                 row['price_diff'])
 
     def _calculate_option_price_discrepancies(self, df: pd.DataFrame, period: str) -> pd.DataFrame:
         """Calculate option price discrepancies with FLEX filtering"""
@@ -1080,219 +754,4 @@ class Reconciliator:
 
             return price_discrepancies.reset_index(drop=True)
         return pd.DataFrame()
-
-    def _lookup_cust_price(self, price_breaks: pd.DataFrame, ticker: str) -> float | None:
-        """Extract custodian price for a ticker when available."""
-
-        if price_breaks.empty:
-            return None
-
-        if ticker in price_breaks.index:
-            entry = price_breaks.loc[ticker]
-            if isinstance(entry, pd.Series):
-                return entry.get('price_cust')
-            if isinstance(entry, pd.DataFrame) and not entry.empty:
-                return entry.iloc[0].get('price_cust')
-
-        for col in ('eqyticker', 'optticker', 'cusip'):
-            if col in price_breaks.columns:
-                match = price_breaks[price_breaks[col] == ticker]
-                if not match.empty:
-                    return match.iloc[0].get('price_cust')
-
-        return None
-
-    def add_summary_row(self, test_name: str, ticker: str, description: str, value):
-        """Capture summary rows without emitting them to the logger."""
-
-        self.summary_rows.append(
-            {
-                "test": test_name,
-                "ticker": ticker,
-                "description": description,
-                "value": value,
-            }
-        )
-
-    def _build_equity_details(self):
-        """Assemble detailed calculations for downstream reporting."""
-
-        def _safe_result_df(name: str, attr: str) -> pd.DataFrame:
-            result = self.results.get(name)
-            if not result:
-                return pd.DataFrame()
-            value = getattr(result, attr, pd.DataFrame())
-            return value.copy() if isinstance(value, pd.DataFrame) else pd.DataFrame()
-
-        equity_details = {
-            # Current day holdings
-            'vest_current': self.fund.data.current.vest.equity.copy(),
-            'custodian_current': self.fund.data.current.custodian.equity.copy(),
-
-            # T-1 holdings
-            'vest_previous': self.fund.data.previous.vest.equity.copy(),
-            'custodian_previous': self.fund.data.previous.custodian.equity.copy(),
-
-            # Other inputs
-            'trades': self.fund.data.current.equity_trades.copy(),
-            'corporate_actions': self.fund.data.current.cr_rd_data.copy(),
-        }
-
-        reconciliation_outputs = {
-            'custodian_equity': {
-                'final': _safe_result_df('custodian_equity', 'final_recon'),
-                'price_T': _safe_result_df('custodian_equity', 'price_discrepancies_T'),
-                'price_T1': _safe_result_df('custodian_equity', 'price_discrepancies_T1'),
-            },
-            'custodian_equity_t1': {
-                'final': _safe_result_df('custodian_equity_t1', 'final_recon'),
-            },
-            'index_equity': {
-                'final': self.results.get('index_equity', {}).get('significant_diffs', pd.DataFrame()).copy()
-                if isinstance(self.results.get('index_equity'), dict) else pd.DataFrame(),
-            },
-        }
-
-        self._detailed_calculations['equity'] = {
-            'inputs': equity_details,
-            'reconciliations': reconciliation_outputs,
-        }
-
-    def _build_option_details(self):
-        """Assemble detailed calculations for regular options for downstream reporting."""
-
-        def _safe_result_df(name: str, attr: str) -> pd.DataFrame:
-            result = self.results.get(name)
-            if not result:
-                return pd.DataFrame()
-            value = getattr(result, attr, pd.DataFrame())
-            return value.copy() if isinstance(value, pd.DataFrame) else pd.DataFrame()
-
-        current = self.fund.data.current
-        previous = self.fund.data.previous
-
-        option_details = {
-            # Current day holdings
-            'vest_current': current.vest.options.copy(),
-            'custodian_current': current.custodian.options.copy(),
-
-            # T-1 holdings
-            'vest_previous': previous.vest.options.copy(),
-            'custodian_previous': previous.custodian.options.copy(),
-
-            # Option trades (if available)
-            'trades': current.option_trades.copy() if hasattr(current, 'option_trades') else pd.DataFrame(),
-        }
-
-        reconciliation_outputs = {
-            'custodian_option': {
-                'final': _safe_result_df('custodian_option', 'final_recon'),
-                'regular_options': _safe_result_df('custodian_option', 'regular_options'),
-                'price_T': _safe_result_df('custodian_option', 'price_discrepancies_T'),
-                'price_T1': _safe_result_df('custodian_option', 'price_discrepancies_T1'),
-            },
-            'custodian_option_t1': {
-                'final': _safe_result_df('custodian_option_t1', 'final_recon'),
-                'regular_options': _safe_result_df('custodian_option_t1', 'regular_options'),
-            },
-        }
-
-        self._detailed_calculations['option'] = {
-            'inputs': option_details,
-            'reconciliations': reconciliation_outputs,
-        }
-
-    def _build_flex_option_details(self):
-        """Assemble detailed calculations for FLEX options for downstream reporting."""
-
-        def _safe_result_df(name: str, attr: str) -> pd.DataFrame:
-            result = self.results.get(name)
-            if not result:
-                return pd.DataFrame()
-            value = getattr(result, attr, pd.DataFrame())
-            return value.copy() if isinstance(value, pd.DataFrame) else pd.DataFrame()
-
-        # Only build if fund uses FLEX options
-        if not self.fund.uses_index_flex:
-            self._detailed_calculations['flex_option'] = {
-                'inputs': {},
-                'reconciliations': {},
-            }
-            return
-
-        current = self.fund.data.current
-        previous = self.fund.data.previous
-
-        flex_option_details = {
-            # Current day holdings
-            'vest_current': current.vest.flex_options.copy(),
-            'custodian_current': current.custodian.flex_options.copy(),
-
-            # T-1 holdings
-            'vest_previous': previous.vest.flex_options.copy(),
-            'custodian_previous': previous.custodian.flex_options.copy(),
-
-            # FLEX option trades (if available)
-            'trades': current.flex_option_trades.copy() if hasattr(current, 'flex_option_trades') else pd.DataFrame(),
-        }
-
-        reconciliation_outputs = {
-            'custodian_flex_option': {
-                'final': _safe_result_df('custodian_flex_option', 'final_recon'),
-                'price_T': _safe_result_df('custodian_flex_option', 'price_discrepancies_T'),
-                'price_T1': _safe_result_df('custodian_flex_option', 'price_discrepancies_T1'),
-            },
-            'custodian_flex_option_t1': {
-                'final': _safe_result_df('custodian_flex_option_t1', 'final_recon'),
-            },
-        }
-
-        self._detailed_calculations['flex_option'] = {
-            'inputs': flex_option_details,
-            'reconciliations': reconciliation_outputs,
-        }
-
-    def _build_treasury_details(self):
-        """Assemble detailed calculations for treasuries for downstream reporting."""
-
-        def _safe_result_df(name: str, attr: str) -> pd.DataFrame:
-            result = self.results.get(name)
-            if not result:
-                return pd.DataFrame()
-            value = getattr(result, attr, pd.DataFrame())
-            return value.copy() if isinstance(value, pd.DataFrame) else pd.DataFrame()
-
-        current = self.fund.data.current
-        previous = self.fund.data.previous
-
-        treasury_details = {
-            # Current day holdings
-            'vest_current': current.vest.treasury.copy(),
-            'custodian_current': current.custodian.treasury.copy(),
-
-            # T-1 holdings
-            'vest_previous': previous.vest.treasury.copy(),
-            'custodian_previous': previous.custodian.treasury.copy(),
-        }
-
-        reconciliation_outputs = {
-            'custodian_treasury': {
-                'final': _safe_result_df('custodian_treasury', 'final_recon'),
-                'price_T': _safe_result_df('custodian_treasury', 'price_discrepancies_T'),
-                'price_T1': _safe_result_df('custodian_treasury', 'price_discrepancies_T1'),
-            },
-            'custodian_treasury_t1': {
-                'final': _safe_result_df('custodian_treasury_t1', 'final_recon'),
-            },
-        }
-
-        self._detailed_calculations['treasury'] = {
-            'inputs': treasury_details,
-            'reconciliations': reconciliation_outputs,
-        }
-
-    def _check_sg_equity(self) -> bool:
-        """Check if this fund has SG equity data"""
-        sg_equity = self.fund_data.get('sg_equity', pd.DataFrame()) if isinstance(self.fund_data, dict) else pd.DataFrame()
-        return not sg_equity.empty
 
