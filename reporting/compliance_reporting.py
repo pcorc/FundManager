@@ -1179,7 +1179,8 @@ class ComplianceReportPDF(BaseReportPDF):
             rows.append([
                 str(date_disp),
                 str(fund_name),
-                str(gics.get("overall_gics_compliance", "")),
+                # Same fallback as the GICS_Compliance sheet: an early checker fail() carries no overall status.
+                str(gics.get("overall_gics_compliance", "FAIL")),
                 *("Yes" if flag else "No" for flag in flags),
                 can_exceed,
                 exceptions,
