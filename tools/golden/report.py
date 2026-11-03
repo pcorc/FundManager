@@ -28,7 +28,8 @@ ATTR_NAMES = {"dimensions": "Used range", "merged": "Merged cells", "freeze_pane
               "col widths": "Column widths", "row heights": "Row heights"}
 _GENERATED = re.compile(r"Generated: \d{4}-\d{2}-\d{2}")
 _BLOCK_TAG = re.compile(r"(?i)(?=<(?:tr|h\d|p|br|li|div|table)\b)")
-COUNTS = ("files_added", "files_removed", "files_changed", "cells", "styles", "pages", "log", "email", "status")
+COUNTS = ("files_added", "files_removed", "files_changed", "sheets_added", "sheets_removed", "cells", "styles",
+          "pages", "log", "email", "status")
 
 
 @dataclass
@@ -39,17 +40,34 @@ class Review:
     lines: List[str] = field(default_factory=list)
 
 
+def _flat(v) -> str:
+    return str(v).replace("\r", "").replace("\n", "\\n")
+
+
+def _clip(s: str, limit: int, start: int = 0) -> str:
+    head = "..." if start else ""
+    body = s[start:start + limit - len(head)]
+    return head + body if start + len(body) >= len(s) else head + body[:-3] + "..."
+
+
 def _short(v, limit: int = MAX_TEXT) -> str:
-    s = str(v).replace("\r", "").replace("\n", "\\n")
-    return s if len(s) <= limit else s[:limit - 3] + "..."
+    s = _flat(v)
+    return s if len(s) <= limit else _clip(s, limit)
 
 
-def _cell(v) -> str:
-    return "(empty)" if v is None else _short(v).replace("|", "\\|")
+def _pair(a, b, limit: int = MAX_TEXT):
+    """Both values cut to limit, keeping the first differing character in view on both sides."""
+    sa, sb = _flat(a), _flat(b)
+    p = next((i for i, (x, y) in enumerate(zip(sa, sb)) if x != y), min(len(sa), len(sb)))
+    start = 0 if p < limit - 40 else p - 30
+    return tuple(s if len(s) <= limit else _clip(s, limit, start) for s in (sa, sb))
 
 
 def _shown(ca, cb):
-    sa, sb = _cell(ca.value), _cell(cb.value)
+    va, vb = ca.value, cb.value
+    if va is not None and type(va) is type(vb) and va != vb and _flat(va) == _flat(vb):
+        va, vb = repr(va), repr(vb)  # differ only in characters flattened for display (e.g. \r)
+    sa, sb = ("(empty)" if v is None else s.replace("|", "\\|") for v, s in zip((ca.value, cb.value), _pair(va, vb)))
     if sa == sb:  # same text, different type (e.g. 1 vs "1", or an empty cell's data type)
         ka, kb = (type(ca.value).__name__, type(cb.value).__name__)
         ka, kb = (ka, kb) if ka != kb else (f"cell type {ca.data_type}", f"cell type {cb.data_type}")
@@ -58,7 +76,25 @@ def _shown(ca, cb):
 
 
 def _udiff(a: List[str], b: List[str], context: int = 2) -> List[str]:
-    lines = [_short(x, 300) for x in difflib.unified_diff(a, b, "before", "after", n=context, lineterm="")]
+    raw = list(difflib.unified_diff(a, b, "before", "after", n=context, lineterm=""))
+    lines, i = raw[:2], 2
+    while i < len(raw):  # pair each run of -lines with the +lines after it and cut both around their first difference
+        j = i
+        while j < len(raw) and raw[j][:1] == "-":
+            j += 1
+        k = j
+        while k < len(raw) and raw[k][:1] == "+":
+            k += 1
+        if k == i:
+            lines.append(_short(raw[i], 300))
+            i += 1
+            continue
+        minus, plus = raw[i:j], raw[j:k]
+        for n in range(min(len(minus), len(plus))):
+            ma, pb = _pair(minus[n][1:], plus[n][1:], 299)
+            minus[n], plus[n] = "-" + ma, "+" + pb
+        lines += [x[0] + _short(x[1:], 299) for x in minus + plus]
+        i = k
     if len(lines) > MAX_DIFF_LINES:
         lines = lines[:MAX_DIFF_LINES] + [f"... ({len(lines) - MAX_DIFF_LINES} more diff lines not shown)"]
     return ["```diff", *lines, "```"] if lines else []
@@ -69,7 +105,7 @@ def _attr_change(va, vb) -> str:
         keys = sorted({k for k in va.keys() | vb.keys() if va.get(k) != vb.get(k)}, key=str)
         parts = [f"{k}: {va.get(k, '(none)')} -> {vb.get(k, '(none)')}" for k in keys]
         return _short("; ".join(parts), 400)
-    return f"{_short(va, 200)} -> {_short(vb, 200)}"
+    return " -> ".join(_pair(va, vb, 200))
 
 
 def _sheet(name: str, sa, sb, counts: dict) -> List[str]:
@@ -105,7 +141,7 @@ def _sheet(name: str, sa, sb, counts: dict) -> List[str]:
         out.append(f"Formatting changed in {len(styles)} cell(s) ({summary}) in column(s) {', '.join(cols)}. "
                    "First examples:")
         for coord, parts in styles[:MAX_STYLE_EXAMPLES]:
-            desc = "; ".join(f"{k} `{_short(x, 120)}` -> `{_short(y, 120)}`" for k, x, y in parts)
+            desc = "; ".join("{} `{}` -> `{}`".format(k, *_pair(x, y, 120)) for k, x, y in parts)
             out.append(f"- {name}!{coord}: {desc}")
         out.append("")
     return out
@@ -117,6 +153,8 @@ def _xlsx(pa: Path, pb: Path, counts: dict) -> List[str]:
     wa, wb = openpyxl.load_workbook(pa), openpyxl.load_workbook(pb)
     added = [s for s in wb.sheetnames if s not in wa.sheetnames]
     removed = [s for s in wa.sheetnames if s not in wb.sheetnames]
+    counts["sheets_added"] += len(added)
+    counts["sheets_removed"] += len(removed)
     out = [f"- Sheet added: `{s}`" for s in added] + [f"- Sheet removed: `{s}`" for s in removed]
     common = [s for s in wa.sheetnames if s in wb.sheetnames]
     if [s for s in wb.sheetnames if s in common] != common:
@@ -211,7 +249,7 @@ def _status(root_a: Path, root_b: Path, counts: dict) -> List[str]:
         out.append(f"- Exit code: {sa.get('exit_code')} -> {sb.get('exit_code')}")
     ea, eb = (_norm_text(s["error"], r) if s.get("error") else None for s, r in ((sa, root_a), (sb, root_b)))
     if ea != eb:
-        out.append(f"- Error: {_short(ea or '(none)', 400)} -> {_short(eb or '(none)', 400)}")
+        out.append("- Error: {} -> {}".format(*_pair(ea or "(none)", eb or "(none)", 400)))
         if sb.get("traceback"):
             out += ["", "Current traceback (last lines):", "", "```",
                     *_norm_text(sb["traceback"], root_b).splitlines()[-15:], "```"]
@@ -278,18 +316,20 @@ def render(reviews: List[Review], reference: str) -> str:
         f"- Scenarios compared: {len(reviews)} ({len(reviews) - len(changed)} unchanged, **{len(changed)} changed**)",
         f"- Report files: {total['files_added']} new, {total['files_removed']} no longer produced, "
         f"{total['files_changed']} changed",
+        f"- Spreadsheet sheets: {total['sheets_added']} new, {total['sheets_removed']} removed",
         f"- Spreadsheet cells: {total['cells']} value(s) changed, {total['styles']} with formatting changes",
         f"- PDF pages changed: {total['pages']}",
         f"- Run log changed in {per('log')} scenario(s); emails in {per('email')}; run status in {per('status')}",
         "",
     ]
     if changed:
-        out += ["| Scenario | Files new / gone / changed | Cell values | Formatting | PDF pages | Log | Email | Status |",
-                "|---|---|---|---|---|---|---|---|"]
+        out += ["| Scenario | Files new / gone / changed | Sheets new / gone | Cell values | Formatting | PDF pages "
+                "| Log | Email | Status |", "|---|---|---|---|---|---|---|---|---|"]
         yes = lambda n: "changed" if n else ""
         for r in changed:
             c = r.counts
-            out.append(f"| {r.name} | {c['files_added']} / {c['files_removed']} / {c['files_changed']} | {c['cells']} "
+            out.append(f"| {r.name} | {c['files_added']} / {c['files_removed']} / {c['files_changed']} "
+                       f"| {c['sheets_added']} / {c['sheets_removed']} | {c['cells']} "
                        f"| {c['styles']} | {c['pages']} | {yes(c['log'])} | {yes(c['email'])} | {yes(c['status'])} |")
         out.append("")
     unchanged = [r.name for r in reviews if not r.changed]

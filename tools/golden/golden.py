@@ -72,15 +72,19 @@ def _rehome(text: str, src: Path, dst: Path) -> str:
     return text
 
 
-def _copy_run(src: Path, dst: Path) -> None:
-    """Copy a run root, re-pointing the run-root paths recorded in its logs/emails/status at dst."""
+def _copy_run(src: Path, dst: Path, home: Path = None) -> None:
+    """Copy a run root to dst, re-pointing the run-root paths in its meta/ (logs/emails/status) at home (default dst).
+
+    meta/ is written as UTF-8 by the runner; cwd/ (locale-encoded app logs, never diffed) is copied verbatim.
+    """
+    home = home or dst
     shutil.rmtree(dst, ignore_errors=True)
     shutil.copytree(src, dst)
-    for f in [*(dst / "meta").rglob("*"), *(dst / "cwd").rglob("*")]:
+    for f in (dst / "meta").rglob("*"):
         if f.is_file():
             text = f.read_bytes().decode("utf-8")
-            moved = _rehome(text, src, dst)
-            if _norm_text(moved, dst) != _norm_text(text, src):
+            moved = _rehome(text, src, home)
+            if _norm_text(moved, home) != _norm_text(text, src):
                 raise RuntimeError(f"re-pointing paths changed {f} beyond its run root")
             f.write_bytes(moved.encode("utf-8"))
 
@@ -100,9 +104,18 @@ def snapshot(args) -> int:
     if dst.exists():
         print(f"snapshot already exists: {dst}")
         return 1
-    for src in sorted(p for p in (WORK / "baseline").iterdir() if p.is_dir()):
-        _copy_run(src, dst / src.name)
-    shutil.copytree(WORK / "data", dst / "data")
+    tmp = dst.with_name(dst.name + ".partial")  # renamed into place only once complete
+    shutil.rmtree(tmp, ignore_errors=True)
+    try:
+        for src in sorted(p for p in (WORK / "baseline").iterdir() if p.is_dir()):
+            _copy_run(src, tmp / src.name, dst / src.name)
+        shutil.copytree(WORK / "data", tmp / "data")
+        tmp.rename(dst)
+    except (OSError, UnicodeDecodeError, RuntimeError) as exc:
+        print(f"snapshot not written: {exc}")
+        return 1
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     print(f"snapshot written: {dst}")
     return 0
 
@@ -115,13 +128,26 @@ def rebaseline(names) -> int:
     if missing:
         print(f"no current output for {', '.join(missing)}; run check or report first")
         return 1
-    ok = True
-    for name in sorted(names, key=lambda n: n in EQUIVALENT_REQUESTS):  # bases first, then their equivalents
-        if name in EQUIVALENT_REQUESTS:
-            ok &= _report(name, diff_roots(WORK / "baseline" / _base(name), CURRENT / name))
-        else:
-            _copy_run(CURRENT / name, WORK / "baseline" / name)
+    bases = [n for n in names if n not in EQUIVALENT_REQUESTS]
+    staging = WORK / ".rebaseline-staging"  # copy everything first so a failure leaves the baseline untouched
+    shutil.rmtree(staging, ignore_errors=True)
+    try:
+        for name in bases:
+            _copy_run(CURRENT / name, staging / name, WORK / "baseline" / name)
+    except (OSError, UnicodeDecodeError, RuntimeError) as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        print(f"baseline unchanged, could not copy current outputs: {exc}")
+        return 1
+    try:
+        for name in bases:
+            shutil.rmtree(WORK / "baseline" / name, ignore_errors=True)
+            (staging / name).rename(WORK / "baseline" / name)
             print(f"REBASELINED {name}")
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    ok = True
+    for name in (n for n in names if n in EQUIVALENT_REQUESTS):  # checked against their (new) base
+        ok &= _report(name, diff_roots(WORK / "baseline" / _base(name), CURRENT / name))
     return 0 if ok else 1
 
 
