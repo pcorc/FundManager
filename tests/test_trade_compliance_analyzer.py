@@ -25,8 +25,8 @@ from reporting.trade_compliance_analyzer import TradingComplianceAnalyzer  # noq
 DAY = date(2026, 10, 30)
 
 
-def _fund_data(equity=None, options=None, tna=1_000_000.0):
-    snapshot = FundSnapshot(vest=FundHoldings(equity=equity, options=options), tna=tna, ta=tna)
+def _fund_data(equity=None, options=None, treasury=None, tna=1_000_000.0):
+    snapshot = FundSnapshot(vest=FundHoldings(equity=equity, options=options, treasury=treasury), tna=tna, ta=tna)
     return FundData(current=snapshot, previous=snapshot)
 
 
@@ -81,6 +81,15 @@ class ExAnteHoldingsTests(unittest.TestCase):
         self.post.data = _fund_data(equity=_equity(price=11.0, iiv_shares=150.0))
         summary = _analyze(self.post, self.ante)["trade_info"]["asset_trade_summary"]["equity"]
         self.assertEqual(summary["trade_value"], 550.0)
+
+    def test_treasury_prices_are_per_100_face(self):
+        bills = pd.DataFrame({"cusip": ["912797TM9"], "nav_shares": [0.0], "iiv_shares": [200_000.0],
+                              "trade_rebal": [200_000.0], "price": [99.5]})
+        self.post.data = _fund_data(treasury=bills)
+        trade_info = _analyze(self.post, self.ante)["trade_info"]
+        summary = trade_info["asset_trade_summary"]["treasury"]
+        self.assertEqual((summary["trade_value"], summary["ex_post_market_value"]), (199_000.0, 199_000.0))
+        self.assertEqual(trade_info["trade_activity"]["treasury"]["buys"][0]["market_value"], 199_000.0)
 
 
 class StatusTests(unittest.TestCase):

@@ -284,6 +284,8 @@ class TradingComplianceAnalyzer:
         if not non_empty(df) or "price" not in df.columns or quantities.empty:
             return 0.0
         prices = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
+        if asset_type == "treasury":
+            prices = prices / 100.0  # quoted per 100 face, as in the holdings' treasury_market_value
 
         # First existing multiplier column (not first positive value, unlike per-trade estimates).
         multiplier_series = pd.Series(1.0, index=df.index, dtype=float)
@@ -382,7 +384,8 @@ class TradingComplianceAnalyzer:
 
     @staticmethod
     def _estimate_trade_market_value(row: pd.Series, quantity: float, asset_type: str) -> float:
-        """Market value of one trade: price x quantity x multiplier, or abs(qty x multiplier) without a price."""
+        """Market value of one trade: price x quantity x multiplier (treasury prices per 100 face), or
+        abs(qty x multiplier) without a price."""
         multiplier = 1.0
         if asset_type == "options":
             multiplier = 100.0  # Default for options; first positive multiplier column wins.
@@ -405,6 +408,8 @@ class TradingComplianceAnalyzer:
                 price_value = 0.0
 
         if price_value > 0:
+            if asset_type == "treasury":
+                price_value /= 100.0  # quoted per 100 face
             return abs(price_value * quantity * multiplier)
         return abs(quantity * multiplier)
 
