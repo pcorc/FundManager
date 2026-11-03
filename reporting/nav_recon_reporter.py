@@ -7,15 +7,19 @@ from datetime import date, datetime
 from typing import Any, Mapping, Optional
 from pathlib import Path
 
+from openpyxl import load_workbook
+
+from reporting.combined_reconciliation_report import CombinedReconciliationReport
 from reporting.nav_recon_reporting import (
     GeneratedNAVReconciliationReport,
-    generate_nav_reconciliation_reports,
-    generate_reconciliation_summary_pdf,
+    NAVReconciliationExcelReport,
+    convert_nav_results_to_dicts,
 )
 from reporting.reconciliation_reporting import (
     GeneratedReconciliationReport,
     generate_reconciliation_reports,
 )
+from reporting.report_utils import normalize_report_date
 
 
 @dataclass
@@ -36,51 +40,47 @@ def build_nav_reconciliation_reports(
         nav_results: Mapping[str, Any] | None = None,
 ) -> Optional[GeneratedReconciliationArtefacts]:
     """Build holdings/NAV reconciliation artefacts using provided payloads."""
+    holdings: Mapping[str, Any] = holdings_results or {}
+    nav: Mapping[str, Any] = nav_results or {}
 
-    derived_holdings: Mapping[str, Any] = holdings_results or {}
-    derived_nav: Mapping[str, Any] = nav_results or {}
-
-    if not derived_holdings and not derived_nav:
+    if not holdings and not nav:
         return None
 
     date_str = str(report_date)
-
-    # ✅ FIX: Wrap in date structure for consistency across all reporting functions
-    nav_by_date = {date_str: derived_nav} if derived_nav else {}
-    holdings_by_date = {date_str: derived_holdings} if derived_holdings else {}
-
-    excel_prefix = f"{file_name_prefix}_{date_str}"
-    excel_path = Path(output_dir) / f"{excel_prefix}.xlsx"
+    file_stem = f"{file_name_prefix}_{date_str}"
+    excel_path = Path(output_dir) / f"{file_stem}.xlsx"
 
     holdings_report: Optional[GeneratedReconciliationReport] = None
-    if derived_holdings:
+    if holdings:
         holdings_report = generate_reconciliation_reports(
-            holdings_by_date,  # ✅ Pass wrapped structure
+            {date_str: holdings},
             report_date,
             output_dir,
             file_name_prefix=file_name_prefix,
         )
 
     nav_report: Optional[GeneratedNAVReconciliationReport] = None
-    if derived_nav:
-        # Build the Excel path
-        excel_output = generate_nav_reconciliation_reports(
-            nav_by_date,  # ✅ Pass wrapped structure
-            str(report_date),
-            excel_path,
+    # The NAV sheets are appended to the holdings workbook written above.
+    if nav:
+        nav = convert_nav_results_to_dicts(nav)
+        NAVReconciliationExcelReport(
+            results=nav,
+            report_date=date_str,
+            output_path=excel_path,
+            workbook=load_workbook(excel_path) if excel_path.exists() else None,
         )
-
-        nav_report = GeneratedNAVReconciliationReport(excel_path=excel_output)
+        nav_report = GeneratedNAVReconciliationReport(excel_path=str(excel_path))
 
     combined_pdf: Optional[str] = None
     if create_pdf:
-        combined_pdf = generate_reconciliation_summary_pdf(
-            holdings_by_date,  # ✅ Pass wrapped structure
-            nav_by_date,  # ✅ Pass wrapped structure
-            report_date,
-            output_dir,
-            file_name=f"{excel_prefix}.pdf",
+        pdf_path = Path(output_dir) / f"{file_stem}.pdf"
+        CombinedReconciliationReport(
+            {fund: payload for fund, payload in nav.items() if payload},
+            {fund: payload for fund, payload in holdings.items() if payload},
+            normalize_report_date(report_date),
+            pdf_path,
         )
+        combined_pdf = str(pdf_path)
 
     return GeneratedReconciliationArtefacts(
         holdings=holdings_report,
