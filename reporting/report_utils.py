@@ -5,13 +5,12 @@ from __future__ import annotations
 import numbers
 from collections.abc import Mapping
 from datetime import date, datetime
-from typing import Any, Dict, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Tuple
 
-
-try:  # pragma: no cover - optional import for typing only
+if TYPE_CHECKING:
     from services.compliance_checker import ComplianceResult
-except Exception:  # pragma: no cover - safeguard during cold starts
-    ComplianceResult = Any  # type: ignore
+
+_RECON_PAYLOAD_KEYS = ("summary", "details", "custodian_equity", "custodian_option", "index_equity")
 
 
 # ---------------------------------------------------------------------------
@@ -89,28 +88,8 @@ def _normalize_reconciliation_payload(raw_results: Mapping[str, Any]) -> Dict[st
     if not raw_results:
         return {}
 
-    # STEP 1: Detect and unwrap date-keyed structure if present
-    first_key = next(iter(raw_results.keys()))
-    first_value = raw_results[first_key]
-
-    # Check if this is date-wrapped: {date: {fund: payload}}
-    fund_level_data = raw_results
-    if isinstance(first_value, dict) and first_value:
-        sample_nested_key = next(iter(first_value.keys()))
-        sample_nested_value = first_value.get(sample_nested_key)
-
-        # If nested value has reconciliation-specific keys, parent is date wrapper
-        if isinstance(sample_nested_value, dict) and any(
-                key in sample_nested_value
-                for key in ["summary", "details", "custodian_equity",
-                            "custodian_option", "index_equity"]
-        ):
-            # This is date-wrapped, unwrap to fund level
-            fund_level_data = first_value
-
-    # STEP 2: Normalize the fund-level data to ensure summary/details structure
     normalized: Dict[str, Dict[str, Any]] = {}
-    for fund_name, payload in (fund_level_data or {}).items():
+    for fund_name, payload in (_unwrap_if_date_keyed(raw_results, _RECON_PAYLOAD_KEYS) or {}).items():
         if not payload:
             continue
         if "summary" in payload or "details" in payload:
@@ -125,12 +104,21 @@ def _normalize_reconciliation_payload(raw_results: Mapping[str, Any]) -> Dict[st
 
 
 # ---------------------------------------------------------------------------
-# NAV reconciliation helpers
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+def _unwrap_if_date_keyed(payload: Mapping[str, Any], keys: Tuple[str, ...]) -> Mapping[str, Any]:
+    """Return the FIRST date's ``{fund: payload}`` if ``payload`` is ``{date: {fund: payload}}``.
+
+    Only the first value is sampled; later dates are dropped.
+    """
+    first_value = next(iter(payload.values()))
+    if isinstance(first_value, dict) and first_value:
+        sample = next(iter(first_value.values()))
+        if isinstance(sample, dict) and any(key in sample for key in keys):
+            return first_value
+    return payload
+
 
 def _is_compliance_result(value: Any) -> bool:
     return hasattr(value, "is_compliant") and hasattr(value, "details")
