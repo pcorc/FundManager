@@ -13,6 +13,11 @@ Settings (environment or ``.env``): ``FUNDMANAGER_UI_OUTPUT_ROOT``,
 ``FUNDMANAGER_UI_USER_HEADER`` (SSO proxy header with the username),
 ``FUNDMANAGER_UI_PASSWORD`` (optional shared password; also read from
 ``st.secrets``) and ``FUNDMANAGER_UI_CATALOG_TTL`` (seconds, default 600).
+
+With ``FUNDMANAGER_UI_USER_HEADER`` set, the app trusts that header as the
+user's identity, so Streamlit must only be reachable through the SSO proxy
+(listen on 127.0.0.1 or firewall the port) and the proxy must overwrite any
+copy of the header the client sends.
 """
 from __future__ import annotations
 
@@ -21,8 +26,9 @@ import hmac
 import logging
 import os
 import sys
+import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Dict, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:  # `streamlit run ui/app.py` only puts ui/ on the path
@@ -34,8 +40,8 @@ from config import fund_definitions  # noqa: E402
 from processing import api  # noqa: E402
 from ui import history_page, new_run, runner  # noqa: E402
 
-PAGES = {"New run": new_run.render, "Run history": history_page.render_history, "Reports": history_page.render_reports}
 _log = logging.getLogger("fundmanager.ui")
+CATALOG_RETRY_SECONDS = 60  # how long a failed catalog load is cached before the DB is tried again
 
 
 def _catalog_ttl() -> int:
@@ -47,21 +53,37 @@ def _catalog_ttl() -> int:
 
 @st.cache_data(ttl=_catalog_ttl(), show_spinner="Loading fund groups from the database…")
 def load_catalog() -> dict:
-    """``processing.api.catalog()`` (reads the cohorts from the DB), cached for the TTL."""
-    return api.catalog()
+    """``processing.api.catalog()`` (reads the cohorts from the DB), cached for the TTL.
+
+    A failure is cached too, as a DB-free fallback (no fund groups) marked with ``_error``, so a down DB
+    costs one connect timeout per :data:`CATALOG_RETRY_SECONDS`, not one per click.
+    """
+    try:
+        return api.catalog()
+    except Exception as exc:  # the DB is down or misconfigured: keep the app usable with explicit tickers
+        _log.error("Loading the catalog failed: %s", type(exc).__name__)  # no message: it may name the DB
+        return {"cohorts": {}, "funds": sorted(fund_definitions.FUND_DEFINITIONS),
+                "operations": list(api.OPERATIONS), "rule_catalog": api.rule_catalog(),
+                "date_modes": list(api.DATE_MODES), "_error": type(exc).__name__, "_at": time.time()}
 
 
 def get_catalog() -> dict:
-    """The cached catalog, or a DB-free fallback (no fund groups) when the DB cannot be reached."""
-    try:
-        return load_catalog()
-    except Exception as exc:  # the DB is down or misconfigured: keep the app usable with explicit tickers
-        _log.error("Loading the catalog failed: %s", type(exc).__name__)  # no message: it may name the DB
-        st.error(f"Could not load the fund groups from the database ({type(exc).__name__}); see the server log. "
+    """The cached catalog (or its fallback, retried after :data:`CATALOG_RETRY_SECONDS`), with a notice on failure."""
+    catalog = load_catalog()
+    if "_error" in catalog and time.time() - catalog.get("_at", 0) > CATALOG_RETRY_SECONDS:
+        load_catalog.clear()
+        catalog = load_catalog()
+    if "_error" in catalog:
+        st.error(f"Could not load the fund groups from the database ({catalog['_error']}); see the server log. "
                  "You can still pick funds by ticker. Use 'Reload fund groups' to retry.")
-        return {"cohorts": {}, "funds": sorted(fund_definitions.FUND_DEFINITIONS),
-                "operations": list(api.OPERATIONS), "rule_catalog": api.rule_catalog(),
-                "date_modes": list(api.DATE_MODES)}
+    return catalog
+
+
+PAGES: Dict[str, Callable[[str], None]] = {
+    "New run": lambda user: new_run.render(get_catalog(), user),
+    "Run history": history_page.render_history,
+    "Reports": history_page.render_reports,
+}
 
 
 def _configured_password() -> Optional[str]:
@@ -109,19 +131,20 @@ def main() -> None:
         st.error("Not signed in: the sign-in header is missing. Open the app through the company SSO link.")
         return
     st.session_state.setdefault("page", "New run")
+    new_run.keep_form_state()  # the New run picks survive visits to the other pages
     with st.sidebar:
         st.markdown("### FundManager")
         page = st.radio("Page", list(PAGES), key="page", label_visibility="collapsed")
         st.caption(f"Signed in as **{user}**")
         st.caption(f"Output: `{runner.output_root()}`")
+        if runner.root_too_deep(runner.output_root()):
+            st.warning("The output folder path is long: some report paths will pass 260 characters, which "
+                       "Explorer and Excel may not open. Set FUNDMANAGER_UI_OUTPUT_ROOT to a short folder.")
         publish = runner.publish_root()
         st.caption(f"Publish: `{publish}`" if publish else "Publish: off")
         if st.button("Reload fund groups", help="Re-read the fund groups (cohorts) from the database"):
             load_catalog.clear()
-    if page == "New run":
-        new_run.render(get_catalog(), user)
-    else:
-        PAGES[page](user)
+    PAGES[page](user)
 
 
 main()
