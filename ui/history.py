@@ -5,13 +5,17 @@ starting, a UI that died mid-run, a hand-edited JSON file): a folder with
 neither ``meta.json`` nor ``request.json`` is not a run and is skipped, and a
 missing or unreadable file just leaves its fields empty. Report paths from
 ``result.json`` are only trusted when they exist inside the run folder.
+Error texts are passed through :func:`ui.runner.redact` (they can quote the
+DB connection string). The zip of a run is built once, under a per-run lock
+(several sessions often render the same just-finished run at once).
 """
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from processing.api import ReportFile, RunRequest, RunResult, bundle, request_from_json
 from ui import runner
@@ -29,9 +33,10 @@ class RunRecord:
     as_of: str = ""  # the request's date or range, for browsing reports by date
     exit_code: Optional[int] = None
     status: str = "incomplete"  # running, ok, ok with errors, failed, invalid, cancelled, timed out, incomplete
-    files: int = 0
-    errors: List[str] = field(default_factory=list)
-    published: int = 0
+    files: int = 0  # distinct report files
+    errors: List[str] = field(default_factory=list)  # redacted
+    published: int = 0  # publishes that copied files
+    report_days: Tuple[str, ...] = ()  # the distinct ReportFile.day values ("stacked" for a stacked workbook)
 
     @property
     def name(self) -> str:
@@ -66,7 +71,8 @@ def load_record(run_dir: Path, active: Optional[Path] = None) -> Optional[RunRec
     result = runner.read_json(run_dir / runner.RESULT) or {}
     request = _try_request(run_dir)
     exit_code = meta.get("exit_code", result.get("exit_code"))
-    errors = [str(e) for e in result.get("errors") or [] if e]
+    errors = [runner.redact(e) for e in result.get("errors") or [] if e]
+    files = report_files(load_result(run_dir)) if result else []
     if request is not None:
         as_of = request.start_date.isoformat()
         if request.end_date and request.end_date != request.start_date:
@@ -82,9 +88,10 @@ def load_record(run_dir: Path, active: Optional[Path] = None) -> Optional[RunRec
         as_of=as_of,
         exit_code=exit_code if isinstance(exit_code, int) else None,
         status=_status(run_dir, meta, exit_code, errors, active),
-        files=len(load_result(run_dir).files) if result else 0,
+        files=len(files),
         errors=errors,
         published=len(meta.get("published") or []),
+        report_days=tuple(dict.fromkeys(f.day for f in files)),
     )
 
 
@@ -137,19 +144,68 @@ def load_result(run_dir: Path) -> RunResult:
     )
 
 
+_LABEL_WORDS = {"nav": "NAV", "eod": "EOD", "pdf": "PDF", "excel": "Excel"}
+_KINDS = ("excel", "pdf")
+
+
+def readable_label(label: str) -> str:
+    """``holdings_reconciliation_excel`` -> ``Holdings reconciliation``; the file kind is shown separately."""
+    words = [w for w in str(label).split("_") if w]
+    if len(words) > 1 and words[-1] in _KINDS:
+        words = words[:-1]
+    text = " ".join(_LABEL_WORDS.get(w, w) for w in words) or str(label)
+    return text[:1].upper() + text[1:]
+
+
+def report_files(result: RunResult) -> List[ReportFile]:
+    """``result.files`` with each file once (labels of a shared workbook joined) and readable labels."""
+    by_path: Dict[str, ReportFile] = {}
+    labels: Dict[str, List[str]] = {}
+    for report in result.files:
+        key = os.path.normcase(runner.plain_path(report.path))
+        by_path.setdefault(key, report)
+        label = readable_label(report.label)
+        if label not in labels.setdefault(key, []):
+            labels[key].append(label)
+    return [ReportFile(day=r.day, label=" + ".join(labels[k]), path=r.path, kind=r.kind) for k, r in by_path.items()]
+
+
+_ZIP_LOCKS: Dict[str, threading.Lock] = {}
+_ZIP_LOCKS_GUARD = threading.Lock()
+
+
+def _zip_lock(run_dir: Path) -> threading.Lock:
+    with _ZIP_LOCKS_GUARD:
+        return _ZIP_LOCKS.setdefault(os.path.normcase(str(run_dir)), threading.Lock())
+
+
 def zip_reports(run_dir: Path) -> Optional[Path]:
     """``<run_dir>/<run name>.zip`` of every report (built once, rebuilt if result.json is newer); ``None`` if none."""
     run_dir = Path(run_dir)
     result = load_result(run_dir)
     if not result.files:
         return None
-    zip_path = run_dir / f"{run_dir.name}.zip"
-    try:
-        fresh = zip_path.stat().st_mtime >= (run_dir / runner.RESULT).stat().st_mtime
-    except OSError:
-        fresh = False
-    if not fresh:
-        tmp = zip_path.with_suffix(f".{os.getpid()}.tmp")
-        bundle(result, tmp)
-        os.replace(tmp, zip_path)
+    zip_path = Path(runner.long_path(run_dir / f"{run_dir.name}.zip", reserve=40))  # leaves room for the temp name
+    with _zip_lock(run_dir):  # sessions of this process build it once; other processes use their own temp file
+        try:
+            fresh = zip_path.stat().st_mtime >= (run_dir / runner.RESULT).stat().st_mtime
+        except OSError:
+            fresh = False
+        if not fresh:
+            tmp = zip_path.with_name(f"{zip_path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+            try:
+                bundle(result, tmp)
+                runner.retry(os.replace, tmp, zip_path)
+            finally:
+                if tmp.exists():
+                    tmp.unlink()
     return zip_path
+
+
+def zip_bytes(run_dir: Path) -> bytes:
+    """The zip of ``run_dir``'s reports (built on demand), for a deferred download button."""
+    zip_path = zip_reports(run_dir)
+    if zip_path is None:
+        raise FileNotFoundError(f"{Path(run_dir).name} has no reports")
+    with _zip_lock(Path(run_dir)):
+        return runner.retry(zip_path.read_bytes)

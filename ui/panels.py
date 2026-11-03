@@ -6,13 +6,19 @@ serialisation needs a pyarrow build that matches the project's pinned NumPy
 
 The progress panel is a fragment that re-reads the run folder every
 ``POLL_SECONDS`` (so it keeps the page responsive, survives reruns and lets
-the user cancel); once the run's ``meta.json`` says it finished, it reruns the
-whole app, which then shows :func:`results_panel` instead.
+the user cancel). Each poll calls :func:`ui.runner.refresh`, which also
+finalizes a worker started before a UI restart; once the run has finished it
+reruns the whole app, which then shows :func:`results_panel` instead.
+
+Error messages and log tails go through :func:`ui.runner.redact`: a worker's
+DB error can quote the connection string. Widget keys that confirm an action
+(Publish) include the run folder, so a confirmation never carries over to
+another run.
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Mapping, Sequence
+from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
 import streamlit as st
 
@@ -35,9 +41,9 @@ def is_finished(run_dir: Path) -> bool:
 def progress_panel(run_dir: str, user: str) -> None:
     """Progress bar (fund index/total), stage indicator, log tail and Cancel for an active run."""
     path = Path(run_dir)
-    meta = runner.read_json(path / runner.META) or {}
-    if meta.get("finished"):
+    if runner.refresh(path):
         st.rerun()  # whole app: swap this panel for the results
+    meta = runner.read_json(path / runner.META) or {}
     state = runner.progress(runner.read_events(path))
     with st.container(border=True):
         st.subheader("Run in progress")
@@ -51,7 +57,7 @@ def progress_panel(run_dir: str, user: str) -> None:
             runner.cancel(path, by=user)
             st.rerun()
         with st.expander("Run log (tail)"):
-            st.code(runner.tail(path / runner.LOG, lines=30) or "(empty)", language="log")
+            st.code(runner.redact(runner.tail(path / runner.LOG, lines=30)) or "(empty)", language="log")
 
 
 def _stage_line(stage: str) -> str:
@@ -64,8 +70,11 @@ def _stage_line(stage: str) -> str:
     return " → ".join(parts)
 
 
-def results_panel(run_dir: Path, user: str, key: str) -> None:
-    """Status, errors, per-day summary, one download per report, zip-all, Publish and the log of a finished run."""
+def results_panel(run_dir: Path, user: str, key: str, day: Optional[str] = None) -> None:
+    """Status, errors, per-day summary, one download per report, zip-all, Publish and the log of a finished run.
+
+    ``day`` limits the per-file downloads to that report date (the Reports page); the zip has every file.
+    """
     run_dir = Path(run_dir)
     record = history.load_record(run_dir)
     if record is None:
@@ -76,32 +85,39 @@ def results_panel(run_dir: Path, user: str, key: str) -> None:
     show(f"**{record.status.upper()}** · exit code {record.exit_code} · {record.name} · {record.user} · "
          f"{record.started or '?'} → {record.finished or '…'}")
     st.caption(record.summary)
-    for error in result.errors:
+    for error in record.errors:  # redacted
         st.error(error)
     if result.summaries:
         st.markdown("**Summary per day**")
         st.markdown(markdown_table(summary_rows(result.summaries)))
-    if result.files:
-        st.markdown(f"**Reports ({len(result.files)})**")
-        zip_path = history.zip_reports(run_dir)
-        if zip_path is not None:
-            st.download_button("Download all (zip)", data=zip_path.read_bytes(), file_name=zip_path.name,
-                               mime="application/zip", key=f"{key}-zip", type="primary", on_click="ignore")
-        for i, report in enumerate(result.files):
+    files = history.report_files(result)
+    if files:
+        st.markdown(f"**Reports ({len(files)})**")
+        st.download_button("Download all (zip)", data=_zip_reader(run_dir), file_name=f"{run_dir.name}.zip",
+                           mime="application/zip", key=f"{key}-zip", type="primary", on_click="ignore")
+        for i, report in enumerate(files):
+            if day is not None and report.day != day:
+                continue
             path = Path(report.path)
-            st.download_button(f"{report.day} · {report.label} · {path.name}", data=_reader(path),
+            kind = "PDF" if report.kind == "pdf" else "Excel" if report.kind == "excel" else report.kind
+            st.download_button(f"{report.day} · {report.label} ({kind}) · {path.name}", data=_reader(path),
                                file_name=path.name, mime=_MIME.get(report.kind, "application/octet-stream"),
                                key=f"{key}-file-{i}", on_click="ignore")
         _publish_controls(run_dir, user, key)
     elif record.status not in ("running", "incomplete"):
         st.info("This run produced no report files.")
     with st.expander("Run log (tail)"):
-        st.code(runner.tail(run_dir / runner.LOG, lines=60) or "(empty)", language="log")
+        st.code(runner.redact(runner.tail(run_dir / runner.LOG, lines=60)) or "(empty)", language="log")
 
 
-def _reader(path: Path):
+def _reader(path: Path) -> Callable[[], bytes]:
     """Deferred download data: the file is read only when the user clicks."""
-    return lambda: path.read_bytes()
+    return lambda: runner.retry(path.read_bytes)
+
+
+def _zip_reader(run_dir: Path) -> Callable[[], bytes]:
+    """Deferred zip: built (once) and read only when the user clicks."""
+    return lambda: history.zip_bytes(run_dir)
 
 
 def summary_rows(summaries: Dict[str, dict]) -> List[dict]:
@@ -137,13 +153,14 @@ def _publish_controls(run_dir: Path, user: str, key: str) -> None:
     with st.expander(f"Publish to {dest}"):
         st.write("Copies this run's reports into the shared folder (same sub-folders). Existing files are "
                  "left untouched and listed as skipped.")
-        sure = st.checkbox("I want to publish these reports", key=f"{key}-publish-sure")
-        if st.button("Publish", key=f"{key}-publish", disabled=not sure):
+        sure = st.checkbox("I want to publish these reports", key=f"{key}-publish-sure-{run_dir.name}")
+        if st.button("Publish", key=f"{key}-publish-{run_dir.name}", disabled=not sure):
             try:
                 copied, skipped = runner.publish(run_dir, dest, by=user)
             except (OSError, ValueError) as exc:
                 st.error(f"Publish failed: {exc}")
             else:
-                st.success(f"Published {len(copied)} file(s) to {dest}.")
+                st.success(f"Published {len(copied)} file(s) to {dest}." if copied else
+                           "Nothing new to publish: every file is already there.")
                 if skipped:
                     st.warning("Skipped (already there): " + ", ".join(p.name for p in skipped))

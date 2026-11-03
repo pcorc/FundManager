@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 import zipfile
 from datetime import date
@@ -111,6 +112,48 @@ class HistoryTest(unittest.TestCase):
         self.assertEqual(history.zip_reports(run_dir).stat().st_mtime, mtime)  # reused, not rebuilt
         empty = self.make_run("20261103-140000-me-empty", result={"exit_code": 1})
         self.assertIsNone(history.zip_reports(empty))
+
+    def test_shared_workbook_is_listed_once_with_readable_labels(self) -> None:
+        run_dir = self.make_run("20261103-160000-me-s1", files=("recon.xlsx", "c.pdf"), meta={"finished": "f"},
+                                result={"exit_code": 0, "errors": ["db at mysql://fm:Sup3rSecret@h/db failed"]})
+        data = json.loads((run_dir / runner.RESULT).read_text())
+        recon = data["files"][0]
+        data["files"] = [{**recon, "label": "holdings_reconciliation_excel"},
+                         {**recon, "label": "nav_reconciliation_excel"},
+                         {**data["files"][1], "label": "compliance_pdf"},
+                         {**data["files"][1], "day": "stacked", "label": "compliance_pdf"}]
+        (run_dir / runner.RESULT).write_text(json.dumps(data))
+        files = history.report_files(history.load_result(run_dir))
+        self.assertEqual([f.label for f in files], ["Holdings reconciliation + NAV reconciliation", "Compliance"])
+        record = history.load_record(run_dir)
+        self.assertEqual(record.files, 2)
+        self.assertEqual(record.report_days, ("2026-10-30",))
+        self.assertEqual(record.errors, ["db at mysql://fm:***@h/db failed"])  # redacted
+        with zipfile.ZipFile(history.zip_reports(run_dir)) as archive:
+            self.assertEqual(len(archive.namelist()), 2)
+
+    def test_concurrent_zip_builds_do_not_collide(self) -> None:
+        run_dir = self.make_run("20261103-170000-me-zz", files=("a.xlsx", "b.xlsx", "c.pdf"),
+                                result={"exit_code": 0})
+        for path in (run_dir / runner.REPORTS).iterdir():
+            path.write_bytes(os.urandom(1_000_000))
+        failures = []
+
+        def render() -> None:
+            try:
+                history.zip_bytes(run_dir)
+            except OSError as exc:
+                failures.append(exc)
+
+        for _ in range(5):
+            (run_dir / f"{run_dir.name}.zip").unlink(missing_ok=True)
+            threads = [threading.Thread(target=render) for _ in range(3)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(failures, [])
+        self.assertEqual([p.name for p in run_dir.glob("*.tmp")], [])
 
     def test_load_request_round_trip(self) -> None:
         request = RunRequest(operations=("compliance", "reconciliation"), start_date=DAY, end_date=date(2026, 11, 2),

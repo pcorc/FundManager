@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import streamlit as st
 
@@ -36,17 +36,19 @@ def render_history(user: str) -> None:
 
 
 def render_reports(user: str) -> None:
-    """Browse the reports of finished runs by report date."""
+    """Browse the reports of finished runs by report date (each day a run wrote reports for)."""
     st.title("Reports")
-    by_day: Dict[str, List[RunRecord]] = defaultdict(list)
+    by_day: Dict[str, List[Tuple[RunRecord, str]]] = defaultdict(list)  # shown date -> (run, ReportFile.day)
     for record in history.list_runs(limit=HISTORY_LIMIT):
-        if record.files and record.as_of:
-            by_day[record.as_of].append(record)
+        for report_day in record.report_days:
+            shown = f"{record.as_of} (stacked)" if report_day == "stacked" else report_day
+            by_day[shown].append((record, report_day))
     if not by_day:
         st.info("No reports yet.")
         return
     day = st.selectbox("Report date", sorted(by_day, reverse=True), key="rep_day")
-    runs = {r.name: r for r in by_day[day]}
+    runs = {r.name: (r, d) for r, d in by_day[day]}
     name = st.selectbox("Run", list(runs), key="rep_run",
-                        format_func=lambda n: f"{n} · {runs[n].user} · {runs[n].status} · {runs[n].files} file(s)")
-    panels.results_panel(runs[name].run_dir, user, key="rep")
+                        format_func=lambda n: f"{n} · {runs[n][0].user} · {runs[n][0].status} · {runs[n][0].summary}")
+    record, report_day = runs[name]
+    panels.results_panel(record.run_dir, user, key="rep", day=report_day)
