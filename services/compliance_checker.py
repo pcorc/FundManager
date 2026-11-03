@@ -117,11 +117,15 @@ class ComplianceChecker:
     def _share_col(self) -> str:
         return "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
 
-    def _zero_shares(self, df: pd.DataFrame) -> pd.Series:
-        # Ownership tests in IRS, 12d-2 and 12d-3 deliberately use zero shares, so they always pass.
-        zeros = pd.Series(0.0, index=df.index, dtype=float)
-        df[self._share_col] = zeros
-        return zeros
+    def _held_shares(self, df: pd.DataFrame) -> pd.Series:
+        """Shares the fund holds per row (the analysis type's share column, numeric; missing -> 0)."""
+        share_col = self._share_col
+        if share_col in df.columns:
+            held = pd.to_numeric(df[share_col], errors="coerce").fillna(0.0)
+        else:
+            held = pd.Series(0.0, index=df.index, dtype=float)
+        df[share_col] = held
+        return held
 
     def _consolidate_holdings_by_issuer(self, holdings_df: pd.DataFrame) -> pd.DataFrame:
         """Aggregate holdings exposure by issuer without conditional adjustments."""
@@ -472,7 +476,7 @@ class ComplianceChecker:
         if "EQY_SH_OUT_million" not in bottom_50_df.columns:
             bottom_50_df["EQY_SH_OUT_million"] = 1.0
         denom = bottom_50_df["EQY_SH_OUT_million"].replace(0, 1)
-        share_series = self._zero_shares(bottom_50_df)
+        share_series = self._held_shares(bottom_50_df)
         bottom_50_df["exceeds_10_percent"] = (share_series / denom) > IRS_OWNERSHIP_LIMIT
         condition_IRS_2_a_10 = not bool(bottom_50_df["exceeds_10_percent"].any())
 
@@ -727,14 +731,15 @@ class ComplianceChecker:
         if exposures is None:
             calculations = {"real_estate_exposure": 0.0, "real_estate_percentage": 0.0, "total_exposure": 0.0}
             return _res(True, rule, calculations, real_estate_check_compliant=True)
-        # Exposure is deliberately forced to zero and the flag hard-coded True: this check always passes.
-        real_estate_exposure, total_exposure = 0.0, exposures[1]
+        real_estate_exposure, total_exposure = exposures
         calculations = {
             "real_estate_exposure": real_estate_exposure,
             "real_estate_percentage": real_estate_exposure / total_exposure if total_exposure > 0 else 0.0,
             "total_exposure": total_exposure,
         }
-        return _res(real_estate_exposure == 0.0, rule, calculations, real_estate_check_compliant=True)
+        # Same zero-tolerance test as commodities_check.
+        is_compliant = real_estate_exposure == 0.0
+        return _res(is_compliant, rule, calculations, real_estate_check_compliant=is_compliant)
 
     def commodities_check(self, fund: Fund) -> ComplianceResult:
         rule = "Commodities Exposure"
@@ -841,7 +846,7 @@ class ComplianceChecker:
 
         if "EQY_SH_OUT_million" not in insurance_holdings.columns:
             insurance_holdings["EQY_SH_OUT_million"] = 0.0
-        share_series = self._zero_shares(insurance_holdings)
+        share_series = self._held_shares(insurance_holdings)
         insurance_holdings["ownership_pct"] = _ownership_pct(share_series, insurance_holdings["EQY_SH_OUT_million"])
 
         max_ownership_pct = float(insurance_holdings["ownership_pct"].max())
@@ -879,7 +884,7 @@ class ComplianceChecker:
             )
 
         sec_related_businesses["EQY_SH_OUT_million"] = sec_related_businesses["EQY_SH_OUT_million"].replace(0, np.nan)
-        share_series = self._zero_shares(sec_related_businesses)
+        share_series = self._held_shares(sec_related_businesses)
         sec_related_businesses["ownership_pct"] = (
             share_series / sec_related_businesses["EQY_SH_OUT_million"]
         ).fillna(0.0)
