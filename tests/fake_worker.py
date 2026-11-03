@@ -4,8 +4,10 @@
 
 Behaviour follows the request's ``output_tag``: ``slow`` sleeps between funds
 (for lock / cancel / timeout tests), ``crash`` exits 1 without a result,
-``invalid`` exits 2 like a rejected request; anything else succeeds, writing one
-small Excel (and PDF when ``create_pdf``) file per day into ``output_dir``.
+``invalid`` exits 2 like a rejected request, ``leak`` fails with a DB error that
+quotes a connection string (for the redaction tests); anything else succeeds,
+writing one small Excel (and PDF when ``create_pdf``) file per day into
+``output_dir``. stderr gets a non-ASCII line, like the real worker's log.
 """
 import json
 import os
@@ -25,10 +27,18 @@ def main() -> int:
     request = json.loads(request_path.read_text(encoding="utf-8"))
     tag = request.get("output_tag") or ""
     sys.stderr.write(f"cwd={os.getcwd()}\nPYTHONPATH={os.environ.get('PYTHONPATH', '')}\n"
-                     f"PYTHONUNBUFFERED={os.environ.get('PYTHONUNBUFFERED', '')}\n")
+                     f"PYTHONUNBUFFERED={os.environ.get('PYTHONUNBUFFERED', '')}\n"
+                     "EOD dates — trade date: fake\n")
     sys.stderr.flush()
     if tag == "crash":
         sys.stderr.write("Traceback: boom\n")
+        return 1
+    if tag == "leak":
+        secret = "mysql+pymysql://fmuser:Hunter2Secret@db.internal/fm"
+        sys.stderr.write(f"OperationalError: cannot connect to {secret}\n")
+        result_path.write_text(json.dumps({"exit_code": 1, "summaries": {}, "paths": {}, "files": [],
+                                           "errors": [f"ArgumentError: Could not parse URL '{secret}'"]}),
+                               encoding="utf-8")
         return 1
     if tag == "invalid":
         result_path.write_text(json.dumps({"exit_code": 2, "summaries": {}, "paths": {}, "files": [],
