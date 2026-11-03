@@ -342,5 +342,50 @@ class SummaryMetricsTests(unittest.TestCase):
         gics.assert_called_once()
         section.assert_not_called()  # Summary Metrics was not selected
 
+
+class RuleSheetsFollowCheckerTests(unittest.TestCase):
+    """D9: Excel rule-sheet formulas and labels follow the checker and config/constants.py."""
+
+    def test_12d3_labels_and_rules(self):
+        from reporting.compliance_reporting import _12d3_row
+        payload = {"rule_1_pass": False, "rule_1_status": "FAIL", "rule_2_pass": True, "rule_3_pass": True}
+        row = _12d3_row("2026-10-30", "KNG", payload, {"max_weight": 0.07}, 5)
+        self.assertEqual(list(row)[2:5], ["Rule 1 (<=5% equities)", "Rule 2 (<=25% debt)",
+                                          "Rule 3 (<=10% total assets)"])
+        self.assertEqual(row["Rule 1 (<=5% equities)"], "FAIL")  # the checker's status, not a formula
+        self.assertEqual(row["Rule 3 (<=10% total assets)"], '=IF(K5<=0.1,"PASS","FAIL")')
+        self.assertEqual(list(row).index("Max Weight"), 10)  # column K
+
+    def test_irs_2a_50_is_checker_verdict_and_2b_not_evaluated(self):
+        from reporting.compliance_reporting import _irs_row
+        row = _irs_row("2026-10-30", "KNG", {"condition_IRS_2_a_50": False}, {}, 2)
+        self.assertEqual(row["condition_IRS_2_a_50"], "FAIL")
+        self.assertEqual(row["condition_IRS_2_b"], "N/A (not evaluated)")
+
+    def test_12d1_test_2_uses_largest_holding(self):
+        from reporting.compliance_reporting import _12d1_row
+        row = _12d1_row("2026-10-30", "KNG", {"test_2_pass": True, "test_3_pass": False},
+                        {"equity_market_value_max": 40.0, "equity_market_value_sum": 120.0}, 3)
+        self.assertEqual(list(row).index("Equity Market Value Max"), 10)  # column K
+        self.assertEqual(row["Equity Market Value Max"], 40.0)
+        self.assertEqual(row["Test 2 (<=5% Total Assets)"], '=IFERROR(IF(K3/C3<=0.05,"PASS","FAIL"),"PASS")')
+        self.assertEqual(row["Test 3 (<=10% Total Assets)"], '=IFERROR(IF(F3/C3<=0.1,"PASS","FAIL"),"FAIL")')
+
+    def test_prospectus_ratios_and_filter_follow_checker(self):
+        from reporting.compliance_reporting import _RULE_SHEETS, _prospectus_row
+        equity = _equity(eqyticker=["AAA"], equity_market_value=[900.0], nav_shares=[1.0],
+                         EQY_SH_OUT_million=[1_000.0])
+        fund = _fund("FDND", equity=equity)  # an ETF whose options are not in scope
+        result = ComplianceChecker({fund.name: fund}).prospectus_80pct_policy(fund)
+        calc = dict(result.calculations, total_opt_delta_notional_value=500.0)
+        row = _prospectus_row("2026-10-30", "FDND", dict(result.details), calc, 2)
+        self.assertEqual((row["Numerator"], row["Denominator"]), (calc["numerator"], calc["denominator"]))
+        self.assertEqual(row["Denominator"], 900.0 + calc["total_cash_value"] + calc["total_tbill_value"])
+        prospectus = next(spec for spec in _RULE_SHEETS if spec.key == "prospectus_80pct_policy")
+        from unittest import mock
+        with mock.patch("reporting.compliance_reporting._is_closed_end_fund", return_value=True):
+            self.assertEqual([prospectus.fund_filter(f) for f in ("P30128", "TR2B1", "HE3B1")],
+                             [False, False, True])
+
 if __name__ == "__main__":
     unittest.main()

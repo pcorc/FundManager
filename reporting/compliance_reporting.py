@@ -11,6 +11,14 @@ from typing import Any, Callable, Dict, Iterable, Mapping, NamedTuple, Optional
 
 import pandas as pd
 
+from config.constants import (
+    PROSPECTUS_MIN_THRESHOLD,
+    RULE_12D1A_SINGLE_ASSETS_LIMIT,
+    RULE_12D1A_TOTAL_ASSETS_LIMIT,
+    RULE_12D3_ASSET_LIMIT,
+    RULE_12D3_DEBT_LIMIT,
+    RULE_12D3_EQUITY_LIMIT,
+)
 from config.fund_definitions import vehicle_wrapper as _vehicle_wrapper
 from reporting.base_report_pdf import BaseReportPDF, draw_header_row
 from reporting.footnotes import FOOTNOTES
@@ -125,22 +133,28 @@ def _prospectus_row(report_date, fund_name, payload, calc, r):
     tbill = calc.get("total_tbill_value", 0.0) or 0.0
     cash = calc.get("total_cash_value", 0.0) or 0.0
     in_scope = bool(payload.get("options_in_scope"))
+    # The checker's ratios: options count on both sides only when in scope (closed-end funds use the
+    # option MV as the primary amount). A skipped fund has none, so its ratio leaves options out.
+    numerator = calc.get("numerator", equity + tbill)
+    denominator = calc.get("denominator", equity + cash + tbill)
+    numerator_mv = calc.get("numerator_mv", equity + tbill)
+    denominator_mv = calc.get("denominator_mv", equity + cash + tbill)
     return OrderedDict(
         [
             ("Date", report_date),
             ("Fund", fund_name),
-            ("Prospectus 80% Compliance", f'=IF(K{r}/J{r}>=0.8,"PASS","FAIL")'),
+            ("Prospectus 80% Compliance", f'=IF(K{r}/J{r}>={PROSPECTUS_MIN_THRESHOLD:g},"PASS","FAIL")'),
             ("Total Equity Market Value", equity),
             ("Total Option Delta Notional Value (DAN)", option_dan),
             ("Total Option Market Value", option_mv),
             ("Total T-Bill Value", tbill),
             ("Total Cash Value", cash),
             ("Max(CCET - DAN, 0)", max((cash + tbill) - option_dan, 0.0)),
-            ("Denominator", equity + option_dan + cash + tbill),
-            ("Numerator", equity + (option_dan if in_scope else 0.0) + tbill),
+            ("Denominator", denominator),
+            ("Numerator", numerator),
             ("Formula", f"=K{r}/J{r}"),
-            ("Denominator (Market Value)", equity + option_mv + cash + tbill),
-            ("Numerator (Market Value)", equity + (option_mv if in_scope else 0.0) + tbill),
+            ("Denominator (Market Value)", denominator_mv),
+            ("Numerator (Market Value)", numerator_mv),
             ("Formula (MV)", f"=N{r}/M{r}"),
             ("Options in Scope for 80%?", "Yes" if in_scope else "No"),
         ]
@@ -231,11 +245,13 @@ def _irs_row(report_date, fund_name, payload, calc, r):
             ("Date", report_date),
             ("Fund", fund_name),
             ("condition_IRS_1", _pf(payload.get("condition_IRS_1"))),
-            ("condition_IRS_2_a_50", f'=IF((I{r}+S{r})/H{r}>=0.5,"PASS","FAIL")'),
+            # The checker's test: qualifying assets >= 50% of net assets (net assets is not on the sheet).
+            ("condition_IRS_2_a_50", _pf(payload.get("condition_IRS_2_a_50"))),
             ("condition_IRS_2_a_5", f'=IF(L{r}<=0.5,"PASS","FAIL")'),
             ("condition_IRS_2_a_10", _na_status(payload.get("condition_IRS_2_a_10_status"))
              or _pf(payload.get("condition_IRS_2_a_10"))),
-            ("condition_IRS_2_b", _pf(payload.get("condition_IRS_2_b", True))),
+            ("condition_IRS_2_b", _pf(payload["condition_IRS_2_b"]) if "condition_IRS_2_b" in payload
+             else "N/A (not evaluated)"),  # the checker has no 2b test
             ("total_assets", num(calc, "total_assets")),
             ("qualifying_assets_value", num(calc, "qualifying_assets_value")),
             ("expenses", abs(num(calc, "expenses"))),
@@ -306,10 +322,15 @@ def _12d1_row(report_date, fund_name, payload, calc, r):
             ("Ownership % Max", num(calc, "ownership_pct_max")),
             ("Equity Market Value Sum", num(calc, "equity_market_value_sum")),
             ("Test 1 (<=3% Ownership)", test_1_na or f'=IF(E{r}<=0.03,"PASS","FAIL")'),
-            ("Test 2 (<=5% Total Assets)", f'=IF(F{r}/C{r}<=0.05,"PASS","FAIL")'),
-            ("Test 3 (<=10% Total Assets)", f'=IF(F{r}/C{r}<=0.10,"PASS","FAIL")'),
+            # Test 2 is the largest single holding (K), Test 3 the sum (F), as in the checker; with no
+            # total assets the formula falls back to the checker's verdict instead of #DIV/0!.
+            ("Test 2 (<=5% Total Assets)", f'=IFERROR(IF(K{r}/C{r}<={RULE_12D1A_SINGLE_ASSETS_LIMIT:g},'
+             f'"PASS","FAIL"),"{_pf(payload.get("test_2_pass"))}")'),
+            ("Test 3 (<=10% Total Assets)", f'=IFERROR(IF(F{r}/C{r}<={RULE_12D1A_TOTAL_ASSETS_LIMIT:g},'
+             f'"PASS","FAIL"),"{_pf(payload.get("test_3_pass"))}")'),
             ("12d1(a) Compliant", _pf(payload.get("twelve_d1a_other_inv_cos_compliant")) if test_1_na
              else f'=IF(AND(G{r}="PASS",H{r}="PASS",I{r}="PASS"),"PASS","FAIL")'),
+            ("Equity Market Value Max", num(calc, "equity_market_value_max")),
         ]
     )
 
@@ -340,14 +361,17 @@ def _12d3_row(report_date, fund_name, payload, calc, r):
     )
     # With an N/A ownership test the AND formula would read FAIL, so write the checker's verdict.
     rule_1_na = _na_status(payload.get("rule_1_status"))
-    # Rule 3 points at column L, which is past the last column (known issue, kept as-is).
+    # Rule 1 is the max ownership of shares outstanding (J is text), so it is the checker's status;
+    # Rule 3 is the max portfolio weight (K) against the checker's limit.
     return OrderedDict(
         [
             ("Date", report_date),
             ("Fund", fund_name),
-            ("Rule 1 (<=5% equities)", rule_1_na or f'=IF(K{r}<=0.05,"PASS","FAIL")'),
-            ("Rule 2 (<=10% debt)", _pf(payload.get("rule_2_pass"))),
-            ("Rule 3 (<=5% total assets)", f'=IF(L{r}<=0.05,"PASS","FAIL")'),
+            (f"Rule 1 (<={RULE_12D3_EQUITY_LIMIT:.0%} equities)",
+             rule_1_na or _pf(payload.get("rule_1_pass"))),
+            (f"Rule 2 (<={RULE_12D3_DEBT_LIMIT:.0%} debt)", _pf(payload.get("rule_2_pass"))),
+            (f"Rule 3 (<={RULE_12D3_ASSET_LIMIT:.0%} total assets)",
+             f'=IF(K{r}<={RULE_12D3_ASSET_LIMIT:g},"PASS","FAIL")'),
             ("12d3 Sec Biz Compliant", _pf(payload.get("twelve_d3_sec_biz_compliant")) if rule_1_na
              else f'=IF(AND(C{r}="PASS",D{r}="PASS",E{r}="PASS"),"PASS","FAIL")'),
             ("SEC-Related Businesses (Shs Out %)", sec_related_str),
@@ -373,7 +397,8 @@ class _RuleSheet(NamedTuple):
 _RULE_SHEETS = (
     _RuleSheet(
         "prospectus_80pct_policy", "Prospectus_80pct", "prospectus_80pct", _prospectus_row,
-        fund_filter=lambda fund: not (_is_closed_end_fund(fund) and fund.startswith("TR")),
+        # The checker skips the P3 and TR closed-end funds (prospectus_80pct_policy).
+        fund_filter=lambda fund: not (_is_closed_end_fund(fund) and fund.startswith(("P3", "TR"))),
         warn_missing=True,
     ),
     _RuleSheet("diversification_40act_check", "40Act_Diversification", "40act", _forty_act_row),
