@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Sequence
-from config.fund_definitions import FUND_DEFINITIONS
-from reporting.reconciliation_reporting import top_option_prices
+from reporting.base_report_pdf import draw_header_row
+from reporting.reconciliation_reporting import top_option_prices, vehicle_wrapper
+from reporting.report_utils import non_empty
 
 import numpy as np
 import pandas as pd
@@ -41,14 +42,16 @@ class HoldingsReconciliationRenderer:
                 self.pdf.ln(1)
 
     # ------------------------------------------------------------------
-    def _draw_section_header(self, title: str, *, subtitle: str | None = None) -> None:
+    def _draw_section_header(
+        self, title: str, *, subtitle: str | None = None, size: int = 14, height: float = 10, gap: float = 4
+    ) -> None:
         self.pdf.set_fill_color(230, 230, 230)
-        self.pdf.set_font("Arial", "B", 14)
-        self.pdf.cell(0, 10, title, ln=True, fill=True)
+        self.pdf.set_font("Arial", "B", size)
+        self.pdf.cell(0, height, title, ln=True, fill=True)
         if subtitle:
             self.pdf.set_font("Arial", "", 10)
             self.pdf.cell(0, 6, subtitle, ln=True)
-        self.pdf.ln(4)
+        self.pdf.ln(gap)
 
     def _draw_subsection_header(self, recon_type: str) -> None:
         label = recon_type.replace("_", " ").title()
@@ -81,14 +84,11 @@ class HoldingsReconciliationRenderer:
             return
 
         df = recon_data.get("final_recon", pd.DataFrame())
-        if not isinstance(df, pd.DataFrame) or df.empty:
+        if not non_empty(df):
             # Distinguish "ran cleanly, no breaks" from "genuinely no data".
             merged = recon_data.get("merged_data")
             price_t = recon_data.get("price_discrepancies_T")
-            ran = (
-                (isinstance(merged, pd.DataFrame) and not merged.empty)
-                or (isinstance(price_t, pd.DataFrame) and not price_t.empty)
-            )
+            ran = non_empty(merged) or non_empty(price_t)
             msg = "All reconciliations successful - no breaks found" if ran else "No reconciliation data available"
             self._draw_two_column_table([("Status", msg)])
             self.pdf.ln(4)
@@ -108,7 +108,7 @@ class HoldingsReconciliationRenderer:
         counts = {"Total": 0, "Holdings": 0, "Quantity": 0, "Weight": 0, "Price": 0}
 
         final_df = recon_data.get("final_recon")
-        if isinstance(final_df, pd.DataFrame) and not final_df.empty:
+        if non_empty(final_df):
             counts["Total"] = len(final_df)
             if "discrepancy_type" in final_df.columns:
                 for disc_type in final_df["discrepancy_type"]:
@@ -144,7 +144,7 @@ class HoldingsReconciliationRenderer:
         self.pdf.cell(0, 6, "Discrepancy Details:", ln=True)
         self.pdf.set_font("Arial", size=9)
         final_df = recon_data.get("final_recon")
-        if isinstance(final_df, pd.DataFrame) and not final_df.empty:
+        if non_empty(final_df):
             title = f"Final Reconciliation - {recon_type}" if recon_type else "Final Reconciliation"
             self._print_discrepancy_table(final_df, title)
 
@@ -195,11 +195,7 @@ class HoldingsReconciliationRenderer:
         usable_width = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
         col_width = usable_width / len(display_cols)
 
-        self.pdf.set_font("Arial", "B", 8)
-        self.pdf.set_fill_color(200, 200, 200)
-        for col in display_cols:
-            self.pdf.cell(col_width, 6, col, border=1, fill=True, align="C")
-        self.pdf.ln()
+        draw_header_row(self.pdf, [col_width] * len(display_cols), display_cols, 6, 8, (200, 200, 200))
 
         self.pdf.set_font("Arial", size=8)
         for _, row in df.head(10).iterrows():
@@ -225,7 +221,7 @@ class HoldingsReconciliationRenderer:
         self, recon_data: Mapping[str, Any], title: str, extra_rows: Sequence[tuple[str, int]] = ()
     ) -> bool:
         final_df = recon_data.get("final_recon")
-        has_holdings = isinstance(final_df, pd.DataFrame) and not final_df.empty
+        has_holdings = non_empty(final_df)
         self._draw_two_column_table([("Holdings Breaks", len(final_df) if has_holdings else 0), *extra_rows])
         if has_holdings:
             self._print_discrepancy_table(final_df, title)
@@ -235,13 +231,13 @@ class HoldingsReconciliationRenderer:
         price_t = recon_data.get("price_discrepancies_T")
         has_holdings = self._print_holdings_block(recon_data, "Holdings Discrepancies")
         self._print_price_discrepancies(price_t, price_label="Custodian")
-        if not has_holdings and not (isinstance(price_t, pd.DataFrame) and not price_t.empty):
+        if not has_holdings and not non_empty(price_t):
             self._draw_two_column_table([("Status", "All reconciliations successful - no breaks found")])
 
     def _print_custodian_option_section(self, recon_data: Mapping[str, Any], *, fund_name: str) -> None:
         regular_df = recon_data.get("regular_options")
         extra_rows = []
-        if isinstance(regular_df, pd.DataFrame) and not regular_df.empty:
+        if non_empty(regular_df):
             extra_rows.append(("Regular Options", len(regular_df)))
         self._print_holdings_block(recon_data, "Option Discrepancies", extra_rows)
         self._print_price_discrepancies(
@@ -264,7 +260,7 @@ class HoldingsReconciliationRenderer:
         fund_name: str | None = None,
         recon_type: str | None = None,
     ) -> None:
-        if isinstance(price_t, pd.DataFrame) and not price_t.empty:
+        if non_empty(price_t):
             filtered = self._filter_option_price_breaks(price_t, fund_name, recon_type)
             self._draw_two_column_table([(f"{price_label} Price Breaks T", len(filtered))])
             self._print_discrepancy_table(filtered, f"{price_label} Price Breaks T")
@@ -279,7 +275,7 @@ class HoldingsReconciliationRenderer:
             fund_name: str | None,
             recon_type: str | None,
     ) -> pd.DataFrame:
-        if not isinstance(price_df, pd.DataFrame) or price_df.empty:
+        if not non_empty(price_df):
             return pd.DataFrame()
 
         if not fund_name or not recon_type or "option" not in recon_type.lower():
@@ -304,8 +300,7 @@ class HoldingsReconciliationRenderer:
         if working.empty:
             return working
 
-        vehicle = (FUND_DEFINITIONS.get(fund_name, {}).get("vehicle_wrapper") or "").lower()
-        if vehicle not in {"private_fund", "closed_end_fund"}:
+        if vehicle_wrapper(fund_name) not in {"private_fund", "closed_end_fund"}:
             return working
         return top_option_prices(working)
 
@@ -319,7 +314,7 @@ class HoldingsReconciliationRenderer:
 
     def _payload_has_content(self, payload: Mapping[str, Any]) -> bool:
         for value in payload.values():
-            if isinstance(value, pd.DataFrame) and not value.empty:
+            if non_empty(value):
                 return True
             if isinstance(value, Mapping) and value:
                 if self._payload_has_content(value):
@@ -327,9 +322,4 @@ class HoldingsReconciliationRenderer:
         return False
 
     def _has_recon_activity(self, recon_data: Mapping[str, Any]) -> bool:
-        final_df = recon_data.get("final_recon")
-        price_df = recon_data.get("price_discrepancies_T")
-        return any(
-            isinstance(df, pd.DataFrame) and not df.empty
-            for df in [final_df, price_df]
-        )
+        return any(non_empty(recon_data.get(key)) for key in ("final_recon", "price_discrepancies_T"))

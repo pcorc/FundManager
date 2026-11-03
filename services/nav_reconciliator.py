@@ -14,14 +14,7 @@ from services.nav_recon_dataclasses import (
     NAVSummary,
     NAVReconciliationResults,
 )
-
-
-def _to_float(value, default=0.0):
-    try:
-        num = float(value)
-    except (TypeError, ValueError):
-        return float(default)
-    return float(default) if pd.isna(num) else num
+from utilities.numbers import to_float
 
 
 def _position(frame: pd.DataFrame, key: str, ticker: str) -> tuple[float, float]:
@@ -29,7 +22,7 @@ def _position(frame: pd.DataFrame, key: str, ticker: str) -> tuple[float, float]
     if not frame.empty and key in frame.columns:
         rows = frame[frame[key] == ticker]
         if not rows.empty:
-            return _to_float(rows.iloc[0].get('nav_shares', 0)), _to_float(rows.iloc[0].get('price', 0))
+            return to_float(rows.iloc[0].get('nav_shares', 0)), to_float(rows.iloc[0].get('price', 0))
     return 0.0, 0.0
 
 
@@ -196,13 +189,13 @@ class NAVReconciliator:
         if use_trade_prices:
             trade_price = self._get_trade_execution_price(trades_t1, ticker)
             if trade_price is not None:
-                price_t1_vest = _to_float(trade_price)
-                price_t1_custodian = _to_float(trade_price)
+                price_t1_vest = to_float(trade_price)
+                price_t1_custodian = to_float(trade_price)
 
         # Apply custodian price adjustments (coerced to float for options only)
         if not price_breaks.empty and ticker in price_breaks.index:
             adj_data = price_breaks.loc[ticker]
-            convert = _to_float if is_option else (lambda value: value)
+            convert = to_float if is_option else (lambda value: value)
 
             if 'price_t_adj' in adj_data:
                 price_t_custodian = convert(adj_data['price_t_adj'])

@@ -1,7 +1,6 @@
 """Orchestration utilities for trading compliance reporting."""
 
 from copy import copy as copy_style
-from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -9,8 +8,8 @@ from typing import Any, Mapping, Optional
 from openpyxl import load_workbook
 from PyPDF2 import PdfMerger
 
-from reporting.report_utils import normalize_report_date
-
+from reporting.compliance_reporting import GeneratedComplianceReport
+from reporting.report_utils import ensure_dir, normalize_report_date
 from reporting.trade_compliance_analyzer import TradingComplianceAnalyzer
 from reporting.trade_compliance_reporting import (
     GeneratedTradingComplianceReport,
@@ -42,8 +41,7 @@ def build_trading_compliance_reports(
     ).analyze()
 
     date_str = normalize_report_date(report_date)
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
+    output_path = ensure_dir(output_dir)
     excel_path = str(output_path / f"{file_name_prefix}_{date_str}.xlsx")
     pdf_path = str(output_path / f"{file_name_prefix}_{date_str}.pdf")
 
@@ -53,12 +51,8 @@ def build_trading_compliance_reports(
 
     return GeneratedTradingComplianceReport(excel_path, pdf_path if create_pdf else None, comparison_data)
 
-@dataclass
-class CombinedTradingComplianceReport:
-    """Aggregated Excel/PDF artefacts for trading + ex-post compliance."""
-
-    excel_path: Optional[str]
-    pdf_path: Optional[str]
+# Aggregated Excel/PDF artefacts for trading + ex-post compliance (same fields).
+CombinedTradingComplianceReport = GeneratedComplianceReport
 
 
 def combine_trading_and_compliance_reports(
@@ -77,8 +71,7 @@ def combine_trading_and_compliance_reports(
     compliance_pdf = getattr(compliance_report, "pdf_path", None)
 
     date_str = normalize_report_date(report_date)
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
+    output_path = ensure_dir(output_dir)
 
     combined_excel = None
     if trading_excel and compliance_excel:

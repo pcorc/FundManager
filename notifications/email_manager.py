@@ -12,6 +12,7 @@ from typing import Any, Iterable, Iterator, List, Mapping, Optional, Sequence, T
 from dotenv import load_dotenv
 
 from config.operation_config import OperationConfig, OperationMode
+from utilities.numbers import fmt_num, fmt_pct
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,7 @@ class EmailManager:
         for fund, data in sorted(summary.items()):
             data = data or {}
             cells = [f"<td>{fund}</td>"]
-            cells += [self._td_r(self._num(data.get(key, data.get(alias)), 4)) for key, alias in _NAV_VALUE_COLUMNS]
+            cells += [self._td_r(fmt_num(data.get(key, data.get(alias)), 4)) for key, alias in _NAV_VALUE_COLUMNS]
             for key, alias in _NAV_GOOD_COLUMNS:
                 ok = bool(data.get(key, data.get(alias)))
                 cells.append(f"<td class='{'pass' if ok else 'fail'}'>{'PASS' if ok else 'FAIL'}</td>")
@@ -138,7 +139,7 @@ class EmailManager:
         rows = []
         for fund, data in sorted(summary.items()):
             data = data or {}
-            rows.append([f"<td>{fund}</td>"] + [self._td_r(self._num(data.get(key), 2)) for key in GL_COLUMNS])
+            rows.append([f"<td>{fund}</td>"] + [self._td_r(fmt_num(data.get(key), 2)) for key in GL_COLUMNS])
         return self._table("Gain/Loss Components", ("Fund",) + GL_COLUMNS, rows)
 
     def _render_compliance_changes(
@@ -170,7 +171,7 @@ class EmailManager:
                 if all(self._is_zero(metrics.get(key)) for key, _ in _TRADE_COLUMNS):
                     continue
                 rows.append([f"<td>{fund}</td><td>{str(asset).title()}</td>"] + [
-                    self._td_r(self._pct(metrics.get(key)) if is_pct else self._num(metrics.get(key), 2))
+                    self._td_r(fmt_pct(metrics.get(key)) if is_pct else fmt_num(metrics.get(key), 2))
                     for key, is_pct in _TRADE_COLUMNS
                 ])
         return self._table(
@@ -213,20 +214,6 @@ td.fail {{ background-color: #f5b8b8; text-align: center; font-weight: bold; }}
 </style></head>
 <body>{body}</body>
 </html>"""
-
-    @staticmethod
-    def _num(value: Any, digits: int = 2) -> str:
-        try:
-            return f"{float(value):,.{digits}f}"
-        except (TypeError, ValueError):
-            return ""
-
-    @staticmethod
-    def _pct(value: Any) -> str:
-        try:
-            return f"{float(value):.2%}"
-        except (TypeError, ValueError):
-            return ""
 
     @staticmethod
     def _is_zero(value: Any) -> bool:

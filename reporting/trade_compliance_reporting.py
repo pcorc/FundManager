@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -11,11 +12,13 @@ import logging
 
 from fpdf import FPDF
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
-from reporting.report_utils import format_number
+from reporting.base_report_pdf import draw_header_row
+from reporting.report_utils import format_number, set_widths, solid_fill
 from reporting.trade_compliance_analyzer import ASSET_ORDER
+from utilities.numbers import float_or, fmt_pct, num
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +61,8 @@ class GeneratedTradingComplianceReport:
     comparison_data: Optional[Mapping[str, Any]] = None
 
 
-def _format_percent(value: float) -> str:
-    try:
-        return f"{float(value) * 100:.2f}%"
-    except (TypeError, ValueError):
-        return "0.00%"
+# f"{x:.2%}" formats x * 100 exactly like f"{x * 100:.2f}%".
+_format_percent = partial(fmt_pct, fallback="0.00%")
 
 
 def _format_money(value: float) -> str:
@@ -87,22 +87,9 @@ PDF_TRADE_SUMMARY_COLUMNS = (
 )
 
 
-def _num(mapping: Mapping[str, Any], key: str) -> float:
-    return float(mapping.get(key, 0.0) or 0.0)
-
-
 def _as_dict(source: Any, key: str) -> Dict[str, Any]:
     value = source.get(key) if isinstance(source, Mapping) else None
     return dict(value) if isinstance(value, Mapping) else {}
-
-
-def _float_or(value: Any, default: float) -> float:
-    if value in (None, ""):
-        return default
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def _get_top_trades(trades_list: list, n: int = 5) -> list:
@@ -120,30 +107,30 @@ def _trade_activity_records(data: Mapping[str, Any]) -> List[Dict[str, Any]]:
         asset_summary = trade_info.get("asset_trade_summary", {}) or {}
         net_trades = trade_info.get("net_trades", {}) or {}
         activity_info = trade_info.get("trade_activity", {}) or {}
-        tna = _num(trade_info, "total_net_assets")
-        ta = _num(trade_info, "total_assets")
+        tna = num(trade_info, "total_net_assets")
+        ta = num(trade_info, "total_assets")
 
         for asset_key in ASSET_ORDER:
             summary = _as_dict(asset_summary, asset_key)
             activity = _as_dict(activity_info, asset_key)
             net = {**dict(activity.get("net", {}) or {}), **_as_dict(net_trades, asset_key)}
-            buy_val, sell_val = _num(net, "buy_value"), _num(net, "sell_value")
+            buy_val, sell_val = num(net, "buy_value"), num(net, "sell_value")
             record: Dict[str, Any] = {
                 "fund": fund_name,
                 "label": ASSET_LABELS[asset_key],
                 "tna": tna,
                 "ta": ta,
-                "trade_value": _num(summary, "trade_value") or abs(buy_val) + abs(sell_val),
-                "pct_tna": _num(summary, "pct_of_tna"),
-                "pct_assets": _num(summary, "pct_of_total_assets"),
-                "ex_ante": _num(summary, "ex_ante_market_value"),
-                "ex_post": _num(summary, "ex_post_market_value"),
-                "delta": _num(summary, "market_value_delta"),
-                "trade_vs_ante": _num(summary, "trade_vs_ex_ante_pct"),
-                "post_vs_ante": _num(summary, "ex_post_vs_ex_ante_pct"),
-                "net_value": _float_or(net.get("net_value"), buy_val - sell_val),
-                "buy_qty": _num(net, "buy_quantity"),
-                "sell_qty": _num(net, "sell_quantity"),
+                "trade_value": num(summary, "trade_value") or abs(buy_val) + abs(sell_val),
+                "pct_tna": num(summary, "pct_of_tna"),
+                "pct_assets": num(summary, "pct_of_total_assets"),
+                "ex_ante": num(summary, "ex_ante_market_value"),
+                "ex_post": num(summary, "ex_post_market_value"),
+                "delta": num(summary, "market_value_delta"),
+                "trade_vs_ante": num(summary, "trade_vs_ex_ante_pct"),
+                "post_vs_ante": num(summary, "ex_post_vs_ex_ante_pct"),
+                "net_value": float_or(net.get("net_value"), buy_val - sell_val),
+                "buy_qty": num(net, "buy_quantity"),
+                "sell_qty": num(net, "sell_quantity"),
                 "buy_val": buy_val,
                 "sell_val": sell_val,
             }
@@ -155,8 +142,7 @@ def _trade_activity_records(data: Mapping[str, Any]) -> List[Dict[str, Any]]:
                 if asset_key in ("equity", "options"):
                     trades = _get_top_trades(trades, n=5)
                 for trade in trades:
-                    quantity = float(trade.get("quantity", 0.0) or 0.0)
-                    value = float(trade.get("market_value", 0.0) or 0.0)
+                    quantity, value = num(trade, "quantity"), num(trade, "market_value")
                     if quantity == 0.0 and value == 0.0:
                         continue
                     details.append((direction, str(trade.get("ticker", "")), quantity, value))
@@ -193,15 +179,11 @@ def _status_class(status: str, violations_after: int) -> Optional[str]:
     return None
 
 
-def _fill(color: str) -> PatternFill:
-    return PatternFill(start_color=color, end_color=color, fill_type="solid")
-
-
 def _write_header(sheet, row: int, headers: Sequence[str], *, center: bool = True) -> None:
     for col, header in enumerate(headers, start=1):
         cell = sheet.cell(row=row, column=col, value=header)
         cell.font = Font(bold=True)
-        cell.fill = _fill("DDDDDD")
+        cell.fill = solid_fill("DDDDDD")
         if center:
             cell.alignment = Alignment(horizontal="center")
 
@@ -265,13 +247,13 @@ def _create_summary_sheet(workbook: Workbook, data: Mapping[str, Any]) -> None:
             # Persistent breaches highlight the fund name only.
             fill_cols = (1,) if status_class == "breach" else range(1, len(COMPLIANCE_CHANGE_HEADERS) + 1)
             for col in fill_cols:
-                sheet.cell(row=row, column=col).fill = _fill(EXCEL_STATUS_FILLS[status_class])
+                sheet.cell(row=row, column=col).fill = solid_fill(EXCEL_STATUS_FILLS[status_class])
         row += 1
 
     for col, value in enumerate(("Totals", "", *totals), start=1):
         cell = sheet.cell(row=row, column=col, value=value)
         cell.font = Font(bold=True)
-        cell.fill = _fill("DDDDDD")
+        cell.fill = solid_fill("DDDDDD")
         if col >= 2:
             cell.alignment = Alignment(horizontal="center")
 
@@ -360,11 +342,10 @@ def _create_compliance_details_sheet(workbook: Workbook, data: Mapping[str, Any]
             for col, value in enumerate(values, start=1):
                 cell = sheet.cell(row=row, column=col, value=value)
                 if fill_color:
-                    cell.fill = _fill(fill_color)
+                    cell.fill = solid_fill(fill_color)
             row += 1
 
-    for col in range(1, len(headers) + 1):
-        sheet.column_dimensions[get_column_letter(col)].width = 22
+    set_widths(sheet, len(headers), 22)
 
 
 class TradingCompliancePDF(FPDF):
@@ -389,11 +370,7 @@ class TradingCompliancePDF(FPDF):
 
 
 def _pdf_header_row(pdf: FPDF, widths: Sequence[float], headers: Sequence[str], height: float, size: int) -> None:
-    pdf.set_font("Arial", "B", size)
-    pdf.set_fill_color(200, 200, 200)
-    for width, header in zip(widths, headers):
-        pdf.cell(width, height, header, 1, 0, "C", True)
-    pdf.ln(height)
+    draw_header_row(pdf, widths, headers, height, size, (200, 200, 200), height)
 
 
 def _pdf_row(
