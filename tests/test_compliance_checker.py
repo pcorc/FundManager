@@ -293,5 +293,42 @@ class FortyActRegistrationTests(unittest.TestCase):
         self.assertEqual(row["Registration Match"], '=IF(OR(D7="diversified",C7<>"diversified"),"PASS","FAIL")')
 
 
+
+class SummaryMetricsTests(unittest.TestCase):
+    """D2: summary metrics always run, and the reports select them under the summary_metrics key."""
+
+    def setUp(self):
+        self.fund = _fund("KNG", equity=_equity(eqyticker=["AAA"], equity_market_value=[100.0],
+                                                nav_shares=[1.0], EQY_SH_OUT_million=[1_000.0]))
+        self.checker = ComplianceChecker({self.fund.name: self.fund})
+
+    def test_filtered_run_still_computes_summary_metrics(self):
+        results = self.checker.run_compliance_tests(["real_estate_check"])[self.fund.name]
+        self.assertEqual(sorted(results), ["real_estate_check", "summary_metrics"])
+        self.assertAlmostEqual(results["summary_metrics"].calculations["equity_market_value"], 100.0)
+
+    def test_summary_sheet_for_default_list_and_alias(self):
+        import tempfile
+        from config.run_configurations import FULL_COMPLIANCE_TESTS
+        from reporting.compliance_reporting import ComplianceReport
+        results = self.checker.run_compliance_tests(FULL_COMPLIANCE_TESTS)
+        cases = [(FULL_COMPLIANCE_TESTS, True), (["summary", "real_estate_check"], True),
+                 (["real_estate_check"], False), (None, True)]
+        for tests, has_summary in cases:
+            with tempfile.TemporaryDirectory() as tmp:
+                report = ComplianceReport(results, "2026-10-30", tmp, test_functions=tests)
+            self.assertEqual("Summary" in report.sheet_data, has_summary, tests)
+            if has_summary:
+                self.assertEqual(report.sheet_data["Summary"]["Equity"].tolist(), [100.0])
+
+    def test_pdf_gics_overview_without_summary_section(self):
+        from unittest import mock
+        from reporting.compliance_reporting import ComplianceReportPDF
+        results = self.checker.run_compliance_tests(["gics_compliance"])
+        with mock.patch.object(ComplianceReportPDF, "save_pdf"),                 mock.patch.object(ComplianceReportPDF, "_render_gics_compliance_overview") as gics,                 mock.patch.object(ComplianceReportPDF, "_render_metric_section") as section:
+            ComplianceReportPDF({"2026-10-30": results}, "unused.pdf", allowed_tests=["gics_compliance"])
+        gics.assert_called_once()
+        section.assert_not_called()  # Summary Metrics was not selected
+
 if __name__ == "__main__":
     unittest.main()

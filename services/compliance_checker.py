@@ -309,7 +309,8 @@ class ComplianceChecker:
         """Execute the requested compliance checks for every fund."""
         rules = _RULES
         if test_functions:
-            requested = set(test_functions)
+            # Summary metrics are fund totals, not a rule: always computed so a filtered run can still report them.
+            requested = set(test_functions) | {"summary_metrics"}
             rules = tuple(rule for rule in _RULES if rule[0] in requested)
 
         results: Dict[str, Dict[str, ComplianceResult]] = {}

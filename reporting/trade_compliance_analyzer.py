@@ -82,9 +82,9 @@ class TradingComplianceAnalyzer:
         violations_before = 0
         violations_after = 0
 
-        # Precedence is intentional: only the ex-post side drops these keys.
+        # summary_metrics (always computed) and fund_object are not checks, on either side.
         check_names = sorted(
-            set(ante_results.keys()) | set(post_results.keys()) - {"summary_metrics", "fund_object"}
+            (set(ante_results.keys()) | set(post_results.keys())) - {"summary_metrics", "fund_object"}
         )
 
         for check in check_names:

@@ -48,9 +48,9 @@ EOD_OPERATIONS = ("compliance", "reconciliation", "nav_reconciliation")
 TRADING_COMPLIANCE = "trading_compliance"
 OPERATIONS = EOD_OPERATIONS + (TRADING_COMPLIANCE,)
 DATE_MODES = ("per_day", "stacked")
-# "summary" is a report-only step (the Summary sheet of a filtered compliance workbook), not a checker rule.
+# "summary" is an alias of summary_metrics (the Summary sheet / PDF section), kept for existing callers.
 COMPLIANCE_TEST_KEYS = ("summary",) + RULE_KEYS
-_STEP_LABELS = {"summary": "Summary sheet (report only)"}
+_STEP_LABELS = {"summary": "Summary sheet (alias of summary_metrics)"}
 _TUPLE_FIELDS = ("operations", "funds", "cohorts", "exclude", "compliance_tests")
 _DATE_FIELDS = ("start_date", "end_date", "previous_date", "ex_ante_date", "ex_post_date",
                 "custodian_date", "custodian_previous_date")

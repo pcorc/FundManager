@@ -53,6 +53,16 @@ _SUMMARY_COLUMNS = [
     "Regular Option MV", "Flex Option MV", "Total Option MV", "Total Assets", "Total Net Assets",
 ]
 
+_SUMMARY_ALIAS = "summary"  # processing.api accepts it for the summary_metrics step
+
+
+def _selected_tests(test_functions: Optional[Iterable[str]]) -> Optional[set]:
+    """Requested report steps with the "summary" alias mapped to summary_metrics; None = everything."""
+    if test_functions is None:
+        return None
+    return {"summary_metrics" if test == _SUMMARY_ALIAS else test for test in test_functions if test}
+
+
 _GICS_CAN_EXCEED = {"KNG", "FDND", "KNGIX"}
 _GICS_EXCEPTIONS = {"TDVI": "Information Technology Sector"}
 
@@ -398,7 +408,7 @@ class ComplianceReport:
         self.file_path = self.output_dir / f"{file_name_prefix}_{self.report_date}.xlsx"
 
         self.gics_mapping = gics_mapping.copy() if isinstance(gics_mapping, pd.DataFrame) else pd.DataFrame()
-        self.test_functions = set(test_functions) if test_functions else None
+        self.test_functions = _selected_tests(test_functions) or None
         self.sheet_data: Dict[str, pd.DataFrame] = {}
 
         self.results = self._prepare_results(results)
@@ -408,7 +418,7 @@ class ComplianceReport:
 
     # ------------------------------------------------------------------
     def process_all_checks(self) -> None:
-        steps = [("summary", self.process_summary), ("gics_compliance", self.process_gics_compliance)]
+        steps = [("summary_metrics", self.process_summary), ("gics_compliance", self.process_gics_compliance)]
         steps += [(spec.key, partial(self._build_rule_sheet, spec)) for spec in _RULE_SHEETS]
         for test_name, processor in steps:
             if self.test_functions is None or test_name in self.test_functions:
@@ -800,11 +810,7 @@ class ComplianceReportPDF(BaseReportPDF):
     ) -> None:
         super().__init__(output_path, orientation="L")
         self.results = flatten_compliance_results(results)
-        self.allowed_tests = (
-            {test for test in allowed_tests if test}
-            if allowed_tests is not None
-            else None
-        )
+        self.allowed_tests = _selected_tests(allowed_tests)
         self.generate_pdf()
         self.save_pdf()
 
@@ -831,12 +837,10 @@ class ComplianceReportPDF(BaseReportPDF):
         self.fund_order = sorted(grouped_results)
 
         for idx, (title, test_key, footnote, skip_labels, metrics) in enumerate(_PDF_SECTIONS):
-            if not self._is_test_selected(test_key):
-                continue
+            if self._is_test_selected(test_key):
+                self._render_metric_section(title, test_key, metrics, footnote, skip_labels)
 
-            self._render_metric_section(title, test_key, metrics, footnote, skip_labels)
-
-            # GICS overview only appears right after Summary Metrics.
+            # GICS overview goes right after the Summary Metrics slot, whether or not Summary is selected.
             if idx == 0 and self._is_test_selected("gics_compliance"):
                 has_gics_data = any(
                     isinstance(payload, dict) and "gics_compliance" in payload
