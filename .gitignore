@@ -5,3 +5,5 @@ __pycache__/
 .idea/
 logs/
 .env
+ui_runs/
+.streamlit/secrets.toml

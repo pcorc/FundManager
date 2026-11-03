@@ -222,6 +222,70 @@ rule, `cohorts=("ETF_FUNDS",)`, and `date_mode="per_day"` or `"stacked"` over
 
 ---
 
+## Web UI
+
+A Streamlit page for ad-hoc and back-dated runs (the scheduled `python main.py …`
+runs are unchanged). Design notes: `docs/ui_plan.md`.
+
+```bash
+python -m streamlit run ui/app.py                                   # http://localhost:8501
+python -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
+```
+
+- **New run:** fund groups (cohorts from the DB, cached; *Reload fund groups* in the
+  sidebar re-reads them), funds and exclusions with a live fund count; End of day
+  (Compliance / Holdings recon / NAV recon) or Trading compliance; all rules or any
+  subset; one as-of date or a range, per day or one stacked compliance workbook;
+  PDF, email, output tag. The request is checked with `processing.api.validate`
+  before **Run** is enabled. While a run is active the form is locked and a panel
+  shows the progress bar (fund *index/total*), the stage, the log tail and **Cancel**;
+  a refreshed or second browser reattaches to it. Afterwards: one download per
+  report, **Download all (zip)**, the summary per day and any errors.
+- **Run history:** every past run (who, when, what, status, files) with its results
+  and **Re-run** (loads the request back into the form, email off).
+- **Reports:** finished runs' reports by report date.
+
+Each run is one `python -m processing.worker` process (cwd = the run folder,
+`PYTHONPATH` = the repo) in `<FUNDMANAGER_UI_OUTPUT_ROOT>/<YYYYMMDD-HHMMSS>-<user>-<tag>/`,
+which holds `request.json`, `progress.jsonl` (the worker's JSON-lines stdout),
+`run.log` (its stderr), `result.json`, `meta.json` (user, start/finish, request
+summary, exit code, cancelled / timed-out flags, publish history), `logs/` and
+`reports/`. Only one run happens per output root at a time (`.run.lock` holds the
+worker PID; a lock whose process is gone is cleared).
+
+| Var | Default | Purpose |
+|---|---|---|
+| `FUNDMANAGER_UI_OUTPUT_ROOT` | `<repo>/ui_runs` (gitignored) | where run folders go |
+| `FUNDMANAGER_UI_PUBLISH_ROOT` | unset | target of the **Publish** button (e.g. the G: archive); unset = no publishing |
+| `FUNDMANAGER_UI_TIMEOUT_MINUTES` | `120` | a run is killed after this; `0` = never |
+| `FUNDMANAGER_UI_USER_HEADER` | unset | request header with the username set by the SSO proxy; when set, requests without it are refused |
+| `FUNDMANAGER_UI_PASSWORD` | unset | optional shared password (also read from `.streamlit/secrets.toml`) |
+| `FUNDMANAGER_UI_CATALOG_TTL` | `600` | seconds the fund groups stay cached |
+
+They can live in `.env` with the DB settings (see `.env.example`). Without
+`FUNDMANAGER_UI_USER_HEADER` the username is the OS account running Streamlit.
+
+Safety:
+- A UI run never writes to the shared drive: the runner always replaces the
+  request's `output_dir` with the run folder. **Publish** copies a finished run's
+  `reports/` into `FUNDMANAGER_UI_PUBLISH_ROOT` (same sub-folders, existing files
+  skipped, recorded in `meta.json`) only after a confirmation tick.
+- **Send email** is off by default (also on Re-run) and needs a second
+  confirmation tick. With `FUNDMANAGER_EMAIL_MODE=display` (the default) emails
+  open as Outlook drafts on the host running the UI.
+- Host it on the internal network only, behind the SSO proxy or with the shared
+  password. The DB connection string stays in `.env`; DB errors are shown only by
+  type.
+- Streamlit installs pyarrow, and recent pyarrow requires NumPy 2 while the
+  project pins NumPy 1.26, so the UI avoids `st.dataframe` and renders tables as
+  Markdown.
+
+Tests: `python -m unittest discover tests -v` also runs `tests/test_ui_runner.py`,
+`tests/test_ui_history.py` and `tests/test_ui_app.py` (Streamlit `AppTest`, a fake
+worker, no DB).
+
+---
+
 ## Reconciliation outputs at a glance
 
 - **Compliance** — per-fund pass/fail across the rule set + per-rule detail

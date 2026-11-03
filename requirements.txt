@@ -7,3 +7,6 @@ openpyxl==3.1.2
 fpdf2==2.8.7
 python-dotenv==1.0.1
 pywin32==311; sys_platform == "win32"   # Outlook display mode in notifications/email_manager.py
+# Web UI (ui/app.py). Streamlit pulls in pyarrow; recent pyarrow needs NumPy 2, so the UI avoids
+# st.dataframe/st.table (Arrow) and renders its tables as Markdown.
+streamlit==1.66.0
