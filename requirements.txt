@@ -1,0 +1,9 @@
+# Python 3.11. Pinned to the versions the golden baseline was produced with.
+SQLAlchemy==1.4.46
+PyMySQL==1.1.0
+pandas==2.1.4
+numpy==1.26.0
+openpyxl==3.1.2
+fpdf2==2.8.7
+python-dotenv==1.0.1
+pywin32==311; sys_platform == "win32"   # Outlook display mode in notifications/email_manager.py
