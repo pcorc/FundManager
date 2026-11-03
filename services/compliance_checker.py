@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Mapping, Optional, Tuple
+from typing import Dict, Mapping, Optional, Tuple
 
 import logging
 import numpy as np
@@ -54,6 +54,38 @@ class ComplianceResult:
     error: Optional[str] = None
 
 
+def _res(ok, rule: str, calcs=None, error: Optional[str] = None, **details) -> ComplianceResult:
+    return ComplianceResult(ok, {"rule": rule, **details}, {} if calcs is None else calcs, error)
+
+
+def _num(df: pd.DataFrame, column: str):
+    # A missing column yields a scalar and .fillna raises, which turns into an error result.
+    return pd.to_numeric(df.get(column, 0.0), errors="coerce").fillna(0.0)
+
+
+def _ownership_pct(numerator: pd.Series, shares_out: pd.Series) -> pd.Series:
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.divide(numerator, shares_out.replace(0, np.nan)).fillna(0.0)
+
+
+# (result key, method name, display name for error results, error log format), in execution order.
+# The order matters: max_15pct_illiquid_sai adds is_illiquid to the shared holdings frames in place.
+_RULES: Tuple[Tuple[str, str, str, str], ...] = (
+    ("summary_metrics", "calculate_summary_metrics", "summary_metrics", "Error calculating summary metrics for %s: %s"),
+    ("gics_compliance", "gics_compliance", "GICS Concentration", "Error in GICS compliance check for %s: %s"),
+    ("prospectus_80pct_policy", "prospectus_80pct_policy", "80% Prospectus Policy", "Error in prospectus policy check for %s: %s"),
+    ("diversification_IRS_check", "diversification_IRS_check", "IRS Diversification", "Error in IRS diversification check for %s: %s"),
+    ("diversification_40act_check", "diversification_40act_check", "40 Act Diversification", "Error in 40 Act diversification check for %s: %s"),
+    ("diversification_IRC_check", "diversification_IRC_check", "IRC Diversification", "Error in IRC diversification check for %s: %s"),
+    ("max_15pct_illiquid_sai", "max_15pct_illiquid_sai", "15% Illiquid Assets", "Error in 15% illiquid check for %s: %s"),
+    ("real_estate_check", "real_estate_check", "Real Estate Exposure", "Error in real estate check for %s: %s"),
+    ("commodities_check", "commodities_check", "Commodities Exposure", "Error in commodities check for %s: %s"),
+    ("twelve_d1a_other_inv_cos", "twelve_d1a_other_inv_cos", "12d1-1 Other Investment Companies", "Error in 12d1-1 check for %s: %s"),
+    ("twelve_d2_insurance_cos", "twelve_d2_insurance_cos", "12d-2 Insurance Companies", "Error in 12d-2 check for %s: %s"),
+    ("twelve_d3_sec_biz", "twelve_d3_sec_biz", "12d-3 Securities Businesses", "Error in 12d-3 check for %s: %s"),
+)
+
+
 class ComplianceChecker:
     """Runs compliance checks against :class:`Fund` domain objects."""
     def __init__(
@@ -65,109 +97,70 @@ class ComplianceChecker:
         *,
         analysis_type: Optional[str] = None,
     ) -> None:
-        self.session = session
         self.funds: Dict[str, Fund] = funds or {}
-        self.date = date
-        self.base_cls = base_cls
         analysis = (analysis_type or "eod").strip().lower()
         self.analysis_type = analysis if analysis in {"eod", "ex_ante", "ex_post"} else "eod"
 
+    @property
+    def _share_col(self) -> str:
+        return "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
 
-    def _consolidate_holdings_by_issuer(
-        self, fund: Fund, holdings_df: pd.DataFrame
-    ) -> pd.DataFrame:
+    def _zero_shares(self, df: pd.DataFrame) -> pd.Series:
+        # Ownership tests in IRS, 12d-2 and 12d-3 deliberately use zero shares, so they always pass.
+        zeros = pd.Series(0.0, index=df.index, dtype=float)
+        df[self._share_col] = zeros
+        return zeros
+
+    def _consolidate_holdings_by_issuer(self, holdings_df: pd.DataFrame) -> pd.DataFrame:
         """Aggregate holdings exposure by issuer without conditional adjustments."""
-
         if holdings_df.empty:
             return holdings_df.copy()
 
         df = holdings_df.copy()
-        df["equity_market_value"] = pd.to_numeric(
-            df.get("equity_market_value", 0.0), errors="coerce"
-        ).fillna(0.0)
-
-        share_col = "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
+        df["equity_market_value"] = _num(df, "equity_market_value")
+        share_col = self._share_col
         if share_col not in df.columns:
             df[share_col] = 0.0
         else:
-            # Fill any NaN values with 0, but preserve existing valid data
             df[share_col] = pd.to_numeric(df[share_col], errors="coerce").fillna(0.0)
 
-        # Ensure eqyticker is string type for grouping
         df["eqyticker"] = df["eqyticker"].astype(str)
-
         google_mask = df["eqyticker"].isin(["GOOG", "GOOGL"])
         if google_mask.any():
             df.loc[google_mask, "eqyticker"] = "GOOGLE"
 
         numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
-        aggregation = {
-            **{
-                column: "sum"
-                for column in numeric_columns
-            },
-            **{
-                column: "first"
-                for column in df.columns
-                if column not in numeric_columns + ["eqyticker"]
-            },
-        }
-
-        consolidated = (
-            df.groupby("eqyticker", as_index=False)
-            .agg(aggregation)
-            .copy()
+        aggregation = {column: "sum" for column in numeric_columns}
+        aggregation.update(
+            {column: "first" for column in df.columns if column not in numeric_columns + ["eqyticker"]}
         )
-
-        return consolidated
+        return df.groupby("eqyticker", as_index=False).agg(aggregation).copy()
 
     def _calculate_index_overlap_adjustments(
         self,
         fund: Fund,
         holdings_df: pd.DataFrame,
-        overlap_df: Optional[pd.DataFrame],
+        overlap_df: pd.DataFrame,
         total_assets: float,
     ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """Apply FLEX index overlap adjustments and return overlap contribution details."""
-
-        overlap_columns = [
-            "security_ticker",
-            "security_weight",
-            "overlap_market_value",
-            "overlap_weight",
-        ]
+        """Apply FLEX index overlap adjustments; the caller guarantees index FLEX and a non-empty overlap."""
+        overlap_columns = ["security_ticker", "security_weight", "overlap_market_value", "overlap_weight"]
         empty = pd.DataFrame(columns=overlap_columns)
 
         def _base_result(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
             df = df.copy()
-            df["net_market_value"] = pd.to_numeric(
-                df.get("equity_market_value", 0.0), errors="coerce"
-            ).fillna(0.0) + pd.to_numeric(
-                df.get("option_market_value", 0.0), errors="coerce"
-            ).fillna(0.0)
+            df["net_market_value"] = _num(df, "equity_market_value") + _num(df, "option_market_value")
             return df, empty
 
         if holdings_df.empty:
             return holdings_df.copy(), empty
-
-        if overlap_df is None or overlap_df.empty:
-            return _base_result(holdings_df)
-
-        if not (
-            fund.has_flex_option
-            and (fund.flex_option_type or "").lower() == "index"
-        ):
-            return _base_result(holdings_df)
 
         flex_options = fund.data.current.vest.flex_options
         if flex_options.empty:
             return _base_result(holdings_df)
 
         overlap = overlap_df.copy()
-
-        overlap["security_weight"] = pd.to_numeric(
-            overlap["security_weight"], errors="coerce"
-        ).fillna(0.0)
+        overlap["security_weight"] = pd.to_numeric(overlap["security_weight"], errors="coerce").fillna(0.0)
         overlap = overlap.drop_duplicates(subset="security_ticker")
 
         flex_df = flex_options.copy()
@@ -184,25 +177,11 @@ class ComplianceChecker:
         if flex_positions.empty:
             return _base_result(holdings_df)
 
-        quantities = pd.to_numeric(
-            flex_positions.get("nav_shares_option", 0.0), errors="coerce"
-        ).fillna(0.0)
-        long_flex = flex_positions.loc[quantities > 0].copy()
-
+        long_flex = flex_positions.loc[_num(flex_positions, "nav_shares_option") > 0].copy()
         if long_flex.empty:
-            long_flex = flex_positions.loc[
-                pd.to_numeric(
-                    flex_positions.get("option_market_value", 0.0), errors="coerce"
-                ).fillna(0.0)
-                > 0
-            ].copy()
+            long_flex = flex_positions.loc[_num(flex_positions, "option_market_value") > 0].copy()
 
-        total_flex_mv = float(
-            pd.to_numeric(
-                long_flex.get("option_market_value", 0.0), errors="coerce"
-            ).fillna(0.0).sum()
-        )
-
+        total_flex_mv = float(_num(long_flex, "option_market_value").sum())
         if total_flex_mv <= 0:
             return _base_result(holdings_df)
 
@@ -216,25 +195,15 @@ class ComplianceChecker:
             right_on="security_ticker",
             how="left",
         )
-        merged["security_weight"] = pd.to_numeric(
-            merged.get("security_weight", 0.0), errors="coerce"
-        ).fillna(0.0)
+        merged["security_weight"] = _num(merged, "security_weight")
         merged["overlap_market_value"] = total_flex_mv * merged["security_weight"]
         merged["long_box_market_value_overlap"] = (
-            pd.to_numeric(
-                merged.get("long_box_market_value_overlap", 0.0), errors="coerce"
-            ).fillna(0.0)
-            + merged["overlap_market_value"]
+            _num(merged, "long_box_market_value_overlap") + merged["overlap_market_value"]
         )
         merged = merged.drop(columns=["security_ticker"], errors="ignore")
-
         merged["net_market_value"] = (
-            pd.to_numeric(
-                merged.get("equity_market_value", 0.0), errors="coerce"
-            ).fillna(0.0)
-            + pd.to_numeric(
-                merged.get("option_market_value", 0.0), errors="coerce"
-            ).fillna(0.0)
+            _num(merged, "equity_market_value")
+            + _num(merged, "option_market_value")
             + merged["long_box_market_value_overlap"]
         )
 
@@ -244,29 +213,19 @@ class ComplianceChecker:
         overlap_details = overlap_details.rename(columns={"eqyticker": "security_ticker"})
         if not overlap_details.empty:
             if total_assets:
-                overlap_details["overlap_weight"] = (
-                    overlap_details["overlap_market_value"] / total_assets
-                )
+                overlap_details["overlap_weight"] = overlap_details["overlap_market_value"] / total_assets
             else:
                 overlap_details["overlap_weight"] = 0.0
         else:
             overlap_details = pd.DataFrame(columns=overlap_columns)
 
         merged = merged.drop(columns=["security_weight", "overlap_market_value"], errors="ignore")
-
         return merged, overlap_details.reindex(columns=overlap_columns).reset_index(drop=True)
 
     def _get_current_totals(self, fund: Fund) -> tuple[float, float, float, float]:
         """Return snapshot total assets, total net assets, expenses, and cash."""
         snapshot = fund.data.current
-
-        # These are properties on FundSnapshot, not on custodian
-        total_assets = snapshot.ta
-        total_net_assets = snapshot.tna
-        expenses = snapshot.expenses
-        cash_value = snapshot.cash
-
-        return total_assets, total_net_assets, expenses, cash_value
+        return snapshot.ta, snapshot.tna, snapshot.expenses, snapshot.cash
 
     def _extract_long_options(self, opt_df: pd.DataFrame, gics_cols: list) -> pd.DataFrame:
         """Return long-only option rows with GICS columns and option_market_value."""
@@ -295,1459 +254,812 @@ class ComplianceChecker:
 
     def run_compliance_tests(self, test_functions: Optional[list[str]] = None) -> Dict[str, Dict[str, ComplianceResult]]:
         """Execute the requested compliance checks for every fund."""
-
-        available_tests: Dict[str, Callable[[Fund], ComplianceResult]] = {
-            "summary_metrics": self.calculate_summary_metrics,
-            "gics_compliance": self.gics_compliance,
-            "prospectus_80pct_policy": self.prospectus_80pct_policy,
-            "diversification_IRS_check": self.diversification_IRS_check,
-            "diversification_40act_check": self.diversification_40act_check,
-            "diversification_IRC_check": self.diversification_IRC_check,
-            "max_15pct_illiquid_sai": self.max_15pct_illiquid_sai,
-            "real_estate_check": self.real_estate_check,
-            "commodities_check": self.commodities_check,
-            "twelve_d1a_other_inv_cos": self.twelve_d1a_other_inv_cos,
-            "twelve_d2_insurance_cos": self.twelve_d2_insurance_cos,
-            "twelve_d3_sec_biz": self.twelve_d3_sec_biz,
-        }
-
+        rules = _RULES
         if test_functions:
             requested = set(test_functions)
-            available_tests = {
-                name: func for name, func in available_tests.items() if name in requested
-            }
+            rules = tuple(rule for rule in _RULES if rule[0] in requested)
 
         results: Dict[str, Dict[str, ComplianceResult]] = {}
-
         for fund_name, fund in self.funds.items():
             fund_results: Dict[str, ComplianceResult] = {}
-
-            for test_name, test_func in available_tests.items():
-
-                if (
-                    test_name == "diversification_IRC_check"
-                    and (fund.vehicle or "").lower() != VEHICLE_VIT
-                ):
+            for test_name, method_name, display, log_msg in rules:
+                if test_name == "diversification_IRC_check" and (fund.vehicle or "").lower() != VEHICLE_VIT:
                     continue
-
                 try:
-                    fund_results[test_name] = test_func(fund)
-                except Exception as exc:  # pragma: no cover - defensive logging path
-                    logger.error(
-                        "Error executing %s for fund %s: %s",
-                        test_name,
-                        fund_name,
-                        exc,
-                        exc_info=True,
-                    )
-                    fund_results[test_name] = ComplianceResult(
-                        is_compliant=False,
-                        details={"rule": test_name, "status": "error"},
-                        calculations={},
-                        error=str(exc),
-                    )
-
+                    fund_results[test_name] = getattr(self, method_name)(fund)
+                except Exception as exc:
+                    logger.error(log_msg, fund.name, exc)
+                    extra = {"fund": fund.name} if test_name == "gics_compliance" else {}
+                    fund_results[test_name] = _res(False, display, {}, str(exc), status="error", **extra)
             results[fund_name] = fund_results
-
         return results
 
     def calculate_summary_metrics(self, fund: Fund) -> ComplianceResult:
-        """Calculate summary metrics for the fund."""
-        try:
-            total_assets, total_net_assets, expenses, cash_value = self._get_current_totals(fund)
-
-            snapshot = fund.data.current
-
-            calculations = {
-                "cash_value": cash_value,
-                "equity_market_value": snapshot.total_equity_value,
-                "option_market_value": snapshot.total_option_value,  # Regular options only
-                "flex_option_market_value": snapshot.total_flex_option_value,  # Flex options
-                "total_option_market_value": snapshot.total_all_options_value,  # All options combined
-                "option_delta_adjusted_notional": snapshot.total_option_delta_adjusted_notional,  # Already includes flex
-                "treasury_market_value": snapshot.total_treasury_value,
-                "total_assets": total_assets,
-                "total_net_assets": total_net_assets,
-                "expenses": expenses,
-            }
-
-            return ComplianceResult(
-                is_compliant=True,
-                details={"rule": "summary_metrics", "status": "calculated"},
-                calculations=calculations,
-            )
-
-        except Exception as exc:
-            logger.error("Error calculating summary metrics for %s: %s", fund.name, exc)
-            return ComplianceResult(
-                is_compliant=False,
-                details={"rule": "summary_metrics", "status": "error"},
-                calculations={},
-                error=str(exc),
-            )
+        total_assets, total_net_assets, expenses, cash_value = self._get_current_totals(fund)
+        snapshot = fund.data.current
+        calculations = {
+            "cash_value": cash_value,
+            "equity_market_value": snapshot.total_equity_value,
+            "option_market_value": snapshot.total_option_value,  # Regular options only
+            "flex_option_market_value": snapshot.total_flex_option_value,
+            "total_option_market_value": snapshot.total_all_options_value,
+            "option_delta_adjusted_notional": snapshot.total_option_delta_adjusted_notional,  # Already includes flex
+            "treasury_market_value": snapshot.total_treasury_value,
+            "total_assets": total_assets,
+            "total_net_assets": total_net_assets,
+            "expenses": expenses,
+        }
+        return _res(True, "summary_metrics", calculations, status="calculated")
 
     def prospectus_80pct_policy(self, fund: Fund) -> ComplianceResult:
-        try:
+        rule = "80% Prospectus Policy"
+        total_assets, total_net_assets, _, total_cash_value = self._get_current_totals(fund)
+        current = fund.data.current
+        total_equity_market_value = float(current.total_equity_value)
+        total_opt_market_value = float(current.total_option_value)
+        total_tbill_value = float(current.total_treasury_value)
+        total_opt_delta_notional_value = float(current.total_option_delta_adjusted_notional)
 
-            total_assets, total_net_assets, _, total_cash_value = self._get_current_totals(fund)
-            total_equity_market_value = float(fund.data.current.total_equity_value)
-            total_opt_market_value = float(fund.data.current.total_option_value)
-            total_tbill_value = float(fund.data.current.total_treasury_value)
-            total_opt_delta_notional_value = float(
-                fund.data.current.total_option_delta_adjusted_notional
-            )
-
-            is_closed_end = fund.is_closed_end_fund
-            if fund.vehicle == VEHICLE_PRIVATE:
-                calculations = {
-                    "total_equity_market_value": total_equity_market_value,
-                    "total_opt_market_value": total_opt_market_value,
-                    "total_tbill_value": total_tbill_value,
-                    "total_cash_value": total_cash_value,
-                    "total_assets": total_assets,
-                    "total_net_assets": total_net_assets,
-                }
-
-                return ComplianceResult(
-                    is_compliant=True,
-                    details={
-                        "rule": "80% Prospectus Policy",
-                        "skipped": True,
-                        "reason": "Private funds are excluded from the 80% test",
-                        "fund": fund.name,
-                    },
-                    calculations=calculations,
-                )
-
-            is_trif = is_closed_end and fund.name.startswith(("P3", "TR"))
-            if is_trif:
-                calculations = {
-                    "total_equity_market_value": total_equity_market_value,
-                    "total_opt_market_value": total_opt_market_value,
-                    "total_tbill_value": total_tbill_value,
-                    "total_cash_value": total_cash_value,
-                    "total_assets": total_assets,
-                    "total_net_assets": total_net_assets,
-                }
-
-                return ComplianceResult(
-                    is_compliant=True,
-                    details={
-                        "rule": "80% Prospectus Policy",
-                        "skipped": True,
-                        "reason": "TRIF closed-end funds are excluded from the 80% test",
-                        "fund": fund.name,
-                    },
-                    calculations=calculations,
-                )
-
-            is_b3_closed_end = is_closed_end and fund.name.endswith("B3")
-            options_in_scope = fund.has_listed_option and fund.name in PROSPECTUS_OPTIONS_FUNDS
-            if is_closed_end:
-                options_in_scope = fund.has_flex_option or fund.has_listed_option or is_b3_closed_end
-
-            option_primary_amount = abs(total_opt_delta_notional_value)
-            option_primary_method = "delta_adjusted_notional"
-
-            if is_closed_end:
-                option_primary_amount = total_opt_market_value
-                option_primary_method = "market_value"
-
-            numerator = total_equity_market_value + total_tbill_value
-            denominator = (
-                total_equity_market_value + total_cash_value + total_tbill_value
-            )
-
-            if options_in_scope:
-                numerator += option_primary_amount
-                denominator += option_primary_amount
-
-            numerator_mv = total_equity_market_value + total_tbill_value
-            denominator_mv = (
-                total_equity_market_value + total_cash_value + total_tbill_value
-            )
-
-            if options_in_scope:
-                numerator_mv += total_opt_market_value
-                denominator_mv += total_opt_market_value
-
-            names_test = numerator / denominator if denominator else 0.0
-            names_test_mv = numerator_mv / denominator_mv if denominator_mv else 0.0
-
+        is_closed_end = fund.is_closed_end_fund
+        # Case-sensitive on purpose (other rules use the lowercased fund.is_private_fund).
+        if fund.vehicle == VEHICLE_PRIVATE:
+            skip_reason = "Private funds are excluded from the 80% test"
+        elif is_closed_end and fund.name.startswith(("P3", "TR")):
+            skip_reason = "TRIF closed-end funds are excluded from the 80% test"
+        else:
+            skip_reason = None
+        if skip_reason:
             calculations = {
                 "total_equity_market_value": total_equity_market_value,
-                "total_opt_delta_notional_value": total_opt_delta_notional_value,
                 "total_opt_market_value": total_opt_market_value,
                 "total_tbill_value": total_tbill_value,
                 "total_cash_value": total_cash_value,
-                "option_contribution": option_primary_amount if options_in_scope else 0.0,
-                "option_contribution_method": option_primary_method,
-                "denominator": denominator,
-                "numerator": numerator,
-                "names_test": names_test,
-                "denominator_mv": denominator_mv,
-                "numerator_mv": numerator_mv,
-                "names_test_mv": names_test_mv,
-                "threshold": PROSPECTUS_MIN_THRESHOLD,
                 "total_assets": total_assets,
                 "total_net_assets": total_net_assets,
-                "options_in_scope": options_in_scope,
-                "policy_variant": (
-                    "closed_end_b3"
-                    if is_b3_closed_end
-                    else ("closed_end" if is_closed_end else "standard")
-                ),
             }
+            return _res(True, rule, calculations, skipped=True, reason=skip_reason, fund=fund.name)
 
-            return ComplianceResult(
-                is_compliant=names_test >= PROSPECTUS_MIN_THRESHOLD,
-                details={
-                    "rule": "80% Prospectus Policy",
-                    "options_in_scope": options_in_scope,
-                    "options_valuation_method": option_primary_method,
-                    "policy_variant": calculations["policy_variant"],
-                },
-                calculations=calculations,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging path
-            logger.error("Error in prospectus policy check for %s: %s", fund.name, exc)
-            return ComplianceResult(
-                is_compliant=False,
-                details={"rule": "80% Prospectus Policy", "status": "error"},
-                calculations={},
-                error=str(exc),
-            )
+        is_b3_closed_end = is_closed_end and fund.name.endswith("B3")
+        if is_closed_end:
+            options_in_scope = fund.has_flex_option or fund.has_listed_option or is_b3_closed_end
+            option_primary_amount, option_primary_method = total_opt_market_value, "market_value"
+        else:
+            options_in_scope = fund.has_listed_option and fund.name in PROSPECTUS_OPTIONS_FUNDS
+            option_primary_amount = abs(total_opt_delta_notional_value)
+            option_primary_method = "delta_adjusted_notional"
+
+        def ratio(option_amount: float) -> Tuple[float, float, float]:
+            numerator = total_equity_market_value + total_tbill_value
+            denominator = total_equity_market_value + total_cash_value + total_tbill_value
+            if options_in_scope:
+                numerator += option_amount
+                denominator += option_amount
+            return numerator, denominator, numerator / denominator if denominator else 0.0
+
+        numerator, denominator, names_test = ratio(option_primary_amount)
+        numerator_mv, denominator_mv, names_test_mv = ratio(total_opt_market_value)
+        policy_variant = "closed_end_b3" if is_b3_closed_end else ("closed_end" if is_closed_end else "standard")
+
+        calculations = {
+            "total_equity_market_value": total_equity_market_value,
+            "total_opt_delta_notional_value": total_opt_delta_notional_value,
+            "total_opt_market_value": total_opt_market_value,
+            "total_tbill_value": total_tbill_value,
+            "total_cash_value": total_cash_value,
+            "option_contribution": option_primary_amount if options_in_scope else 0.0,
+            "option_contribution_method": option_primary_method,
+            "denominator": denominator,
+            "numerator": numerator,
+            "names_test": names_test,
+            "denominator_mv": denominator_mv,
+            "numerator_mv": numerator_mv,
+            "names_test_mv": names_test_mv,
+            "threshold": PROSPECTUS_MIN_THRESHOLD,
+            "total_assets": total_assets,
+            "total_net_assets": total_net_assets,
+            "options_in_scope": options_in_scope,
+            "policy_variant": policy_variant,
+        }
+        return _res(
+            names_test >= PROSPECTUS_MIN_THRESHOLD,
+            rule,
+            calculations,
+            options_in_scope=options_in_scope,
+            options_valuation_method=option_primary_method,
+            policy_variant=policy_variant,
+        )
 
     def diversification_IRS_check(self, fund: Fund) -> ComplianceResult:
-        # IRS §851 RIC diversification is for registered investment companies.
-        # Private funds are not RICs.
+        # IRS §851 RIC diversification is for registered investment companies; private funds are not RICs.
         if fund.is_private_fund:
-            return ComplianceResult(
-                is_compliant=True,
-                details={
-                    "rule": "IRS Diversification",
-                    "skipped": True,
-                    "reason": "Private funds are not RICs under IRS §851",
-                    "fund_type": "Private Fund",
-                },
-                calculations={},
+            return _res(
+                True, "IRS Diversification", {}, skipped=True,
+                reason="Private funds are not RICs under IRS §851", fund_type="Private Fund",
             )
 
-        try:
-            vest_eqy_holdings = fund.data.current.vest.equity
-            vest_opt_holdings = fund.data.current.vest.options
-            vest_flex_holdings = fund.data.current.vest.flex_options
-            total_tbill_value = float(fund.data.current.total_treasury_value)
-            total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
-            overlap_df = fund.data.current.overlap
+        vest_eqy_holdings = fund.data.current.vest.equity
+        vest_opt_holdings = fund.data.current.vest.options
+        vest_flex_holdings = fund.data.current.vest.flex_options
+        total_tbill_value = float(fund.data.current.total_treasury_value)
+        total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
+        overlap_df = fund.data.current.overlap
 
-            vest_eqy_holdings = self._consolidate_holdings_by_issuer(fund, vest_eqy_holdings)
+        vest_eqy_holdings = self._consolidate_holdings_by_issuer(vest_eqy_holdings)
 
-            if fund.has_listed_option:
-                holdings_df = pd.merge(
-                    vest_eqy_holdings,
-                    vest_opt_holdings,
-                    left_on="eqyticker",
-                    right_on="equity_underlying_ticker",
-                    how="outer",
-                    suffixes=("", "_option"),
-                )
-                if "option_market_value" in holdings_df.columns:
-                    holdings_df["option_market_value"] = holdings_df["option_market_value"].fillna(0)
-                else:
-                    holdings_df["option_market_value"] = 0
+        if fund.has_listed_option:
+            holdings_df = pd.merge(
+                vest_eqy_holdings,
+                vest_opt_holdings,
+                left_on="eqyticker",
+                right_on="equity_underlying_ticker",
+                how="outer",
+                suffixes=("", "_option"),
+            )
+            if "option_market_value" in holdings_df.columns:
+                holdings_df["option_market_value"] = holdings_df["option_market_value"].fillna(0)
             else:
-                holdings_df = vest_eqy_holdings
+                holdings_df["option_market_value"] = 0
+        else:
+            holdings_df = vest_eqy_holdings
 
+        overlap_details_df = pd.DataFrame(
+            columns=["security_ticker", "security_weight", "overlap_market_value", "overlap_weight"]
+        )
+        has_index_flex = fund.has_flex_option and ((fund.flex_option_type or "").lower() == "index")
+        if has_index_flex and not overlap_df.empty:
+            holdings_df, overlap_details_df = self._calculate_index_overlap_adjustments(
+                fund, holdings_df, overlap_df, total_assets
+            )
+        else:
+            holdings_df["net_market_value"] = holdings_df["equity_market_value"] + holdings_df["option_market_value"]
 
+        if fund.has_flex_option and ((fund.flex_option_type or "").lower() == "single_stock"):
+            df_flex_calls = vest_flex_holdings[vest_flex_holdings["option_notional_value"] > 0]
+            holdings_df = pd.merge(
+                holdings_df,
+                df_flex_calls[["equity_underlying_ticker", "option_notional_value"]],
+                left_on="eqyticker",
+                right_on="equity_underlying_ticker",
+                how="outer",
+                suffixes=("", "_flex"),
+            )
+            holdings_df["net_market_value"] = holdings_df["net_market_value"] + holdings_df["option_notional_value_flex"]
 
-            overlap_details_df = pd.DataFrame(
-                columns=["security_ticker", "security_weight", "overlap_market_value", "overlap_weight"]
+        holdings_df["weight"] = holdings_df["net_market_value"] / total_assets if total_assets else 0.0
+        holdings_df["tna_wgt"] = holdings_df["net_market_value"] / total_net_assets if total_net_assets else 0.0
+
+        holdings_df = holdings_df.sort_values("tna_wgt", ascending=False).reset_index(drop=True)
+        largest_holding = holdings_df.iloc[0].to_dict() if len(holdings_df) >= 1 else {}
+        holdings_df["cumulative_weight"] = holdings_df["tna_wgt"].cumsum()
+        bottom_50_mask = holdings_df["cumulative_weight"] > 0.5
+        bottom_50_df = holdings_df[bottom_50_mask].copy()
+        top_50_df = holdings_df[~bottom_50_mask].copy()
+
+        qualifying_assets_value = float(holdings_df["net_market_value"].sum())
+        if qualifying_assets_value > total_assets and total_net_assets:
+            condition_IRS_2_a_50 = (total_net_assets - expenses) / total_net_assets >= IRS_QUALIFYING_ASSETS_MIN
+        else:
+            condition_IRS_2_a_50 = (
+                qualifying_assets_value >= IRS_QUALIFYING_ASSETS_MIN * total_net_assets
+                if total_net_assets
+                else False
             )
 
-            has_index_flex = fund.has_flex_option and (
-                (fund.flex_option_type or "").lower() == "index"
-            )
+        five_pct_gross_assets = total_assets * 0.05
+        large_securities = holdings_df[holdings_df["equity_market_value"] >= five_pct_gross_assets]
+        sum_large_securities_weights = float(large_securities["tna_wgt"].sum())
+        condition_IRS_2_a_5_new = sum_large_securities_weights <= 0.5
 
-            if has_index_flex and not overlap_df.empty:
-                holdings_df, overlap_details_df = self._calculate_index_overlap_adjustments(
-                    fund,
-                    holdings_df,
-                    overlap_df,
-                    total_assets,
-                )
-            else:
-                holdings_df["net_market_value"] = holdings_df["equity_market_value"] + holdings_df["option_market_value"]
+        bottom_50_df["exceeds_5_percent"] = bottom_50_df["tna_wgt"] > IRS_BOTTOM_50_LIMIT
+        condition_IRS_2_a_5_original = not bool(bottom_50_df["exceeds_5_percent"].any())
 
-            has_single_stock_flex = fund.has_flex_option and (
-                (fund.flex_option_type or "").lower() == "single_stock"
-            )
+        if "EQY_SH_OUT_million" not in bottom_50_df.columns:
+            bottom_50_df["EQY_SH_OUT_million"] = 1.0
+        denom = bottom_50_df["EQY_SH_OUT_million"].replace(0, 1)
+        share_series = self._zero_shares(bottom_50_df)
+        bottom_50_df["exceeds_10_percent"] = (share_series / denom) > IRS_OWNERSHIP_LIMIT
+        condition_IRS_2_a_10 = not bool(bottom_50_df["exceeds_10_percent"].any())
 
-            if has_single_stock_flex:
-                df_flex_calls = vest_flex_holdings[vest_flex_holdings["option_notional_value"] > 0]
-                holdings_df = pd.merge(
-                    holdings_df,
-                    df_flex_calls[["equity_underlying_ticker", "option_notional_value"]],
-                    left_on="eqyticker",
-                    right_on="equity_underlying_ticker",
-                    how="outer",
-                    suffixes=("", "_flex"),
-                )
-                holdings_df["net_market_value"] = holdings_df["net_market_value"] + holdings_df["option_notional_value_flex"]
-
-            if total_assets:
-                holdings_df["weight"] = holdings_df["net_market_value"] / total_assets
-            else:
-                holdings_df["weight"] = 0.0
-
-            if total_net_assets:
-                holdings_df["tna_wgt"] = holdings_df["net_market_value"] / total_net_assets
-            else:
-                holdings_df["tna_wgt"] = 0.0
-
-            holdings_df = holdings_df.sort_values("tna_wgt", ascending=False).reset_index(drop=True)
-            largest_holding = holdings_df.iloc[0].to_dict() if len(holdings_df) >= 1 else {}
-
-            holdings_df["cumulative_weight"] = holdings_df["tna_wgt"].cumsum()
-            bottom_50_mask = holdings_df["cumulative_weight"] > 0.5
-            bottom_50_df = holdings_df[bottom_50_mask].copy()
-            top_50_df = holdings_df[~bottom_50_mask].copy()
-
-            qualifying_assets_value = float(holdings_df["net_market_value"].sum())
-            overlap_weight_sum = float(overlap_details_df.get("overlap_weight", pd.Series()).sum())
-
-            if qualifying_assets_value > total_assets and total_net_assets:
-                condition_IRS_2_a_50 = (
-                    (total_net_assets - expenses) / total_net_assets >= IRS_QUALIFYING_ASSETS_MIN
-                )
-            else:
-                condition_IRS_2_a_50 = (
-                    qualifying_assets_value >= IRS_QUALIFYING_ASSETS_MIN * total_net_assets
-                    if total_net_assets
-                    else False
-                )
-
-            five_pct_gross_assets = total_assets * 0.05
-            large_securities = holdings_df[holdings_df["equity_market_value"] >= five_pct_gross_assets]
-            sum_large_securities_weights = float(large_securities["tna_wgt"].sum())
-            condition_IRS_2_a_5_new = sum_large_securities_weights <= 0.5
-
-            if "tna_wgt" not in bottom_50_df.columns:
-                bottom_50_df["tna_wgt"] = 0.0
-            bottom_50_df["exceeds_5_percent"] = bottom_50_df["tna_wgt"] > IRS_BOTTOM_50_LIMIT
-            condition_IRS_2_a_5_original = not bool(bottom_50_df["exceeds_5_percent"].any())
-
-            if "EQY_SH_OUT_million" not in bottom_50_df.columns:
-                bottom_50_df["EQY_SH_OUT_million"] = 1.0
-            denom = bottom_50_df["EQY_SH_OUT_million"].replace(0, 1)
-
-            share_col = "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
-            share_series = pd.Series(0.0, index=bottom_50_df.index, dtype=float)
-            bottom_50_df[share_col] = share_series
-
-            bottom_50_df["exceeds_10_percent"] = (
-                share_series / denom
-            ) > IRS_OWNERSHIP_LIMIT
-            condition_IRS_2_a_10 = not bool(bottom_50_df["exceeds_10_percent"].any())
-
-            details = {
-                "rule": "IRS Diversification",
-                "condition_IRS_1": True,
-                "condition_IRS_2_a_50": condition_IRS_2_a_50,
-                "condition_IRS_2_a_5": condition_IRS_2_a_5_new,
-                "condition_IRS_2_a_5_original": condition_IRS_2_a_5_original,
-                "condition_IRS_2_a_10": condition_IRS_2_a_10,
-            }
-
-            calculations = {
-                "total_assets": total_assets,
-                "total_net_assets": total_net_assets,
-                "total_tbill_value": total_tbill_value,
-                "qualifying_assets_value": qualifying_assets_value,
-                "five_pct_gross_assets": five_pct_gross_assets,
-                "sum_large_securities_weights": sum_large_securities_weights,
-                "large_securities_count": int(len(large_securities)),
-                "largest_holding": largest_holding,
-                "second_largest_holding": holdings_df.iloc[1].to_dict() if len(holdings_df) >= 2 else {},
-                "bottom_50_largest": bottom_50_df.iloc[0].to_dict() if len(bottom_50_df) >= 1 else {},
-                "bottom_50_second_largest": bottom_50_df.iloc[1].to_dict() if len(bottom_50_df) >= 2 else {},
-                "holdings_df": holdings_df.to_dict("records"),
-                "bottom_50_holdings": bottom_50_df.to_dict("records"),
-                "top_50_holdings": top_50_df.to_dict("records"),
-                "expenses": expenses,
-                "bottom_50_exceeds_5_percent": int(
-                    bottom_50_df["exceeds_5_percent"].sum()
-                )
-                if "exceeds_5_percent" in bottom_50_df
-                else 0,
-                "bottom_50_exceeds_10_percent": int(
-                    bottom_50_df["exceeds_10_percent"].sum()
-                )
-                if "exceeds_10_percent" in bottom_50_df
-                else 0,
-                "large_securities": large_securities.to_dict("records"),
-                "overlap": overlap_details_df.to_dict("records"),
-                "overlap_weight_sum": overlap_weight_sum,
-                "overlap_market_value_sum": float(
-                    overlap_details_df.get("overlap_market_value", pd.Series()).sum()
-                ),
-            }
-
-            is_compliant = all(
-                [
-                    details["condition_IRS_1"],
-                    condition_IRS_2_a_50,
-                    condition_IRS_2_a_5_new,
-                    condition_IRS_2_a_10,
-                ]
-            )
-
-            return ComplianceResult(
-                is_compliant=is_compliant,
-                details=details,
-                calculations=calculations,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging path
-            logger.error("Error in IRS diversification check for %s: %s", fund.name, exc)
-            return ComplianceResult(
-                is_compliant=False,
-                details={"rule": "IRS Diversification", "status": "error"},
-                calculations={},
-                error=str(exc),
-            )
+        details = {
+            "rule": "IRS Diversification",
+            "condition_IRS_1": True,
+            "condition_IRS_2_a_50": condition_IRS_2_a_50,
+            "condition_IRS_2_a_5": condition_IRS_2_a_5_new,
+            "condition_IRS_2_a_5_original": condition_IRS_2_a_5_original,
+            "condition_IRS_2_a_10": condition_IRS_2_a_10,
+        }
+        calculations = {
+            "total_assets": total_assets,
+            "total_net_assets": total_net_assets,
+            "total_tbill_value": total_tbill_value,
+            "qualifying_assets_value": qualifying_assets_value,
+            "five_pct_gross_assets": five_pct_gross_assets,
+            "sum_large_securities_weights": sum_large_securities_weights,
+            "large_securities_count": int(len(large_securities)),
+            "largest_holding": largest_holding,
+            "second_largest_holding": holdings_df.iloc[1].to_dict() if len(holdings_df) >= 2 else {},
+            "bottom_50_largest": bottom_50_df.iloc[0].to_dict() if len(bottom_50_df) >= 1 else {},
+            "bottom_50_second_largest": bottom_50_df.iloc[1].to_dict() if len(bottom_50_df) >= 2 else {},
+            "holdings_df": holdings_df.to_dict("records"),
+            "bottom_50_holdings": bottom_50_df.to_dict("records"),
+            "top_50_holdings": top_50_df.to_dict("records"),
+            "expenses": expenses,
+            "bottom_50_exceeds_5_percent": int(bottom_50_df["exceeds_5_percent"].sum()),
+            "bottom_50_exceeds_10_percent": int(bottom_50_df["exceeds_10_percent"].sum()),
+            "large_securities": large_securities.to_dict("records"),
+            "overlap": overlap_details_df.to_dict("records"),
+            "overlap_weight_sum": float(overlap_details_df["overlap_weight"].sum()),
+            "overlap_market_value_sum": float(overlap_details_df["overlap_market_value"].sum()),
+        }
+        is_compliant = all([condition_IRS_2_a_50, condition_IRS_2_a_5_new, condition_IRS_2_a_10])
+        return ComplianceResult(is_compliant, details, calculations)
 
     def diversification_40act_check(self, fund: Fund) -> ComplianceResult:
         if fund.is_private_fund:
-            return ComplianceResult(
-                is_compliant=True,
-                details={
-                    "rule": "40 Act Diversification",
-                    "skipped": True,
-                    "reason": "Private funds are not registered under the 40 Act",
-                    "fund_type": "Private Fund",
-                },
-                calculations={},
+            return _res(
+                True, "40 Act Diversification", {}, skipped=True,
+                reason="Private funds are not registered under the 40 Act", fund_type="Private Fund",
             )
 
-        try:
-            vest_opt_holdings = fund.data.current.vest.options
-            vest_eqy_holdings = fund.data.current.vest.equity
-            vest_treasury_holdings = fund.data.current.vest.treasury
+        vest_opt_holdings = fund.data.current.vest.options
+        vest_eqy_holdings = fund.data.current.vest.equity
+        total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
+        vest_eqy_holdings = self._consolidate_holdings_by_issuer(vest_eqy_holdings)
+        fund_registration = (fund.diversification_status or "unknown").replace("_", "-").lower()
 
-            total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
-            vest_eqy_holdings = self._consolidate_holdings_by_issuer(fund, vest_eqy_holdings)
-
-            registration = (fund.diversification_status or "unknown").replace("_", "-")
-            fund_registration = registration.lower()
-
-            if fund.has_listed_option and fund.listed_option_type == "index":
-                holdings_df = vest_eqy_holdings.copy()
-                holdings_df["option_market_value"] = 0.0
-                holdings_df["net_market_value"] = holdings_df["equity_market_value"]
-            else:
-                # Get long-only options (regular + flex) aggregated by underlying ticker
-                long_opts = self._extract_long_options(vest_opt_holdings, [])
-                long_flex = self._extract_long_options(fund.data.current.vest.flex_options, [])
-
-                # Combine and aggregate long option MV by underlying ticker
-                long_all = pd.concat([long_opts, long_flex], ignore_index=True)
-                if not long_all.empty and "equity_underlying_ticker" in long_all.columns:
-                    long_by_issuer = (
-                        long_all.groupby("equity_underlying_ticker")["_contrib_value"]
-                        .sum()
-                        .reset_index()
-                        .rename(columns={"equity_underlying_ticker": "eqyticker", "_contrib_value": "long_option_mv"})
-                    )
-                else:
-                    long_by_issuer = pd.DataFrame(columns=["eqyticker", "long_option_mv"])
-
-                holdings_df = pd.merge(
-                    vest_eqy_holdings,
-                    long_by_issuer,
-                    how="left",
-                    on="eqyticker",
-                )
-                holdings_df["long_option_mv"] = holdings_df["long_option_mv"].fillna(0.0)
-                holdings_df["net_market_value"] = holdings_df["equity_market_value"] + holdings_df["long_option_mv"]
-
-            # Qualifying assets: equity + long options + cash + treasury
-            long_opt_mv = self._extract_long_options(
-                vest_opt_holdings, []
-            )["_contrib_value"].sum() if not self._extract_long_options(vest_opt_holdings, []).empty else 0.0
-
-            long_flex_mv = self._extract_long_options(
-                fund.data.current.vest.flex_options, []
-            )["_contrib_value"].sum() if not self._extract_long_options(fund.data.current.vest.flex_options, []).empty else 0.0
-
-            _, _, _, cash_value = self._get_current_totals(fund)
-            treasury_value = float(fund.data.current.total_treasury_value)
-            equity_value = float(vest_eqy_holdings["equity_market_value"].sum()) if not vest_eqy_holdings.empty else 0.0
-
-            qualifying_assets = equity_value + long_opt_mv + long_flex_mv
-            qualifying_pct = qualifying_assets / total_assets if total_assets else 0.0
-            condition_1_met = qualifying_pct >= ACT_40_QUALIFYING_ASSETS_MIN
-
-            non_qualifying_assets = total_assets - qualifying_assets
-            non_qualifying_assets_pct = non_qualifying_assets / total_assets if total_assets else 0.0
-
-            # Calculate thresholds
-            five_pct_threshold = ACT_40_ISSUER_LIMIT * total_assets  # 5% threshold
-            max_excluded_bucket = 0.25 * total_assets  # 25% bucket cap
-
-            # Identify issuers with 5%+ exposure
-            sorted_df = holdings_df.sort_values(by="net_market_value", ascending=False)
-            five_pct_plus_issuers = sorted_df[sorted_df["net_market_value"] > five_pct_threshold].copy()
-
-            # Allocate 5%+ issuers to the 25% bucket until we hit the cap
-            excluded_securities = []
-            excluded_bucket_total = 0.0
-            violating_issuers = []
-
-            for idx, row in five_pct_plus_issuers.iterrows():
-                issuer_value = row["net_market_value"]
-
-                # Check if adding this issuer would exceed the 25% cap
-                if excluded_bucket_total + issuer_value <= max_excluded_bucket:
-                    # Fits in the 25% bucket
-                    excluded_securities.append(row["eqyticker"])
-                    excluded_bucket_total += issuer_value
-                else:
-                    # Doesn't fit - this is a violation
-                    violating_issuers.append({
-                        "ticker": row["eqyticker"],
-                        "value": issuer_value,
-                        "pct_of_assets": (issuer_value / total_assets * 100) if total_assets > 0 else 0.0
-                    })
-
-            # Remaining securities (< 5% and violating 5%+ issuers) go to 75% bucket
-            remaining_securities = sorted_df[~sorted_df["eqyticker"].isin(excluded_securities)].copy()
-
-            five_pct_threshold = ACT_40_ISSUER_LIMIT * total_assets
-            issuer_limited = remaining_securities[
-                remaining_securities["net_market_value"] > five_pct_threshold
-            ].copy()
-            issuer_limited_sum = float(issuer_limited["net_market_value"].sum()) if not issuer_limited.empty else 0.0
-            condition_2a_met = issuer_limited.empty
-
-            occ_weight_mkt_val = abs(float(vest_opt_holdings["option_market_value"].sum()))
-            condition_2a_occ_met = (
-                occ_weight_mkt_val <= 0.05 * total_net_assets if total_net_assets else False
-            )
-
-            if "EQY_SH_OUT_million" not in remaining_securities.columns:
-                remaining_securities["EQY_SH_OUT_million"] = 1.0
-            remaining_securities["EQY_SH_OUT_million"] = (
-                pd.to_numeric(remaining_securities["EQY_SH_OUT_million"], errors="coerce").replace(0, 1)
-            )
-
-            share_col = "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
-
-            # Preserve existing share data instead of overwriting with zeros
-            if share_col not in remaining_securities.columns:
-                remaining_securities[share_col] = 0.0
-            else:
-                remaining_securities[share_col] = pd.to_numeric(
-                    remaining_securities[share_col], errors="coerce"
-                ).fillna(0.0)
-
-            if not remaining_securities.empty:
-                # Define override mapping
-                ticker_overrides = {
-                    "LOGI": 160784460,
-                    "RCI": 429073267,
-                    "TU": 1550930636
-                }
-
-                # Apply overrides for tickers that exist in the data
-                for ticker, value in ticker_overrides.items():
-                    if ticker in remaining_securities["eqyticker"].values:
-                        remaining_securities.loc[remaining_securities["eqyticker"] == ticker, "EQY_SH_OUT_million"] = value
-
-            remaining_securities["vest_ownership_of_float"] = (
-                    remaining_securities[share_col] / remaining_securities["EQY_SH_OUT_million"]
-            ).fillna(0.0)
-            issuer_compliance_2b = remaining_securities["vest_ownership_of_float"] <= ACT_40_OWNERSHIP_LIMIT
-            condition_2b_met = bool(issuer_compliance_2b.all())
-
-            cumulative_weight_excluded = (
-                excluded_bucket_total / total_net_assets
-                if (excluded_bucket_total and total_net_assets)
-                else 0.0
-            )
-            cumulative_weight_remaining = 1 - cumulative_weight_excluded
-
-            if not remaining_securities.empty and total_assets:
-                remaining_securities["vest_weight"] = (
-                    remaining_securities["net_market_value"] / total_assets
-                )
-            else:
-                remaining_securities["vest_weight"] = 0.0
-
-            columns_for_output = [
-                col
-                for col in [
-                    "eqyticker",
-                    share_col,
-                    "net_market_value",
-                    "vest_weight",
-                    "vest_ownership_of_float",
-                ]
-                if col in remaining_securities.columns
-            ]
-            details_df = remaining_securities[columns_for_output].copy() if columns_for_output else pd.DataFrame()
-            remaining_stocks_details = details_df.to_dict("records")
-            max_ownership_float = (
-                float(remaining_securities["vest_ownership_of_float"].max())
-                if "vest_ownership_of_float" in remaining_securities.columns
-                else 0.0
-            )
-
-            actual_diversified = all(
-                [condition_1_met, condition_2a_met, condition_2b_met]
-            )
-            fund_status_today = "diversified" if actual_diversified else "non-diversified"
-
-            if fund_registration in {"diversified", "non-diversified"}:
-                expected_diversified = fund_registration == "diversified"
-            else:
-                expected_diversified = actual_diversified
-            expected_status = "diversified" if expected_diversified else "non-diversified"
-
-            calculations = {
-                "fund_registration": fund_registration,
-                "fund_status_today": fund_status_today,
-                "expected_fund_status": expected_status,
-                "total_assets": total_assets,
-                "net_assets": total_net_assets,
-                "expenses": expenses,
-                "condition_1_met": condition_1_met,
-                "non_qualifying_assets_1_wgt": non_qualifying_assets_pct,
-                "qualifying_assets_pct": qualifying_pct,
-                "issuer_limited_sum": issuer_limited_sum,
-                "issuer_limited_securities": issuer_limited.to_dict("records")
-                if not issuer_limited.empty
-                else [],
-                "condition_2a_met": condition_2a_met,
-                "condition_2b_met": condition_2b_met,
-                "issuer_compliance_2b": issuer_compliance_2b.to_dict()
-                if isinstance(issuer_compliance_2b, pd.Series)
-                else {"all": issuer_compliance_2b},
-                "excluded_securities": excluded_securities,
-                "cumulative_weight_excluded": cumulative_weight_excluded,
-                "cumulative_weight_remaining": cumulative_weight_remaining,
-                "remaining_stocks_details": remaining_stocks_details,
-                "share_column_used": share_col,
-                "max_ownership_float": max_ownership_float,
-                "condition_2a_occ_met": condition_2a_occ_met,
-                "occ_market_value": occ_weight_mkt_val,
-                "occ_weight": occ_weight_mkt_val / total_assets if total_assets else 0.0,
-            }
-
-            diversification_failure_duration = None
-            if diversification_failure_duration is None:
-                if all([condition_1_met, condition_2a_met, condition_2b_met]):
-                    diversification_failure_duration = 0
-                else:
-                    diversification_failure_duration = 1
-
-            details = {
-                "rule": "40 Act Diversification",
-                "condition_40act_1": condition_1_met,
-                "condition_40act_2a": condition_2a_met,
-                "condition_40act_2b": condition_2b_met,
-                "condition_40act_2a_occ": condition_2a_occ_met,
-                "diversified_since_inception_40act": condition_1_met and condition_2a_met and condition_2b_met,
-                "diversification_failure_duration_40act": diversification_failure_duration,
-                "expected_registration_status": expected_status,
-                "actual_registration_status": fund_status_today,
-            }
-
-            is_compliant = actual_diversified == expected_diversified
-
-            return ComplianceResult(
-                is_compliant=is_compliant,
-                details=details,
-                calculations=calculations,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging path
-            logger.error("Error in 40 Act diversification check for %s: %s", fund.name, exc)
-            return ComplianceResult(
-                is_compliant=False,
-                details={"rule": "40 Act Diversification", "status": "error"},
-                calculations={},
-                error=str(exc),
-            )
-
-    def diversification_IRC_check(self, fund: Fund) -> ComplianceResult:
-        """
-        Check IRC diversification compliance.
-        Only applies to VIT (Variable Insurance Trust) funds.
-        """
-        try:
-            regular_options = fund.data.current.vest.options
-            vest_eqy_holdings = fund.data.current.vest.equity
-            total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
-            vest_eqy_holdings = self._consolidate_holdings_by_issuer(fund, vest_eqy_holdings)
-
-            if vest_eqy_holdings.empty:
-                raise ValueError("Equity holdings missing")
-            if total_assets == 0:
-                raise ValueError("Total assets missing")
-
-            # Merge equity and options data
+        long_opts = self._extract_long_options(vest_opt_holdings, [])
+        long_flex = self._extract_long_options(fund.data.current.vest.flex_options, [])
+        if fund.has_listed_option and fund.listed_option_type == "index":
+            holdings_df = vest_eqy_holdings.copy()
+            holdings_df["option_market_value"] = 0.0
+            holdings_df["net_market_value"] = holdings_df["equity_market_value"]
+        else:
+            # Long options carry no issuer ticker, so none are attributed to issuers; the merge keeps
+            # the original column layout and the KeyError for equity frames without eqyticker.
             holdings_df = pd.merge(
                 vest_eqy_holdings,
-                regular_options,
+                pd.DataFrame(columns=["eqyticker", "long_option_mv"]),
                 how="left",
-                left_on="eqyticker",
-                right_on="equity_underlying_ticker",
-                suffixes=("", "_option"),
+                on="eqyticker",
             )
+            holdings_df["long_option_mv"] = holdings_df["long_option_mv"].fillna(0.0)
+            holdings_df["net_market_value"] = holdings_df["equity_market_value"] + holdings_df["long_option_mv"]
 
-            # Calculate net market value
-            holdings_df["net_market_value"] = (
-                    pd.to_numeric(holdings_df["equity_market_value"], errors="coerce").fillna(0.0)
-                    + pd.to_numeric(holdings_df["option_market_value"], errors="coerce").fillna(0.0)
-            )
-            holdings_df["weight"] = holdings_df["net_market_value"] / total_assets
+        # Qualifying assets: equity + long options (cash and treasury are not counted)
+        long_opt_mv = long_opts["_contrib_value"].sum() if not long_opts.empty else 0.0
+        long_flex_mv = long_flex["_contrib_value"].sum() if not long_flex.empty else 0.0
+        equity_value = float(vest_eqy_holdings["equity_market_value"].sum()) if not vest_eqy_holdings.empty else 0.0
 
-            # Sort by net market value
-            sorted_holdings = holdings_df.sort_values(by="net_market_value", ascending=False)
+        qualifying_assets = equity_value + long_opt_mv + long_flex_mv
+        qualifying_pct = qualifying_assets / total_assets if total_assets else 0.0
+        condition_1_met = qualifying_pct >= ACT_40_QUALIFYING_ASSETS_MIN
+        non_qualifying_assets = total_assets - qualifying_assets
+        non_qualifying_assets_pct = non_qualifying_assets / total_assets if total_assets else 0.0
 
-            # Calculate top exposures
-            top_exposures = [0.0, 0.0, 0.0, 0.0]
-            if not sorted_holdings.empty:
-                cum_values = sorted_holdings["net_market_value"].cumsum()
-                for idx in range(min(4, len(cum_values))):
-                    top_exposures[idx] = float(cum_values.iloc[idx] / total_assets)
+        five_pct_threshold = ACT_40_ISSUER_LIMIT * total_assets
+        max_excluded_bucket = 0.25 * total_assets
 
-            top_holdings = (
-                sorted_holdings[["eqyticker", "net_market_value"]]
-                .head(4)
-                .to_dict("records")
-            )
+        # Allocate 5%+ issuers (largest first) to the 25% bucket until it is full
+        sorted_df = holdings_df.sort_values(by="net_market_value", ascending=False)
+        five_pct_plus_issuers = sorted_df[sorted_df["net_market_value"] > five_pct_threshold].copy()
+        excluded_securities = []
+        excluded_bucket_total = 0.0
+        for _, row in five_pct_plus_issuers.iterrows():
+            issuer_value = row["net_market_value"]
+            if excluded_bucket_total + issuer_value <= max_excluded_bucket:
+                excluded_securities.append(row["eqyticker"])
+                excluded_bucket_total += issuer_value
 
-            # Check all IRC conditions
-            details = {
-                "rule": "IRC Diversification",
-                "condition_IRC_55": top_exposures[0] <= IRC_TOP_1_LIMIT,
-                "condition_IRC_70": top_exposures[1] <= IRC_TOP_2_LIMIT,
-                "condition_IRC_80": top_exposures[2] <= IRC_TOP_3_LIMIT,
-                "condition_IRC_90": top_exposures[3] <= IRC_TOP_4_LIMIT,
-            }
+        # Remaining securities (< 5% and 5%+ issuers that did not fit) form the 75% bucket
+        remaining_securities = sorted_df[~sorted_df["eqyticker"].isin(excluded_securities)].copy()
+        issuer_limited = remaining_securities[remaining_securities["net_market_value"] > five_pct_threshold].copy()
+        issuer_limited_sum = float(issuer_limited["net_market_value"].sum())
+        condition_2a_met = issuer_limited.empty
 
-            calculations = {
-                "total_assets": total_assets,
-                "top_1": top_exposures[0],
-                "top_2": top_exposures[1],
-                "top_3": top_exposures[2],
-                "top_4": top_exposures[3],
-                "top_holdings": top_holdings,
-            }
+        occ_weight_mkt_val = abs(float(vest_opt_holdings["option_market_value"].sum()))
+        condition_2a_occ_met = occ_weight_mkt_val <= 0.05 * total_net_assets if total_net_assets else False
 
-            is_compliant = all([
-                details["condition_IRC_55"],
-                details["condition_IRC_70"],
-                details["condition_IRC_80"],
-                details["condition_IRC_90"],
-            ])
+        if "EQY_SH_OUT_million" not in remaining_securities.columns:
+            remaining_securities["EQY_SH_OUT_million"] = 1.0
+        remaining_securities["EQY_SH_OUT_million"] = (
+            pd.to_numeric(remaining_securities["EQY_SH_OUT_million"], errors="coerce").replace(0, 1)
+        )
 
-            return ComplianceResult(
-                is_compliant=is_compliant,
-                details=details,
-                calculations=calculations,
-            )
-        except Exception as exc:
-            logger.error("Error in IRC diversification check for %s: %s", fund.name, exc)
-            return ComplianceResult(
-                is_compliant=False,
-                details={"rule": "IRC Diversification", "status": "error"},
-                calculations={},
-                error=str(exc),
-            )
+        share_col = self._share_col
+        if share_col not in remaining_securities.columns:
+            remaining_securities[share_col] = 0.0
+        else:
+            remaining_securities[share_col] = pd.to_numeric(remaining_securities[share_col], errors="coerce").fillna(0.0)
+
+        if not remaining_securities.empty:
+            ticker_overrides = {"LOGI": 160784460, "RCI": 429073267, "TU": 1550930636}
+            for ticker, value in ticker_overrides.items():
+                if ticker in remaining_securities["eqyticker"].values:
+                    remaining_securities.loc[remaining_securities["eqyticker"] == ticker, "EQY_SH_OUT_million"] = value
+
+        remaining_securities["vest_ownership_of_float"] = (
+                remaining_securities[share_col] / remaining_securities["EQY_SH_OUT_million"]
+        ).fillna(0.0)
+        issuer_compliance_2b = remaining_securities["vest_ownership_of_float"] <= ACT_40_OWNERSHIP_LIMIT
+        condition_2b_met = bool(issuer_compliance_2b.all())
+
+        cumulative_weight_excluded = (
+            excluded_bucket_total / total_net_assets
+            if (excluded_bucket_total and total_net_assets)
+            else 0.0
+        )
+        if not remaining_securities.empty and total_assets:
+            remaining_securities["vest_weight"] = remaining_securities["net_market_value"] / total_assets
+        else:
+            remaining_securities["vest_weight"] = 0.0
+        remaining_stocks_details = remaining_securities[
+            ["eqyticker", share_col, "net_market_value", "vest_weight", "vest_ownership_of_float"]
+        ].to_dict("records")
+
+        actual_diversified = all([condition_1_met, condition_2a_met, condition_2b_met])
+        fund_status_today = "diversified" if actual_diversified else "non-diversified"
+        if fund_registration in {"diversified", "non-diversified"}:
+            expected_diversified = fund_registration == "diversified"
+        else:
+            expected_diversified = actual_diversified
+        expected_status = "diversified" if expected_diversified else "non-diversified"
+
+        calculations = {
+            "fund_registration": fund_registration,
+            "fund_status_today": fund_status_today,
+            "expected_fund_status": expected_status,
+            "total_assets": total_assets,
+            "net_assets": total_net_assets,
+            "expenses": expenses,
+            "condition_1_met": condition_1_met,
+            "non_qualifying_assets_1_wgt": non_qualifying_assets_pct,
+            "qualifying_assets_pct": qualifying_pct,
+            "issuer_limited_sum": issuer_limited_sum,
+            "issuer_limited_securities": issuer_limited.to_dict("records"),
+            "condition_2a_met": condition_2a_met,
+            "condition_2b_met": condition_2b_met,
+            "issuer_compliance_2b": issuer_compliance_2b.to_dict(),
+            "excluded_securities": excluded_securities,
+            "cumulative_weight_excluded": cumulative_weight_excluded,
+            "cumulative_weight_remaining": 1 - cumulative_weight_excluded,
+            "remaining_stocks_details": remaining_stocks_details,
+            "share_column_used": share_col,
+            "max_ownership_float": float(remaining_securities["vest_ownership_of_float"].max()),
+            "condition_2a_occ_met": condition_2a_occ_met,
+            "occ_market_value": occ_weight_mkt_val,
+            "occ_weight": occ_weight_mkt_val / total_assets if total_assets else 0.0,
+        }
+        details = {
+            "rule": "40 Act Diversification",
+            "condition_40act_1": condition_1_met,
+            "condition_40act_2a": condition_2a_met,
+            "condition_40act_2b": condition_2b_met,
+            "condition_40act_2a_occ": condition_2a_occ_met,
+            "diversified_since_inception_40act": condition_1_met and condition_2a_met and condition_2b_met,
+            "diversification_failure_duration_40act": 0 if actual_diversified else 1,
+            "expected_registration_status": expected_status,
+            "actual_registration_status": fund_status_today,
+        }
+        return ComplianceResult(actual_diversified == expected_diversified, details, calculations)
+
+    def diversification_IRC_check(self, fund: Fund) -> ComplianceResult:
+        """IRC diversification; the dispatcher only runs it for VIT funds."""
+        regular_options = fund.data.current.vest.options
+        vest_eqy_holdings = fund.data.current.vest.equity
+        total_assets, _, _, _ = self._get_current_totals(fund)
+        vest_eqy_holdings = self._consolidate_holdings_by_issuer(vest_eqy_holdings)
+
+        if vest_eqy_holdings.empty:
+            raise ValueError("Equity holdings missing")
+        if total_assets == 0:
+            raise ValueError("Total assets missing")
+
+        holdings_df = pd.merge(
+            vest_eqy_holdings,
+            regular_options,
+            how="left",
+            left_on="eqyticker",
+            right_on="equity_underlying_ticker",
+            suffixes=("", "_option"),
+        )
+        holdings_df["net_market_value"] = (
+                pd.to_numeric(holdings_df["equity_market_value"], errors="coerce").fillna(0.0)
+                + pd.to_numeric(holdings_df["option_market_value"], errors="coerce").fillna(0.0)
+        )
+        holdings_df["weight"] = holdings_df["net_market_value"] / total_assets
+        sorted_holdings = holdings_df.sort_values(by="net_market_value", ascending=False)
+
+        top_exposures = [0.0, 0.0, 0.0, 0.0]
+        if not sorted_holdings.empty:
+            cum_values = sorted_holdings["net_market_value"].cumsum()
+            for idx in range(min(4, len(cum_values))):
+                top_exposures[idx] = float(cum_values.iloc[idx] / total_assets)
+
+        details = {
+            "rule": "IRC Diversification",
+            "condition_IRC_55": top_exposures[0] <= IRC_TOP_1_LIMIT,
+            "condition_IRC_70": top_exposures[1] <= IRC_TOP_2_LIMIT,
+            "condition_IRC_80": top_exposures[2] <= IRC_TOP_3_LIMIT,
+            "condition_IRC_90": top_exposures[3] <= IRC_TOP_4_LIMIT,
+        }
+        calculations = {
+            "total_assets": total_assets,
+            "top_1": top_exposures[0],
+            "top_2": top_exposures[1],
+            "top_3": top_exposures[2],
+            "top_4": top_exposures[3],
+            "top_holdings": sorted_holdings[["eqyticker", "net_market_value"]].head(4).to_dict("records"),
+        }
+        is_compliant = all(
+            details[key] for key in ("condition_IRC_55", "condition_IRC_70", "condition_IRC_80", "condition_IRC_90")
+        )
+        return ComplianceResult(is_compliant, details, calculations)
+
+    @staticmethod
+    def _sector_exposure(fund: Fund, pattern: str) -> Optional[Tuple[float, float]]:
+        """Return (sector exposure, total equity exposure), or None when there are no equity holdings."""
+        vest_eqy_holdings = fund.data.current.vest.equity
+        if vest_eqy_holdings.empty:
+            return None
+        mask = vest_eqy_holdings["GICS_SECTOR_NAME"].str.contains(pattern, case=False, na=False)
+        exposure = float(vest_eqy_holdings.loc[mask, "equity_market_value"].sum())
+        return exposure, float(vest_eqy_holdings["equity_market_value"].sum())
 
     def real_estate_check(self, fund: Fund) -> ComplianceResult:
-        """Check if fund has any real estate exposure"""
-        try:
-
-            vest_eqy_holdings = fund.data.current.vest.equity
-
-            if vest_eqy_holdings.empty:
-                # No holdings means no real estate exposure - PASS
-                return ComplianceResult(
-                    is_compliant=True,
-                    details={
-                        "rule": "Real Estate Exposure",
-                        "real_estate_check_compliant": True
-                    },
-                    calculations={
-                        "real_estate_exposure": 0.0,
-                        "real_estate_percentage": 0.0,
-                        "total_exposure": 0.0,
-                    },
-                )
-
-            # Check for real estate in GICS sector
-            real_estate_mask = vest_eqy_holdings["GICS_SECTOR_NAME"].str.contains(
-                "Real Estate", case=False, na=False
-            )
-            real_estate_exposure = float(
-                vest_eqy_holdings.loc[real_estate_mask, "equity_market_value"].sum()
-            )
-            real_estate_exposure = 0.0
-            total_exposure = float(vest_eqy_holdings["equity_market_value"].sum())
-            real_estate_percentage = (
-                real_estate_exposure / total_exposure if total_exposure > 0 else 0.0
-            )
-
-            # PASS if no real estate exposure, FAIL if any exposure
-            is_compliant = real_estate_exposure == 0.0
-
-            calculations = {
-                "real_estate_exposure": real_estate_exposure,
-                "real_estate_percentage": real_estate_percentage,
-                "total_exposure": total_exposure,
-            }
-
-            return ComplianceResult(
-                is_compliant=is_compliant,
-                details={
-                    "rule": "Real Estate Exposure",
-                    "real_estate_check_compliant": True #is_compliant
-                },
-                calculations=calculations,
-            )
-        except Exception as exc:
-            logger.error("Error in real estate check for %s: %s", fund.name, exc)
-            return ComplianceResult(
-                is_compliant=False,
-                details={"rule": "Real Estate Exposure", "status": "error"},
-                calculations={},
-                error=str(exc),
-            )
+        rule = "Real Estate Exposure"
+        exposures = self._sector_exposure(fund, "Real Estate")
+        if exposures is None:
+            calculations = {"real_estate_exposure": 0.0, "real_estate_percentage": 0.0, "total_exposure": 0.0}
+            return _res(True, rule, calculations, real_estate_check_compliant=True)
+        # Exposure is deliberately forced to zero and the flag hard-coded True: this check always passes.
+        real_estate_exposure, total_exposure = 0.0, exposures[1]
+        calculations = {
+            "real_estate_exposure": real_estate_exposure,
+            "real_estate_percentage": real_estate_exposure / total_exposure if total_exposure > 0 else 0.0,
+            "total_exposure": total_exposure,
+        }
+        return _res(real_estate_exposure == 0.0, rule, calculations, real_estate_check_compliant=True)
 
     def commodities_check(self, fund: Fund) -> ComplianceResult:
-        """Check if fund has any commodities exposure"""
-        try:
-            vest_eqy_holdings = fund.data.current.vest.equity
-
-            if vest_eqy_holdings.empty:
-                # No holdings means no commodities exposure - PASS
-                return ComplianceResult(
-                    is_compliant=True,
-                    details={
-                        "rule": "Commodities Exposure",
-                        "commodities_check_compliant": True
-                    },
-                    calculations={
-                        "commodities_exposure": 0.0,
-                        "commodities_percentage": 0.0,
-                        "total_exposure": 0.0,
-                    },
-                )
-
-            # Check for commodities in GICS sector or other fields
-            commodities_mask = vest_eqy_holdings["GICS_SECTOR_NAME"].str.contains(
-                "Commodities", case=False, na=False
-            )
-            commodities_exposure = float(
-                vest_eqy_holdings.loc[commodities_mask, "equity_market_value"].sum()
-            )
-            total_exposure = float(vest_eqy_holdings["equity_market_value"].sum())
-            commodities_percentage = (
-                commodities_exposure / total_exposure if total_exposure > 0 else 0.0
-            )
-
-            # PASS if no commodities exposure, FAIL if any exposure
-            is_compliant = commodities_exposure == 0.0
-
-            calculations = {
-                "commodities_exposure": commodities_exposure,
-                "total_exposure": total_exposure,
-                "commodities_percentage": commodities_percentage,
-            }
-
-            return ComplianceResult(
-                is_compliant=is_compliant,
-                details={
-                    "rule": "Commodities Exposure",
-                    "commodities_check_compliant": is_compliant
-                },
-                calculations=calculations,
-            )
-        except Exception as exc:
-            logger.error("Error in commodities check for %s: %s", fund.name, exc)
-            return ComplianceResult(
-                is_compliant=False,
-                details={"rule": "Commodities Exposure", "status": "error"},
-                calculations={},
-                error=str(exc),
-            )
+        rule = "Commodities Exposure"
+        exposures = self._sector_exposure(fund, "Commodities")
+        if exposures is None:
+            calculations = {"commodities_exposure": 0.0, "commodities_percentage": 0.0, "total_exposure": 0.0}
+            return _res(True, rule, calculations, commodities_check_compliant=True)
+        commodities_exposure, total_exposure = exposures
+        calculations = {
+            "commodities_exposure": commodities_exposure,
+            "total_exposure": total_exposure,
+            "commodities_percentage": commodities_exposure / total_exposure if total_exposure > 0 else 0.0,
+        }
+        is_compliant = commodities_exposure == 0.0
+        return _res(is_compliant, rule, calculations, commodities_check_compliant=is_compliant)
 
     def twelve_d1a_other_inv_cos(self, fund: Fund) -> ComplianceResult:
-        try:
+        rule = "12d1-1 Other Investment Companies"
+        vest_eqy_holdings = fund.data.current.vest.equity
+        total_assets, _, _, _ = self._get_current_totals(fund)
+        all_pass = {
+            "twelve_d1a_other_inv_cos_compliant": True,
+            "test_1_pass": True,
+            "test_2_pass": True,
+            "test_3_pass": True,
+        }
+        base_calculations = {
+            "total_assets": total_assets,
+            "investment_companies": [],
+            "ownership_pct_max": None,
+            "equity_market_value_sum": 0.0,
+            "equity_market_value_max": 0.0,
+            "ownership_pct_values": [],
+        }
 
-            vest_eqy_holdings = fund.data.current.vest.equity
-            total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
-
-            # No equity / no assets is a legitimate skip (e.g. cash-only private
-            # funds). Return a "skipped" PASS result instead of raising — the
-            # rule trivially holds when there are no investment companies held.
-            if total_assets == 0 or vest_eqy_holdings.empty:
-                return ComplianceResult(
-                    is_compliant=True,
-                    details={
-                        "rule": "12d1-1 Other Investment Companies",
-                        "skipped": True,
-                        "reason": "No equity holdings or total assets",
-                        "twelve_d1a_other_inv_cos_compliant": True,
-                        "test_1_pass": True,
-                        "test_2_pass": True,
-                        "test_3_pass": True,
-                    },
-                    calculations={
-                        "total_assets": total_assets,
-                        "investment_companies": [],
-                        "ownership_pct_max": None,
-                        "equity_market_value_sum": 0.0,
-                        "equity_market_value_max": 0.0,
-                        "ownership_pct_values": [],
-                    },
-                )
-
-            inv_co_mask = ~vest_eqy_holdings["REGULATORY_STRUCTURE"].isnull()
-            investment_companies = vest_eqy_holdings[inv_co_mask].copy()
-
-            if investment_companies.empty:
-                calculations = {
-                    "total_assets": total_assets,
-                    "investment_companies": [],
-                    "ownership_pct_max": None,
-                    "equity_market_value_sum": 0.0,
-                    "equity_market_value_max": 0.0,
-                    "ownership_pct_values": [],
-                    "test_2_threshold": RULE_12D1A_SINGLE_ASSETS_LIMIT * total_assets,
-                    "test_3_threshold": RULE_12D1A_TOTAL_ASSETS_LIMIT * total_assets,
-                }
-                return ComplianceResult(
-                    is_compliant=True,
-                    details={
-                        "rule": "12d1-1 Other Investment Companies",
-                        "twelve_d1a_other_inv_cos_compliant": True,
-                        "test_1_pass": True,
-                        "test_2_pass": True,
-                        "test_3_pass": True,
-                    },
-                    calculations=calculations,
-                )
-
-            if "EQY_SH_OUT_million" not in investment_companies.columns:
-                investment_companies["EQY_SH_OUT_million"] = 0.0
-            if "quantity" not in investment_companies.columns:
-                investment_companies["quantity"] = 0.0
-
-            with np.errstate(divide="ignore", invalid="ignore"):
-                investment_companies["ownership_pct"] = np.divide(
-                    investment_companies["quantity"],
-                    investment_companies["EQY_SH_OUT_million"].replace(0, np.nan),
-                ).fillna(0.0)
-
-            max_ownership_pct = float(investment_companies["ownership_pct"].max())
-            max_equity_value = float(investment_companies["equity_market_value"].max())
-            sum_equity_value = float(investment_companies["equity_market_value"].sum())
-
-            test_1_pass = max_ownership_pct <= RULE_12D1A_OWNERSHIP_LIMIT
-            test_2_pass = max_equity_value <= RULE_12D1A_SINGLE_ASSETS_LIMIT * total_assets
-            test_3_pass = sum_equity_value <= RULE_12D1A_TOTAL_ASSETS_LIMIT * total_assets
-
-            calculations = {
-                "total_assets": total_assets,
-                "investment_companies": investment_companies.to_dict("records"),
-                "ownership_pct_max": max_ownership_pct,
-                "equity_market_value_sum": sum_equity_value,
-                "equity_market_value_max": max_equity_value,
-                "ownership_pct_values": investment_companies["ownership_pct"].tolist(),
-                "test_2_threshold": RULE_12D1A_SINGLE_ASSETS_LIMIT * total_assets,
-                "test_3_threshold": RULE_12D1A_TOTAL_ASSETS_LIMIT * total_assets,
-            }
-
-            is_compliant = all([test_1_pass, test_2_pass, test_3_pass])
-
-            return ComplianceResult(
-                is_compliant=is_compliant,
-                details={
-                    "rule": "12d1-1 Other Investment Companies",
-                    "twelve_d1a_other_inv_cos_compliant": is_compliant,
-                    "test_1_pass": test_1_pass,
-                    "test_2_pass": test_2_pass,
-                    "test_3_pass": test_3_pass,
-                },
-                calculations=calculations,
+        # No equity / no assets (e.g. cash-only private funds) is a skipped PASS rather than an error.
+        if total_assets == 0 or vest_eqy_holdings.empty:
+            return _res(
+                True, rule, base_calculations, skipped=True, reason="No equity holdings or total assets", **all_pass
             )
-        except Exception as exc:  # pragma: no cover - defensive logging path
-            logger.error("Error in 12d1-1 check for %s: %s", fund.name, exc)
-            return ComplianceResult(
-                is_compliant=False,
-                details={"rule": "12d1-1 Other Investment Companies", "status": "error"},
-                calculations={},
-                error=str(exc),
-            )
+
+        thresholds = {
+            "test_2_threshold": RULE_12D1A_SINGLE_ASSETS_LIMIT * total_assets,
+            "test_3_threshold": RULE_12D1A_TOTAL_ASSETS_LIMIT * total_assets,
+        }
+        investment_companies = vest_eqy_holdings[~vest_eqy_holdings["REGULATORY_STRUCTURE"].isnull()].copy()
+        if investment_companies.empty:
+            return _res(True, rule, {**base_calculations, **thresholds}, **all_pass)
+
+        if "EQY_SH_OUT_million" not in investment_companies.columns:
+            investment_companies["EQY_SH_OUT_million"] = 0.0
+        if "quantity" not in investment_companies.columns:
+            investment_companies["quantity"] = 0.0
+        investment_companies["ownership_pct"] = _ownership_pct(
+            investment_companies["quantity"], investment_companies["EQY_SH_OUT_million"]
+        )
+
+        max_ownership_pct = float(investment_companies["ownership_pct"].max())
+        max_equity_value = float(investment_companies["equity_market_value"].max())
+        sum_equity_value = float(investment_companies["equity_market_value"].sum())
+        test_1_pass = max_ownership_pct <= RULE_12D1A_OWNERSHIP_LIMIT
+        test_2_pass = max_equity_value <= RULE_12D1A_SINGLE_ASSETS_LIMIT * total_assets
+        test_3_pass = sum_equity_value <= RULE_12D1A_TOTAL_ASSETS_LIMIT * total_assets
+
+        calculations = {
+            "total_assets": total_assets,
+            "investment_companies": investment_companies.to_dict("records"),
+            "ownership_pct_max": max_ownership_pct,
+            "equity_market_value_sum": sum_equity_value,
+            "equity_market_value_max": max_equity_value,
+            "ownership_pct_values": investment_companies["ownership_pct"].tolist(),
+            **thresholds,
+        }
+        is_compliant = all([test_1_pass, test_2_pass, test_3_pass])
+        return _res(
+            is_compliant,
+            rule,
+            calculations,
+            twelve_d1a_other_inv_cos_compliant=is_compliant,
+            test_1_pass=test_1_pass,
+            test_2_pass=test_2_pass,
+            test_3_pass=test_3_pass,
+        )
 
     def twelve_d2_insurance_cos(self, fund: Fund) -> ComplianceResult:
-        try:
-            vest_eqy_holdings = fund.data.current.vest.equity
-            total_assets, total_net_assets, _, _ = self._get_current_totals(fund)
-            insurance_mask = (
-                vest_eqy_holdings["GICS_INDUSTRY_GROUP_NAME"].eq("Insurance")
-                | vest_eqy_holdings["GICS_INDUSTRY_NAME"].eq("Insurance")
-            )
-            insurance_holdings = vest_eqy_holdings[insurance_mask].copy()
+        rule = "12d-2 Insurance Companies"
+        vest_eqy_holdings = fund.data.current.vest.equity
+        total_assets, _, _, _ = self._get_current_totals(fund)
+        insurance_mask = (
+            vest_eqy_holdings["GICS_INDUSTRY_GROUP_NAME"].eq("Insurance")
+            | vest_eqy_holdings["GICS_INDUSTRY_NAME"].eq("Insurance")
+        )
+        insurance_holdings = vest_eqy_holdings[insurance_mask].copy()
 
-            if insurance_holdings.empty:
-                calculations = {
-                    "total_assets": total_assets,
-                    "insurance_holdings": [],
-                    "insurance_count": 0,
-                    "max_ownership_pct": 0.0,
-                    "threshold": RULE_12D2_INSURANCE_LIMIT,
-                }
-                return ComplianceResult(
-                    is_compliant=True,
-                    details={
-                        "rule": "12d-2 Insurance Companies",
-                        "twelve_d2_insurance_cos_compliant": True,
-                        "test_pass": True,
-                    },
-                    calculations=calculations,
-                )
-
-            if "EQY_SH_OUT_million" not in insurance_holdings.columns:
-                insurance_holdings["EQY_SH_OUT_million"] = 0.0
-
-            share_col = "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
-            share_series = pd.Series(0.0, index=insurance_holdings.index, dtype=float)
-            insurance_holdings[share_col] = share_series
-
-            with np.errstate(divide="ignore", invalid="ignore"):
-                insurance_holdings["ownership_pct"] = np.divide(
-                    share_series,
-                    insurance_holdings["EQY_SH_OUT_million"].replace(0, np.nan),
-                ).fillna(0.0)
-
-            max_ownership_pct = float(insurance_holdings["ownership_pct"].max())
-            test_pass = max_ownership_pct <= RULE_12D2_INSURANCE_LIMIT
-
+        if insurance_holdings.empty:
             calculations = {
                 "total_assets": total_assets,
-                "insurance_holdings": insurance_holdings.to_dict("records"),
-                "insurance_count": len(insurance_holdings),
-                "max_ownership_pct": max_ownership_pct,
+                "insurance_holdings": [],
+                "insurance_count": 0,
+                "max_ownership_pct": 0.0,
                 "threshold": RULE_12D2_INSURANCE_LIMIT,
             }
+            return _res(True, rule, calculations, twelve_d2_insurance_cos_compliant=True, test_pass=True)
 
-            return ComplianceResult(
-                is_compliant=test_pass,
-                details={
-                    "rule": "12d-2 Insurance Companies",
-                    "twelve_d2_insurance_cos_compliant": test_pass,
-                    "test_pass": test_pass,
-                },
-                calculations=calculations,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging path
-            logger.error("Error in 12d-2 check for %s: %s", fund.name, exc)
-            return ComplianceResult(
-                is_compliant=False,
-                details={"rule": "12d-2 Insurance Companies", "status": "error"},
-                calculations={},
-                error=str(exc),
-            )
+        if "EQY_SH_OUT_million" not in insurance_holdings.columns:
+            insurance_holdings["EQY_SH_OUT_million"] = 0.0
+        share_series = self._zero_shares(insurance_holdings)
+        insurance_holdings["ownership_pct"] = _ownership_pct(share_series, insurance_holdings["EQY_SH_OUT_million"])
+
+        max_ownership_pct = float(insurance_holdings["ownership_pct"].max())
+        test_pass = max_ownership_pct <= RULE_12D2_INSURANCE_LIMIT
+        calculations = {
+            "total_assets": total_assets,
+            "insurance_holdings": insurance_holdings.to_dict("records"),
+            "insurance_count": len(insurance_holdings),
+            "max_ownership_pct": max_ownership_pct,
+            "threshold": RULE_12D2_INSURANCE_LIMIT,
+        }
+        return _res(test_pass, rule, calculations, twelve_d2_insurance_cos_compliant=test_pass, test_pass=test_pass)
 
     def twelve_d3_sec_biz(self, fund: Fund) -> ComplianceResult:
-        try:
-            vest_eqy_holdings = fund.data.current.vest.equity
-            vest_opt_holdings = fund.data.current.vest.options
-            total_assets, total_net_assets, _, _ = self._get_current_totals(fund)
-            sec_biz_mask = vest_eqy_holdings["GICS_INDUSTRY_NAME"].isin(["Capital Markets", "Banks"])
-            sec_related_businesses = vest_eqy_holdings[sec_biz_mask].copy()
+        rule = "12d-3 Securities Businesses"
+        vest_eqy_holdings = fund.data.current.vest.equity
+        vest_opt_holdings = fund.data.current.vest.options
+        total_assets, _, _, _ = self._get_current_totals(fund)
+        sec_biz_mask = vest_eqy_holdings["GICS_INDUSTRY_NAME"].isin(["Capital Markets", "Banks"])
+        sec_related_businesses = vest_eqy_holdings[sec_biz_mask].copy()
 
-            if sec_related_businesses.empty:
-                calculations = {
-                    "total_assets": total_assets,
-                    "sec_related_businesses": [],
-                    "combined_holdings": [],
-                    "occ_weight_mkt_val": 0.0,
-                    "occ_weight": 0.0,
-                    "max_ownership_pct": 0.0,
-                    "max_weight": 0.0,
-                }
-                return ComplianceResult(
-                    is_compliant=True,
-                    details={
-                        "rule": "12d-3 Securities Businesses",
-                        "twelve_d3_sec_biz_compliant": True,
-                        "rule_1_pass": True,
-                        "rule_2_pass": True,
-                        "rule_3_pass": True,                    },
-                    calculations=calculations,
-                )
-
-            sec_related_businesses["EQY_SH_OUT_million"] = sec_related_businesses[
-                "EQY_SH_OUT_million"
-            ].replace(0, np.nan)
-
-            share_col = "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
-            share_series = pd.Series(0.0, index=sec_related_businesses.index, dtype=float)
-            sec_related_businesses[share_col] = share_series
-
-            sec_related_businesses["ownership_pct"] = (
-                share_series / sec_related_businesses["EQY_SH_OUT_million"]
-            ).fillna(0.0)
-
-            rule_1_pass = bool((sec_related_businesses["ownership_pct"] <= RULE_12D3_EQUITY_LIMIT).all())
-
-            debt_mask = vest_eqy_holdings["SECURITY_TYP"].eq("Debt") if "SECURITY_TYP" in vest_eqy_holdings.columns else pd.Series(False, index=vest_eqy_holdings.index)
-            debt_related_businesses = vest_eqy_holdings[debt_mask]
-            if debt_related_businesses.empty:
-                rule_2_pass = True
-            else:
-                debt_threshold = RULE_12D3_DEBT_LIMIT * total_assets
-                rule_2_pass = bool(
-                    (debt_related_businesses["equity_market_value"] <= debt_threshold).all()
-                )
-
-            combined_holdings = pd.merge(
-                sec_related_businesses,
-                vest_opt_holdings,
-                how="left",
-                left_on="eqyticker",
-                right_on="equity_underlying_ticker",
-                suffixes=("", "_option"),
-            )
-            combined_holdings["option_market_value"] = pd.to_numeric(
-                combined_holdings.get("option_market_value", 0.0), errors="coerce"
-            ).fillna(0.0)
-            combined_holdings["equity_market_value"] = pd.to_numeric(
-                combined_holdings.get("equity_market_value", 0.0), errors="coerce"
-            ).fillna(0.0)
-            combined_holdings["net_market_value"] = (
-                combined_holdings["equity_market_value"] + combined_holdings["option_market_value"]
-            )
-            combined_holdings["vest_weight"] = (
-                combined_holdings["net_market_value"] / total_assets if total_assets else 0.0
-            )
-            combined_holdings = combined_holdings.loc[:, ~combined_holdings.columns.duplicated()]
-            max_weight = float(combined_holdings["vest_weight"].max()) if not combined_holdings.empty else 0.0
-            rule_3_pass = max_weight <= RULE_12D3_ASSET_LIMIT
-
-            related_tickers = sec_related_businesses["eqyticker"].unique()
-            ticker_mask = vest_opt_holdings["equity_underlying_ticker"].isin(related_tickers)
-            # occ_exposure = vest_opt_holdings[ticker_mask].copy()
-            # occ_weight_mkt_val = float(occ_exposure["option_market_value"].sum())
-            # occ_weight = occ_weight_mkt_val / total_assets if total_assets else 0.0
-            # rule_3_pass_occ = occ_weight <= 0.05
-
-            is_compliant = all([rule_1_pass, rule_2_pass, rule_3_pass])
-
+        if sec_related_businesses.empty:
             calculations = {
                 "total_assets": total_assets,
-                "sec_related_businesses": sec_related_businesses.to_dict("records"),
-                "combined_holdings": combined_holdings.to_dict("records"),
-                # "occ_weight_mkt_val": occ_weight_mkt_val,
-                # "occ_weight": occ_weight,
-                "max_ownership_pct": float(sec_related_businesses["ownership_pct"].max()),
-                "max_weight": max_weight,
+                "sec_related_businesses": [],
+                "combined_holdings": [],
+                "occ_weight_mkt_val": 0.0,
+                "occ_weight": 0.0,
+                "max_ownership_pct": 0.0,
+                "max_weight": 0.0,
             }
+            return _res(
+                True, rule, calculations,
+                twelve_d3_sec_biz_compliant=True, rule_1_pass=True, rule_2_pass=True, rule_3_pass=True,
+            )
 
-            return ComplianceResult(
-                is_compliant=is_compliant,
-                details={
-                    "rule": "12d-3 Securities Businesses",
-                    "twelve_d3_sec_biz_compliant": is_compliant,
-                    "rule_1_pass": rule_1_pass,
-                    "rule_2_pass": rule_2_pass,
-                    "rule_3_pass": rule_3_pass,
-                },
-                calculations=calculations,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging path
-            logger.error("Error in 12d-3 check for %s: %s", fund.name, exc)
-            return ComplianceResult(
-                is_compliant=False,
-                details={"rule": "12d-3 Securities Businesses", "status": "error"},
-                calculations={},
-                error=str(exc),
-            )
+        sec_related_businesses["EQY_SH_OUT_million"] = sec_related_businesses["EQY_SH_OUT_million"].replace(0, np.nan)
+        share_series = self._zero_shares(sec_related_businesses)
+        sec_related_businesses["ownership_pct"] = (
+            share_series / sec_related_businesses["EQY_SH_OUT_million"]
+        ).fillna(0.0)
+        rule_1_pass = bool((sec_related_businesses["ownership_pct"] <= RULE_12D3_EQUITY_LIMIT).all())
+
+        if "SECURITY_TYP" in vest_eqy_holdings.columns:
+            debt_mask = vest_eqy_holdings["SECURITY_TYP"].eq("Debt")
+        else:
+            debt_mask = pd.Series(False, index=vest_eqy_holdings.index)
+        debt_related_businesses = vest_eqy_holdings[debt_mask]
+        if debt_related_businesses.empty:
+            rule_2_pass = True
+        else:
+            debt_threshold = RULE_12D3_DEBT_LIMIT * total_assets
+            rule_2_pass = bool((debt_related_businesses["equity_market_value"] <= debt_threshold).all())
+
+        combined_holdings = pd.merge(
+            sec_related_businesses,
+            vest_opt_holdings,
+            how="left",
+            left_on="eqyticker",
+            right_on="equity_underlying_ticker",
+            suffixes=("", "_option"),
+        )
+        combined_holdings["option_market_value"] = _num(combined_holdings, "option_market_value")
+        combined_holdings["equity_market_value"] = _num(combined_holdings, "equity_market_value")
+        combined_holdings["net_market_value"] = (
+            combined_holdings["equity_market_value"] + combined_holdings["option_market_value"]
+        )
+        combined_holdings["vest_weight"] = (
+            combined_holdings["net_market_value"] / total_assets if total_assets else 0.0
+        )
+        combined_holdings = combined_holdings.loc[:, ~combined_holdings.columns.duplicated()]
+        max_weight = float(combined_holdings["vest_weight"].max()) if not combined_holdings.empty else 0.0
+        rule_3_pass = max_weight <= RULE_12D3_ASSET_LIMIT
+
+        is_compliant = all([rule_1_pass, rule_2_pass, rule_3_pass])
+        calculations = {
+            "total_assets": total_assets,
+            "sec_related_businesses": sec_related_businesses.to_dict("records"),
+            "combined_holdings": combined_holdings.to_dict("records"),
+            "max_ownership_pct": float(sec_related_businesses["ownership_pct"].max()),
+            "max_weight": max_weight,
+        }
+        return _res(
+            is_compliant, rule, calculations,
+            twelve_d3_sec_biz_compliant=is_compliant, rule_1_pass=rule_1_pass,
+            rule_2_pass=rule_2_pass, rule_3_pass=rule_3_pass,
+        )
 
     def max_15pct_illiquid_sai(self, fund: Fund) -> ComplianceResult:
-        """Check 15% illiquid assets compliance"""
-        try:
-            vest_opt_holdings = fund.data.current.vest.options
-            vest_eqy_holdings = fund.data.current.vest.equity
-            total_assets, total_net_assets, expenses, _ = self._get_current_totals(fund)
+        rule = "15% Illiquid Assets"
+        vest_opt_holdings = fund.data.current.vest.options
+        vest_eqy_holdings = fund.data.current.vest.equity
+        total_assets, _, _, _ = self._get_current_totals(fund)
 
-            if total_assets == 0 or vest_eqy_holdings.empty:
-                #raise ValueError("Equity holdings or total assets missing")
-                return ComplianceResult(
-                    is_compliant=True,
-                    details={
-                        "rule": "15% Illiquid Assets",
-                        "max_15pct_illiquid_sai": True,
-                        "equity_holdings_85pct_compliant": True,
-                    },
-                    calculations={},
-                )
+        if total_assets == 0 or vest_eqy_holdings.empty:
+            return _res(True, rule, {}, max_15pct_illiquid_sai=True, equity_holdings_85pct_compliant=True)
 
-            # Check for illiquid flag
-            if "is_illiquid" not in vest_eqy_holdings.columns:
-                vest_eqy_holdings["is_illiquid"] = False
-            if "is_illiquid" not in vest_opt_holdings.columns:
-                vest_opt_holdings["is_illiquid"] = False
+        # Mutates the shared holdings frames in place, so every later rule also sees is_illiquid.
+        if "is_illiquid" not in vest_eqy_holdings.columns:
+            vest_eqy_holdings["is_illiquid"] = False
+        if "is_illiquid" not in vest_opt_holdings.columns:
+            vest_opt_holdings["is_illiquid"] = False
 
-            illiquid_eqy_value = 0
-            illiquid_mask = vest_eqy_holdings["is_illiquid"] == True
-            illiquid_eqy_value = float(
-                vest_eqy_holdings.loc[illiquid_mask, "equity_market_value"].sum()
-            )
+        illiquid_mask = vest_eqy_holdings["is_illiquid"] == True
+        illiquid_eqy_value = float(vest_eqy_holdings.loc[illiquid_mask, "equity_market_value"].sum())
+        illiquid_opt_value = 0
+        if not vest_opt_holdings.empty:
+            illiquid_opt_mask = vest_opt_holdings["is_illiquid"] == True
+            illiquid_opt_value = float(vest_opt_holdings.loc[illiquid_opt_mask, "option_market_value"].sum())
 
-            illiquid_opt_value = 0
-            if not vest_opt_holdings.empty:
-                illiquid_opt_mask = vest_opt_holdings["is_illiquid"] == True
-                illiquid_opt_value = float(
-                    vest_opt_holdings.loc[illiquid_opt_mask, "option_market_value"].sum()
-                )
+        total_illiquid_value = illiquid_eqy_value + illiquid_opt_value
+        illiquid_percentage = total_illiquid_value / total_assets
+        equity_percentage = float(vest_eqy_holdings["equity_market_value"].sum()) / total_assets
 
-            total_illiquid_value = illiquid_eqy_value + illiquid_opt_value
-            illiquid_percentage = total_illiquid_value / total_assets
-
-            # Calculate equity percentage
-            equity_value = float(vest_eqy_holdings["equity_market_value"].sum())
-            equity_percentage = equity_value / total_assets
-
-            # Check compliance
-            illiquid_compliant = illiquid_percentage <= ILLIQUID_MAX_THRESHOLD
-            equity_compliant = equity_percentage >= EQUITY_MIN_THRESHOLD
-            is_compliant = illiquid_compliant
-
-            calculations = {
-                "total_assets": total_assets,
-                "total_illiquid_value": total_illiquid_value,
-                "illiquid_percentage": illiquid_percentage,
-                "equity_holdings_percentage": equity_percentage,
-            }
-
-            return ComplianceResult(
-                is_compliant=is_compliant,
-                details={
-                    "rule": "15% Illiquid Assets",
-                    "max_15pct_illiquid_sai": True,
-                    "equity_holdings_85pct_compliant": equity_compliant,
-                },
-                calculations=calculations,
-            )
-        except Exception as exc:
-            logger.error("Error in 15% illiquid check for %s: %s", fund.name, exc)
-            return ComplianceResult(
-                is_compliant=False,
-                details={"rule": "15% Illiquid Assets", "status": "error"},
-                calculations={},
-                error=str(exc),
-            )
+        calculations = {
+            "total_assets": total_assets,
+            "total_illiquid_value": total_illiquid_value,
+            "illiquid_percentage": illiquid_percentage,
+            "equity_holdings_percentage": equity_percentage,
+        }
+        return _res(
+            illiquid_percentage <= ILLIQUID_MAX_THRESHOLD,
+            rule,
+            calculations,
+            max_15pct_illiquid_sai=True,
+            equity_holdings_85pct_compliant=equity_percentage >= EQUITY_MIN_THRESHOLD,
+        )
 
     def gics_compliance(self, fund: Fund) -> ComplianceResult:
+        rule = "GICS Concentration"
 
-        try:
-            vest_eqy_holdings = fund.data.current.vest.equity
-            vest_opt_holdings = fund.data.current.vest.options
-            vest_flex_holdings = fund.data.current.vest.flex_options
-            total_assets, total_net_assets, _, _ = self._get_current_totals(fund)
+        def fail(status: str, error: str) -> ComplianceResult:
+            return _res(False, rule, {}, error, status=status, fund=fund.name)
 
-            if total_assets == 0.0:
-                return ComplianceResult(
-                    is_compliant=False,
-                    details={
-                        "rule": "GICS Concentration",
-                        "status": "missing_total_assets",
-                        "fund": fund.name,
-                    },
-                    calculations={},
-                    error="Total assets is zero — cannot compute GICS weights",
-                )
+        vest_eqy_holdings = fund.data.current.vest.equity
+        vest_opt_holdings = fund.data.current.vest.options
+        vest_flex_holdings = fund.data.current.vest.flex_options
+        total_assets, total_net_assets, _, _ = self._get_current_totals(fund)
 
-            # --- Equity contribution ---
-            equity_values = pd.to_numeric(
-                vest_eqy_holdings.get("equity_market_value", 0.0), errors="coerce"
-            ).fillna(0.0)
+        if total_assets == 0.0:
+            return fail("missing_total_assets", "Total assets is zero — cannot compute GICS weights")
 
-            if equity_values.sum() == 0.0:
-                return ComplianceResult(
-                    is_compliant=False,
-                    details={
-                        "rule": "GICS Concentration",
-                        "status": "missing_equity_market_value",
-                        "fund": fund.name,
-                    },
-                    calculations={},
-                    error="Equity market values are unavailable for weight calculation",
-                )
+        equity_values = _num(vest_eqy_holdings, "equity_market_value")
+        if equity_values.sum() == 0.0:
+            return fail("missing_equity_market_value", "Equity market values are unavailable for weight calculation")
 
-            eqy_gics_cols = [c for c in GICS_CLASS_COLUMNS if c in vest_eqy_holdings.columns]
-            eqy_frame = vest_eqy_holdings[eqy_gics_cols].copy()
-            eqy_frame["_contrib_value"] = equity_values.values
+        eqy_gics_cols = [c for c in GICS_CLASS_COLUMNS if c in vest_eqy_holdings.columns]
+        eqy_frame = vest_eqy_holdings[eqy_gics_cols].copy()
+        eqy_frame["_contrib_value"] = equity_values.values
 
-            long_opt_frame = self._extract_long_options(vest_opt_holdings, eqy_gics_cols)
-            long_flex_frame = self._extract_long_options(vest_flex_holdings, eqy_gics_cols)
+        long_opt_frame = self._extract_long_options(vest_opt_holdings, eqy_gics_cols)
+        long_flex_frame = self._extract_long_options(vest_flex_holdings, eqy_gics_cols)
+        frames = [eqy_frame] + [frame for frame in (long_opt_frame, long_flex_frame) if not frame.empty]
 
-            frames = [eqy_frame]
-            if not long_opt_frame.empty:
-                frames.append(long_opt_frame)
-            if not long_flex_frame.empty:
-                frames.append(long_flex_frame)
+        combined_df = pd.concat(frames, ignore_index=True)
+        combined_values = pd.to_numeric(combined_df["_contrib_value"], errors="coerce").fillna(0.0)
+        fund_weights = combined_values / total_assets
+        fund_weights.index = combined_df.index
 
-            combined_df = pd.concat(frames, ignore_index=True)
-            combined_values = pd.to_numeric(
-                combined_df["_contrib_value"], errors="coerce"
-            ).fillna(0.0)
+        gics_summary_fund = self._summarize_gics_exposure(combined_df, fund_weights)
+        if not gics_summary_fund:
+            return fail("missing_gics_data", "GICS classifications are not available on equity holdings")
 
-            fund_weights = combined_values / total_assets
-            fund_weights.index = combined_df.index
+        index_equity = fund.data.current.index.equity
+        index_df = index_equity.copy() if not index_equity.empty else pd.DataFrame()
 
-            gics_summary_fund = self._summarize_gics_exposure(combined_df, fund_weights)
-
-            if not gics_summary_fund:
-                return ComplianceResult(
-                    is_compliant=False,
-                    details={
-                        "rule": "GICS Concentration",
-                        "status": "missing_gics_data",
-                        "fund": fund.name,
-                    },
-                    calculations={},
-                    error="GICS classifications are not available on equity holdings",
-                )
-
-            index_equity = fund.data.current.index.equity
-            index_df = index_equity.copy() if not index_equity.empty else pd.DataFrame()
-
-            # Process index weights if we have valid index data
-            gics_summary_index: Dict[str, Dict[str, float]] = {}
-            index_weight_basis: Optional[str] = None
-
-            if not index_df.empty:
-                index_weights = pd.Series(dtype=float)
-
-                for column in ("weight_index", "index_weight", "benchmark_weight", "weight"):
-                    if column in index_df.columns:
-                        candidate = pd.to_numeric(index_df[column], errors="coerce").fillna(0.0)
-                        total = float(candidate.sum())
-                        if total != 0.0:
-                            index_weights = candidate / total
-                            index_weights.index = index_df.index
-                            index_weight_basis = column
-                            break
-
-                if index_weights.empty and "equity_market_value" in index_df.columns:
-                    candidate = pd.to_numeric(
-                        index_df["equity_market_value"], errors="coerce"
-                    ).fillna(0.0)
+        gics_summary_index: Dict[str, Dict[str, float]] = {}
+        index_weight_basis: Optional[str] = None
+        if not index_df.empty:
+            for column in ("weight_index", "index_weight", "benchmark_weight", "weight", "equity_market_value"):
+                if column in index_df.columns:
+                    candidate = pd.to_numeric(index_df[column], errors="coerce").fillna(0.0)
                     total = float(candidate.sum())
                     if total != 0.0:
                         index_weights = candidate / total
                         index_weights.index = index_df.index
-                        index_weight_basis = "equity_market_value"
+                        index_weight_basis = column
+                        gics_summary_index = self._summarize_gics_exposure(index_df, index_weights)
+                        break
 
-                if not index_weights.empty:
-                    gics_summary_index = self._summarize_gics_exposure(index_df, index_weights)
+        compliance_group = self._resolve_gics_compliance_group(fund.name)
+        exceeding_fund_gics, exceeding_index_gics, calculations = self._check_exposure(
+            gics_summary_fund, gics_summary_index
+        )
 
-            compliance_group = self._resolve_gics_compliance_group(fund.name)
+        # Every group is judged at industry level only.
+        fund_over_industries = set(exceeding_fund_gics.get("GICS_INDUSTRY_NAME", {}).keys())
+        index_over_industries = set(exceeding_index_gics.get("GICS_INDUSTRY_NAME", {}).keys())
+        industry_within_limit = len(fund_over_industries) == 0
+        industry_mismatches = fund_over_industries - index_over_industries
+        if compliance_group == "dogg":
+            # DOGG: no industry may exceed 25%
+            failing = fund_over_industries
+        elif compliance_group == "tdvi":
+            # TDVI: only Information Technology industries may exceed 25%
+            industry_sector_map = self._build_industry_to_sector_map(vest_eqy_holdings)
+            failing = [
+                ind for ind in fund_over_industries
+                if industry_sector_map.get(ind) != "Information Technology"
+            ]
+        else:
+            # KNG/FDND and default: an industry may exceed 25% only when the index also exceeds 25% in it
+            failing = industry_mismatches
+        overall_status = "PASS" if len(failing) == 0 else "FAIL"
 
-            exceeding_fund_gics, exceeding_index_gics, calculations = self._check_exposure(
-                gics_summary_fund,
-                gics_summary_index,
-            )
-
-            # Extract industry-level exceedances
-            fund_over_industries = set(exceeding_fund_gics.get("GICS_INDUSTRY_NAME", {}).keys())
-            index_over_industries = set(exceeding_index_gics.get("GICS_INDUSTRY_NAME", {}).keys())
-
-            # Convenience flag for industry within limit
-            industry_within_limit = len(fund_over_industries) == 0
-
-            if compliance_group == "dogg":
-                # SIMPLIFIED: Only check industry level
-                overall_status = "PASS" if industry_within_limit else "FAIL"
-
-            elif compliance_group == "kng_fdnd":
-                # SIMPLIFIED: Only check that fund/index match at INDUSTRY level
-                # Fund must exceed 25% in an industry ONLY if index also exceeds 25% in that same industry
-                industry_mismatches = fund_over_industries - index_over_industries
-                overall_status = "PASS" if len(industry_mismatches) == 0 else "FAIL"
-
-            elif compliance_group == "tdvi":
-                industry_sector_map = self._build_industry_to_sector_map(vest_eqy_holdings)
-
-                # Filter out Information Technology sector industries from exceeding industries
-                non_it_exceeding = [
-                    ind for ind in fund_over_industries
-                    if industry_sector_map.get(ind) != "Information Technology"
-                ]
-
-                # PASS if all exceeding industries are in IT sector, FAIL if any are not
-                overall_status = "PASS" if len(non_it_exceeding) == 0 else "FAIL"
-
-            else:
-                # DEFAULT RULE (unchanged - already only checks industry level):
-                # Fund can be >25% in an INDUSTRY only when index is also >25% in that same INDUSTRY
-                industry_mismatches = fund_over_industries - index_over_industries
-                overall_status = "PASS" if len(industry_mismatches) == 0 else "FAIL"
-
-            calculations.setdefault("meta", {})
-            calculations["meta"].update(
-                {
-                    "total_assets": total_assets,
-                    "total_net_assets": total_net_assets,
-                    "fund_weight_basis": "equity_market_value",
-                    "index_weight_basis": index_weight_basis,
-                }
-            )
-            calculations.setdefault("fund_summary", gics_summary_fund)
-            calculations.setdefault("index_summary", gics_summary_index)
-
-            details: Dict[str, object] = {
-                "rule": "GICS Concentration",
-                "fund": fund.name,
-                "overall_gics_compliance": overall_status,
-                "industry_exceeds_25": industry_within_limit,  # Only industry level now
-                "exceeding_fund_gics": exceeding_fund_gics,
-                "exceeding_index_gics": exceeding_index_gics,
-                "fund_exposures": gics_summary_fund,
-                "compliance_group": compliance_group,
+        calculations.setdefault("meta", {})
+        calculations["meta"].update(
+            {
+                "total_assets": total_assets,
+                "total_net_assets": total_net_assets,
+                "fund_weight_basis": "equity_market_value",
+                "index_weight_basis": index_weight_basis,
             }
+        )
+        calculations.setdefault("fund_summary", gics_summary_fund)
+        calculations.setdefault("index_summary", gics_summary_index)
 
-            # Basis fields
-            details["fund_weight_basis"] = "equity_market_value"
-            if index_weight_basis:
-                details["index_weight_basis"] = index_weight_basis
+        details: Dict[str, object] = {
+            "rule": rule,
+            "fund": fund.name,
+            "overall_gics_compliance": overall_status,
+            "industry_exceeds_25": industry_within_limit,
+            "exceeding_fund_gics": exceeding_fund_gics,
+            "exceeding_index_gics": exceeding_index_gics,
+            "fund_exposures": gics_summary_fund,
+            "compliance_group": compliance_group,
+            "fund_weight_basis": "equity_market_value",
+        }
+        if index_weight_basis:
+            details["index_weight_basis"] = index_weight_basis
+        if compliance_group not in {"dogg", "tdvi"} and industry_mismatches:
+            details["industry_mismatches"] = sorted(industry_mismatches)
 
-            # Add explicit list of industry mismatches for non-dogg, non-tdvi groups
-            if compliance_group in {"kng_fdnd"} or compliance_group not in {"dogg", "kng_fdnd", "tdvi"}:
-                industry_mismatches = fund_over_industries - index_over_industries
-                if industry_mismatches:
-                    details["industry_mismatches"] = sorted(industry_mismatches)
-
-            return ComplianceResult(
-                is_compliant=overall_status == "PASS",
-                details=details,
-                calculations=calculations,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging path
-            logger.error("Error in GICS compliance check for %s: %s", fund.name, exc)
-            return ComplianceResult(
-                is_compliant=False,
-                details={"rule": "GICS Concentration", "status": "error", "fund": fund.name},
-                calculations={},
-                error=str(exc),
-            )
+        return ComplianceResult(overall_status == "PASS", details, calculations)
 
     @staticmethod
     def _resolve_gics_compliance_group(fund_name: str) -> str:
@@ -1807,79 +1119,40 @@ class ComplianceChecker:
         calculations: Dict[str, Dict[str, object]] = {}
 
         for gics_class in GICS_CLASS_COLUMNS:
-            fund_series = pd.Series(gics_summary_fund.get(gics_class, {}), dtype=float)
-            index_series = pd.Series(gics_summary_index.get(gics_class, {}), dtype=float)
-
-            if not fund_series.empty:
-                fund_series = fund_series.sort_values(ascending=False)
-            if not index_series.empty:
-                index_series = index_series.sort_values(ascending=False)
-
+            fund_series = pd.Series(gics_summary_fund.get(gics_class, {}), dtype=float).sort_values(ascending=False)
+            index_series = pd.Series(gics_summary_index.get(gics_class, {}), dtype=float).sort_values(ascending=False)
             fund_mask = fund_series > GICS_CONCENTRATION_THRESHOLD
             index_mask = index_series > GICS_CONCENTRATION_THRESHOLD
-
             exceeding_fund = fund_series[fund_mask].round(6).to_dict()
             exceeding_index = index_series[index_mask].round(6).to_dict()
-
             exceeding_fund_gics[gics_class] = exceeding_fund
             exceeding_index_gics[gics_class] = exceeding_index
-
             calculations[gics_class] = {
                 "fund_weights": fund_series.round(6).to_dict(),
                 "index_weights": index_series.round(6).to_dict(),
                 "exceeding_fund": exceeding_fund,
                 "exceeding_index": exceeding_index,
                 "concentration_threshold": GICS_CONCENTRATION_THRESHOLD,
-                "fund_exceeding_count": int(fund_mask.sum()) if not fund_series.empty else 0,
-                "index_exceeding_count": int(index_mask.sum()) if not index_series.empty else 0,
+                "fund_exceeding_count": int(fund_mask.sum()),
+                "index_exceeding_count": int(index_mask.sum()),
             }
 
         return exceeding_fund_gics, exceeding_index_gics, calculations
 
     def _build_industry_to_sector_map(self, df: pd.DataFrame) -> Dict[str, str]:
-        """
-        Build a mapping of GICS_INDUSTRY_NAME to GICS_SECTOR_NAME from holdings.
-
-        Args:
-            df: DataFrame containing GICS_SECTOR_NAME and GICS_INDUSTRY_NAME columns
-
-        Returns:
-            Dictionary mapping industry names to sector names (None for missing sectors)
-        """
+        """Map each GICS_INDUSTRY_NAME to the GICS_SECTOR_NAME of its first holding (None if missing)."""
         if df.empty or "GICS_INDUSTRY_NAME" not in df.columns or "GICS_SECTOR_NAME" not in df.columns:
             return {}
 
-        # Get unique industry-sector pairs
         mapping_df = df[["GICS_INDUSTRY_NAME", "GICS_SECTOR_NAME"]].copy()
+        for column in ("GICS_INDUSTRY_NAME", "GICS_SECTOR_NAME"):
+            if mapping_df[column].dtype == object:
+                mapping_df[column] = mapping_df[column].astype(str).str.strip()
 
-        # Clean up string columns
-        if mapping_df["GICS_INDUSTRY_NAME"].dtype == object:
-            mapping_df["GICS_INDUSTRY_NAME"] = mapping_df["GICS_INDUSTRY_NAME"].astype(str).str.strip()
-        if mapping_df["GICS_SECTOR_NAME"].dtype == object:
-            mapping_df["GICS_SECTOR_NAME"] = mapping_df["GICS_SECTOR_NAME"].astype(str).str.strip()
-
-        # Filter out null/empty industry names
-        mapping_df = mapping_df[
-            mapping_df["GICS_INDUSTRY_NAME"].notna() &
-            (mapping_df["GICS_INDUSTRY_NAME"] != "") &
-            (mapping_df["GICS_INDUSTRY_NAME"] != "nan")
-            ]
-
-        # Drop duplicates - keep first occurrence
+        industries = mapping_df["GICS_INDUSTRY_NAME"]
+        mapping_df = mapping_df[industries.notna() & (industries != "") & (industries != "nan")]
         mapping_df = mapping_df.drop_duplicates(subset=["GICS_INDUSTRY_NAME"])
-
-        # Build mapping dictionary
-        industry_to_sector = {}
-        for _, row in mapping_df.iterrows():
-            industry = row["GICS_INDUSTRY_NAME"]
-            sector = row["GICS_SECTOR_NAME"]
-
-            # Handle null/empty sectors gracefully
-            if pd.isna(sector) or sector == "" or sector == "nan":
-                industry_to_sector[industry] = None
-            else:
-                industry_to_sector[industry] = sector
-
-        return industry_to_sector
-
-
+        return {
+            industry: None if pd.isna(sector) or sector == "" or sector == "nan" else sector
+            for industry, sector in zip(mapping_df["GICS_INDUSTRY_NAME"], mapping_df["GICS_SECTOR_NAME"])
+        }
