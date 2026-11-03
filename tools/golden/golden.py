@@ -29,6 +29,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -120,6 +121,47 @@ def snapshot(args) -> int:
     return 0
 
 
+def _rename(src: Path, dst: Path, attempts: int = 5) -> None:
+    """Path.rename, retried briefly: on Windows an indexer or scanner can hold a file open for a moment (WinError 5)."""
+    for attempt in range(1, attempts + 1):
+        try:
+            src.rename(dst)
+            return
+        except PermissionError:
+            if attempt == attempts:
+                raise
+            time.sleep(0.5 * attempt)
+
+
+def _swap_in(new: Path, target: Path, aside: Path) -> bool:
+    """Replace target with new. The old target is renamed to aside first, put back if new cannot go in,
+    and deleted only once new is in place, so a failed rename never loses the baseline."""
+    if aside.exists():
+        print(f"{aside} is left over from a failed rebaseline; restore or remove it first")
+        return False
+    aside.parent.mkdir(parents=True, exist_ok=True)
+    had_old = target.exists()
+    try:
+        if had_old:
+            _rename(target, aside)
+    except OSError as exc:
+        print(f"could not move {target} aside: {exc}")
+        return False
+    try:
+        _rename(new, target)
+    except OSError as exc:
+        print(f"could not move {new} into place: {exc}")
+        if had_old:
+            try:
+                _rename(aside, target)
+            except OSError as restore_exc:
+                print(f"could not restore the old baseline, it is kept at {aside}: {restore_exc}")
+        return False
+    if had_old:
+        shutil.rmtree(aside, ignore_errors=True)
+    return True
+
+
 def rebaseline(names) -> int:
     names = names or [*SCENARIOS, *EQUIVALENT_REQUESTS]
     if _unknown(names):
@@ -138,11 +180,18 @@ def rebaseline(names) -> int:
         shutil.rmtree(staging, ignore_errors=True)
         print(f"baseline unchanged, could not copy current outputs: {exc}")
         return 1
+    # Swap each scenario in: the old baseline is renamed aside, never deleted, until its replacement is in place.
+    aside = WORK / ".rebaseline-old"
     try:
         for name in bases:
-            shutil.rmtree(WORK / "baseline" / name, ignore_errors=True)
-            (staging / name).rename(WORK / "baseline" / name)
+            if not _swap_in(staging / name, WORK / "baseline" / name, aside / name):
+                print(f"baseline of {name} unchanged, the scenarios after it were not rebaselined")
+                return 1
             print(f"REBASELINED {name}")
+        try:
+            aside.rmdir()  # empty once every swap succeeded
+        except OSError:
+            pass
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     ok = True
