@@ -152,11 +152,20 @@ class Reconciliator:
             qty_rows = df_issues['discrepancy_type'] == "Quantity Mismatch"
             df_issues = pd.concat([df_issues[qty_rows], df_issues[~qty_rows]], ignore_index=True)
 
+        price_disc_T = self._price_breaks(df, 'eqyticker', override_small=True)
+        price_disc_T1 = self._price_breaks(df1, 'eqyticker', override_small=True)
+
+        # Override small today's vest price with the custodian price
+        if {'price_vest', 'price_cust'}.issubset(df.columns):
+            df['price_diff'] = (df['price_vest'] - df['price_cust']).abs()
+            small_T = df['price_diff'].between(0.01, 1)
+            df.loc[small_T, 'price_vest'] = df.loc[small_T, 'price_cust']
+
         self.results['custodian_equity'] = ReconciliationResult(
             raw_recon=df.loc[mask_qty].reset_index(drop=True),
             final_recon=df_issues.reset_index(drop=True),
-            price_discrepancies_T=self._price_breaks(df, 'eqyticker'),
-            price_discrepancies_T1=self._price_breaks(df1, 'eqyticker'),
+            price_discrepancies_T=price_disc_T,
+            price_discrepancies_T1=price_disc_T1,
             merged_data=df.copy()
         )
 
@@ -333,7 +342,7 @@ class Reconciliator:
                 'quantity_diff', 'discrepancy_type', 'breakdown'
             ])
 
-        price_disc_T = self._price_breaks(df, 'cusip')
+        price_disc_T = self._price_breaks(df, 'cusip', override_small=True)
 
         self.results['custodian_treasury'] = ReconciliationResult(
             raw_recon=df.loc[mask_qty].reset_index(drop=True),
@@ -411,7 +420,8 @@ class Reconciliator:
         df['shares_cust'] = cls._coerce_numeric_series(df['shares_cust'])
 
     @staticmethod
-    def _price_breaks(df: pd.DataFrame, ticker_col: str, pct: bool = False) -> pd.DataFrame:
+    def _price_breaks(df: pd.DataFrame, ticker_col: str, pct: bool = False,
+                      override_small: bool = False) -> pd.DataFrame:
         """Rows whose vest/custodian price differ by more than 0.005."""
         if not {'price_vest', 'price_cust'}.issubset(df.columns):
             return pd.DataFrame()
@@ -423,7 +433,12 @@ class Reconciliator:
                     (df_price['price_vest'] - df_price['price_cust']) / df_price['price_cust'] * 100
             ).replace([np.inf, -np.inf], 0)
             cols.append('price_pct_diff')
-        return df_price.loc[df_price['price_diff'] > 0.005, cols].reset_index(drop=True)
+        breaks = df_price.loc[df_price['price_diff'] > 0.005, cols].reset_index(drop=True)
+        if override_small:
+            # Kept for its dtype side effects (raise/warn on int price_vest); df_price is discarded
+            small_mask = df_price['price_diff'].lt(1)
+            df_price.loc[small_mask, 'price_vest'] = df_price.loc[small_mask, 'price_cust']
+        return breaks
 
     def _option_price_breaks(self, df: pd.DataFrame) -> pd.DataFrame:
         """Option price breaks with FLEX indicator, weights and private/CEF top-5 limit."""
