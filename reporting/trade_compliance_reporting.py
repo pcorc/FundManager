@@ -15,12 +15,11 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from reporting.report_utils import format_number
+from reporting.trade_compliance_analyzer import ASSET_ORDER
 
 logger = logging.getLogger(__name__)
 
 ASSET_LABELS: Dict[str, str] = {"equity": "Equity", "options": "Options", "treasury": "Treasury"}
-
-ASSET_ORDER: Tuple[str, ...] = ("equity", "options", "treasury")
 
 MONEY_FORMAT = "#,##0.00"
 PERCENT_FORMAT = "0.00%"
