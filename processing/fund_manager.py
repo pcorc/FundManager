@@ -61,6 +61,15 @@ def _sum_numeric(df: pd.DataFrame, columns: Sequence[str]) -> float:
     return 0.0
 
 
+_NAV_FIELDS = {
+    "nav": ["nav_per_share", "nav", "net_asset_value"],
+    "ta": ["total_assets", "gross_assets", "gross_value"],
+    "tna": ["total_net_assets", "tna", "net_assets", "nav_total"],
+    "expenses": ["expense_amount", "expenses"],
+    "shares_outstanding": ["shares_outstanding", "shares", "total_shares"],
+}
+
+
 class FundManager:
     """Runs the daily operations across every fund in a registry."""
 
@@ -173,102 +182,41 @@ class FundManager:
     # Populate Fund.data from BulkDataStore
     # ------------------------------------------------------------------
     def _populate_fund_data(self, fund: Fund) -> None:
-        fund_data_dict = self.data_store.fund_data.get(fund.name, {})
+        d = self.data_store.fund_data.get(fund.name, {})
+        flex_pattern = fund.flex_option_pattern if fund.has_flex_option else None
+        options = {
+            key: _split_options(d.get(key, pd.DataFrame()), flex_pattern)
+            for key in ("vest_option", "vest_option_t1", "custodian_option", "custodian_option_t1")
+        }
 
-        flex_pattern: Optional[str] = None
-        if fund.has_flex_option:
-            flex_pattern = fund.flex_option_pattern
-
-        vest_opts, vest_flex = _split_options(
-            fund_data_dict.get("vest_option", pd.DataFrame()), flex_pattern
-        )
-        vest_opts_t1, vest_flex_t1 = _split_options(
-            fund_data_dict.get("vest_option_t1", pd.DataFrame()), flex_pattern
-        )
-        cust_opts, cust_flex = _split_options(
-            fund_data_dict.get("custodian_option", pd.DataFrame()), flex_pattern
-        )
-        cust_opts_t1, cust_flex_t1 = _split_options(
-            fund_data_dict.get("custodian_option_t1", pd.DataFrame()), flex_pattern
-        )
-
-        nav_t = fund_data_dict.get("nav", pd.DataFrame())
-        nav_t1 = fund_data_dict.get("nav_t1", pd.DataFrame())
-
-        fund.data = FundData(
-            current=FundSnapshot(
-                vest=FundHoldings(
-                    equity=fund_data_dict.get("vest_equity", pd.DataFrame()),
-                    options=vest_opts,
-                    flex_options=vest_flex,
-                    treasury=fund_data_dict.get("vest_treasury", pd.DataFrame()),
-                ),
-                custodian=FundHoldings(
-                    equity=fund_data_dict.get("custodian_equity", pd.DataFrame()),
-                    options=cust_opts,
-                    flex_options=cust_flex,
-                    treasury=fund_data_dict.get("custodian_treasury", pd.DataFrame()),
-                ),
-                index=FundHoldings(equity=fund_data_dict.get("index", pd.DataFrame())),
-                cash=_sum_numeric(fund_data_dict.get("cash", pd.DataFrame()), ["cash_value"]),
-                nav=_first_numeric(nav_t, ["nav_per_share", "nav", "net_asset_value"]),
-                ta=_first_numeric(nav_t, ["total_assets", "gross_assets", "gross_value"]),
-                tna=_first_numeric(nav_t, ["total_net_assets", "tna", "net_assets", "nav_total"]),
-                expenses=_first_numeric(nav_t, ["expense_amount", "expenses"]),
-                shares_outstanding=_first_numeric(nav_t, ["shares_outstanding", "shares", "total_shares"]),
-                flows=_sum_numeric(
-                    fund_data_dict.get("flows", pd.DataFrame()),
-                    ["net_flows", "flows", "amount", "value"],
-                ),
-                equity_trades=fund_data_dict.get("equity_trades", pd.DataFrame()),
-                option_trades=fund_data_dict.get("option_trades", pd.DataFrame()),
-                flex_option_trades=fund_data_dict.get("flex_option_trades", pd.DataFrame()),
-                treasury_trades=fund_data_dict.get("treasury_trades", pd.DataFrame()),
-                cr_rd_data=fund_data_dict.get("cr_rd", pd.DataFrame()),
-                assignments=fund_data_dict.get("assignments", pd.DataFrame()),
+        def snapshot(sfx: str) -> FundSnapshot:
+            holdings = {}
+            for src in ("vest", "custodian"):
+                opts, flex = options[f"{src}_option{sfx}"]
+                holdings[src] = FundHoldings(
+                    equity=d.get(f"{src}_equity{sfx}", pd.DataFrame()),
+                    options=opts,
+                    flex_options=flex,
+                    treasury=d.get(f"{src}_treasury{sfx}", pd.DataFrame()),
+                )
+            nav = d.get(f"nav{sfx}", pd.DataFrame())
+            return FundSnapshot(
+                **holdings,
+                index=FundHoldings(equity=d.get("index", pd.DataFrame())),  # T index for both snapshots
+                cash=_sum_numeric(d.get(f"cash{sfx}", pd.DataFrame()), ["cash_value"]),
+                **{name: _first_numeric(nav, columns) for name, columns in _NAV_FIELDS.items()},
+                equity_trades=d.get(f"equity_trades{sfx}", pd.DataFrame()),
+                option_trades=d.get(f"option_trades{sfx}", pd.DataFrame()),
+                flex_option_trades=d.get(f"flex_option_trades{sfx}", pd.DataFrame()),
+                cr_rd_data=None if sfx else d.get("cr_rd", pd.DataFrame()),
                 fund_name=fund.name,
-            ),
-            previous=FundSnapshot(
-                vest=FundHoldings(
-                    equity=fund_data_dict.get("vest_equity_t1", pd.DataFrame()),
-                    options=vest_opts_t1,
-                    flex_options=vest_flex_t1,
-                    treasury=fund_data_dict.get("vest_treasury_t1", pd.DataFrame()),
-                ),
-                custodian=FundHoldings(
-                    equity=fund_data_dict.get("custodian_equity_t1", pd.DataFrame()),
-                    options=cust_opts_t1,
-                    flex_options=cust_flex_t1,
-                    treasury=fund_data_dict.get("custodian_treasury_t1", pd.DataFrame()),
-                ),
-                index=FundHoldings(equity=fund_data_dict.get("index", pd.DataFrame())),
-                cash=_sum_numeric(fund_data_dict.get("cash_t1", pd.DataFrame()), ["cash_value"]),
-                nav=_first_numeric(nav_t1, ["nav_per_share", "nav", "net_asset_value"]),
-                ta=_first_numeric(nav_t1, ["total_assets", "gross_assets", "gross_value"]),
-                tna=_first_numeric(nav_t1, ["total_net_assets", "tna", "net_assets", "nav_total"]),
-                expenses=_first_numeric(nav_t1, ["expense_amount", "expenses"]),
-                shares_outstanding=_first_numeric(nav_t1, ["shares_outstanding", "shares", "total_shares"]),
-                flows=_sum_numeric(
-                    fund_data_dict.get("flows_t1", pd.DataFrame()),
-                    ["net_flows", "flows", "amount", "value"],
-                ),
-                equity_trades=fund_data_dict.get("equity_trades_t1", pd.DataFrame()),
-                option_trades=fund_data_dict.get("option_trades_t1", pd.DataFrame()),
-                flex_option_trades=fund_data_dict.get("flex_option_trades_t1", pd.DataFrame()),
-                treasury_trades=fund_data_dict.get("treasury_trades_t1", pd.DataFrame()),
-                assignments=fund_data_dict.get("assignments_t1", pd.DataFrame()),
-                fund_name=fund.name,
-            ),
-        )
+            )
 
-        fund.data.price_breaks = fund_data_dict.get("holdings_price_breaks", {}) or {}
-        fund.data.assignments = (
-            fund_data_dict.get("option_assignments")
-            or fund_data_dict.get("assignments")
-        )
-        fund.data.distributions = fund_data_dict.get("distributions")
-        fund.data.flows = fund_data_dict.get("t1_flows") or fund_data_dict.get("flows_t1")
-        fund.data.other = fund_data_dict.get("other", 0.0)
+        fund.data = FundData(current=snapshot(""), previous=snapshot("_t1"))
+        fund.data.price_breaks = d.get("holdings_price_breaks", {}) or {}
+        fund.data.distributions = d.get("distributions")
+        fund.data.flows = d.get("flows_t1")
+        fund.data.other = d.get("other", 0.0)
 
     # ------------------------------------------------------------------
     # Misc

@@ -1,384 +1,72 @@
-"""Static fund metadata consumed by :func:`processing.fund.build_fund_registry`."""
+"""Static fund metadata consumed by :func:`processing.fund.build_fund_registry`.
+
+Only policy flags with no equivalent column in the reconciliation.* views live
+here; expense ratio, benchmark, vehicle, custodian etc. come from v_fund_metadata.
+"""
 from __future__ import annotations
 from typing import Any, Dict
 import pandas as pd
 from sqlalchemy import text
 
 
-"""Per-fund policy / compliance config.
+_ABSENT = object()  # leave the key out of the fund's definition entirely
 
-Anything that names a source table is GONE — those routes now live in the
-reconciliation.* views and resolve fund_ticker through
-accounts_mapping.vw_tif_account_numbers.
-
-What stays here is the small set of policy flags that drive compliance and
-reconciliation logic and have no equivalent column in v_fund_properties.
-
-Fields surfaced by vw_tif_account_numbers (no longer duplicated here):
-  expense_ratio        -> Expense_Ratio
-  index_ticker_join    -> Benchmark
-  vehicle_wrapper      -> EOD_Report_Strategy (CEF / PF / TIF / VIT)
-  custodian            -> Custodian / Custody_Service_Provider
-  custody_account      -> Custody_Account
-  launch_date          -> Launch_Date
-  creation_unit_size   -> Creation_Unit_Size
-  bbg_ticker           -> BBG_Ticker
-"""
-
-
-
-FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {
-    "DOGG": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.08,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": True,
-        "flex_option_type": "single_stock",
-        "has_otc": False,
-        "has_treasury": True,
-        "diversification_status": "non-diversified",
-    },
-    "FDND": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.08,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "index",
-        "has_flex_option": False,
-        "flex_option_type": None,
-        "has_otc": False,
-        "has_treasury": False,
-        "diversification_status": "non-diversified",
-    },
-    "FGSI": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.08,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "index",
-        "has_flex_option": False,
-        "flex_option_type": None,
-        "has_otc": False,
-        "has_treasury": False,
-        "diversification_status": "non-diversified",
-    },
-    "FTCSH": {
-        "option_roll_tenor": "quarterly",
-        "overwrite": 0.0,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "index",
-        "has_flex_option": False,
-        "flex_option_type": None,
-        "has_otc": False,
-        "has_treasury": False,
-        "diversification_status": "non-diversified",
-    },
-    "FTMIX": {
-        "option_roll_tenor": "monthly",
-        "overwrite": 0.0,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "index",
-        "has_flex_option": False,
-        "flex_option_type": None,
-        "has_otc": False,
-        "has_treasury": False,
-    },
-    "HE3B1": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.12,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
-    "HE3B2": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.12,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
-    "HE3B3": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.12,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "index",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
-    "KNG": {
-        "option_roll_tenor": "monthly",
-        "overwrite": 0.08,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": False,
-        "flex_option_type": None,
-        "has_otc": False,
-        "has_treasury": False,
-        "diversification_status": "diversified",
-    },
-    "KNGIX": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.1,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": False,
-        "flex_option_type": None,
-        "has_otc": False,
-        "has_treasury": False,
-        "diversification_status": "diversified",
-    },
-    "P20127": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.15,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
-    "P21026": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.15,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
-    "P2726": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.15,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
-    "P30128": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.15,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
-    "P31027": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.12,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
-    "P3727": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.12,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
-    "PD227": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.12,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": False,
-        "flex_option_type": None,
-        "has_otc": False,
-        "has_treasury": False,
-        "diversification_status": "excluded",
-    },
-    "PF227": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.12,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": False,
-        "flex_option_type": None,
-        "has_otc": False,
-        "has_treasury": False,
-        "diversification_status": "excluded",
-    },
-    "PF27V1": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.16,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": False,
-        "flex_option_type": None,
-        "has_otc": False,
-        "has_treasury": False,
-        "diversification_status": "excluded",
-    },
-    "R21126": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.12,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "index",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
-    "RDVI": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.08,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "index",
-        "has_flex_option": False,
-        "flex_option_type": None,
-        "has_otc": False,
-        "has_treasury": False,
-        "diversification_status": "non-diversified",
-    },
-    "SDVD": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.08,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "index",
-        "has_flex_option": False,
-        "flex_option_type": None,
-        "has_otc": False,
-        "has_treasury": False,
-        "diversification_status": "non-diversified",
-    },
-    "TDVI": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.08,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "index",
-        "has_flex_option": False,
-        "flex_option_type": None,
-        "has_otc": False,
-        "has_treasury": False,
-        "diversification_status": "non-diversified",
-    },
-    "TR2A1": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.15,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
-    "TR2B1": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.15,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
-    "TR2B2": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.15,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
-    "TR2B3": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.15,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
-    "TR2B4": {
-        "option_roll_tenor": "weekly",
-        "overwrite": 0.15,
-        "has_equity": True,
-        "has_listed_option": True,
-        "listed_option_type": "single_stock",
-        "has_flex_option": True,
-        "flex_option_type": "index",
-        "has_otc": False,
-        "has_treasury": False,
-        "overlap_benchmark_ticker": "SPY",
-        "diversification_status": "diversified",
-    },
+_COLUMNS = ("option_roll_tenor", "overwrite", "listed_option_type", "flex_option_type",
+            "has_treasury", "diversification_status")
+_ROWS = {
+    "DOGG":   ("weekly",    0.08, "single_stock", "single_stock", True,  "non-diversified"),
+    "FDND":   ("weekly",    0.08, "index",        None,           False, "non-diversified"),
+    "FGSI":   ("weekly",    0.08, "index",        None,           False, "non-diversified"),
+    "FTCSH":  ("quarterly", 0.0,  "index",        None,           False, "non-diversified"),
+    "FTMIX":  ("monthly",   0.0,  "index",        None,           False, _ABSENT),
+    "HE3B1":  ("weekly",    0.12, "single_stock", "index",        False, "diversified"),
+    "HE3B2":  ("weekly",    0.12, "single_stock", "index",        False, "diversified"),
+    "HE3B3":  ("weekly",    0.12, "index",        "index",        False, "diversified"),
+    "KNG":    ("monthly",   0.08, "single_stock", None,           False, "diversified"),
+    "KNGIX":  ("weekly",    0.1,  "single_stock", None,           False, "diversified"),
+    "P20127": ("weekly",    0.15, "single_stock", "index",        False, "diversified"),
+    "P21026": ("weekly",    0.15, "single_stock", "index",        False, "diversified"),
+    "P2726":  ("weekly",    0.15, "single_stock", "index",        False, "diversified"),
+    "P30128": ("weekly",    0.15, "single_stock", "index",        False, "diversified"),
+    "P31027": ("weekly",    0.12, "single_stock", "index",        False, "diversified"),
+    "P3727":  ("weekly",    0.12, "single_stock", "index",        False, "diversified"),
+    "PD227":  ("weekly",    0.12, "single_stock", None,           False, "excluded"),
+    "PF227":  ("weekly",    0.12, "single_stock", None,           False, "excluded"),
+    "PF27V1": ("weekly",    0.16, "single_stock", None,           False, "excluded"),
+    "R21126": ("weekly",    0.12, "index",        "index",        False, "diversified"),
+    "RDVI":   ("weekly",    0.08, "index",        None,           False, "non-diversified"),
+    "SDVD":   ("weekly",    0.08, "index",        None,           False, "non-diversified"),
+    "TDVI":   ("weekly",    0.08, "index",        None,           False, "non-diversified"),
+    "TR2A1":  ("weekly",    0.15, "single_stock", "index",        False, "diversified"),
+    "TR2B1":  ("weekly",    0.15, "single_stock", "index",        False, "diversified"),
+    "TR2B2":  ("weekly",    0.15, "single_stock", "index",        False, "diversified"),
+    "TR2B3":  ("weekly",    0.15, "single_stock", "index",        False, "diversified"),
+    "TR2B4":  ("weekly",    0.15, "single_stock", "index",        False, "diversified"),
 }
+
+
+def _definition(row: tuple) -> Dict[str, Any]:
+    values = dict(zip(_COLUMNS, row))
+    flex_type = values["flex_option_type"]
+    payload = {
+        "option_roll_tenor": values["option_roll_tenor"],
+        "overwrite": values["overwrite"],
+        "has_equity": True,
+        "has_listed_option": True,
+        "listed_option_type": values["listed_option_type"],
+        "has_flex_option": flex_type is not None,
+        "flex_option_type": flex_type,
+        "has_otc": False,
+        "has_treasury": values["has_treasury"],
+    }
+    if flex_type == "index":
+        payload["overlap_benchmark_ticker"] = "SPY"
+    if values["diversification_status"] is not _ABSENT:
+        payload["diversification_status"] = values["diversification_status"]
+    return payload
+
+
+FUND_DEFINITIONS: Dict[str, Dict[str, Any]] = {fund: _definition(row) for fund, row in _ROWS.items()}
 
 
 ALL_FUNDS = set(FUND_DEFINITIONS.keys())
@@ -418,41 +106,9 @@ def load_cohorts_from_db(session) -> None:
             target.add(row["fund_ticker"])
 
 
-
-DIVERSIFIED_FUNDS = {
-    fund
-    for fund, payload in FUND_DEFINITIONS.items()
-    if payload.get("diversification_status") == "diversified"
-}
-
-NON_DIVERSIFIED_FUNDS = {
-    fund
-    for fund, payload in FUND_DEFINITIONS.items()
-    if payload.get("diversification_status") == "non-diversified"
-}
-
-LISTED_INDEX_OPTION_FUNDS = {
-    fund
-    for fund, payload in FUND_DEFINITIONS.items()
-    if payload.get("listed_option_type") == "index"
-}
-
-LISTED_SINGLE_STOCK_OPTION_FUNDS = {
-    fund
-    for fund, payload in FUND_DEFINITIONS.items()
-    if payload.get("listed_option_type") == "single_stock"
-}
-
 INDEX_FLEX_FUNDS = {
     fund
     for fund, payload in FUND_DEFINITIONS.items()
     if bool(payload.get("has_flex_option"))
     and (payload.get("flex_option_type") or "").lower() == "index"
-}
-
-SINGLE_STOCK_FLEX_FUNDS = {
-    fund
-    for fund, payload in FUND_DEFINITIONS.items()
-    if bool(payload.get("has_flex_option"))
-    and (payload.get("flex_option_type") or "").lower() == "single_stock"
 }
