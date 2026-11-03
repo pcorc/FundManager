@@ -12,14 +12,16 @@ from typing import Any, Callable, Dict, Iterable, Mapping, NamedTuple, Optional
 import pandas as pd
 
 from config.fund_definitions import FUND_DEFINITIONS
-from reporting.base_report_pdf import BaseReportPDF
+from reporting.base_report_pdf import BaseReportPDF, draw_header_row
 from reporting.footnotes import FOOTNOTES
 from reporting.report_utils import (
+    ensure_dir,
     flatten_compliance_results,
     normalize_compliance_results,
     normalize_report_date,
 )
 from utilities.logger import setup_logger
+from utilities.numbers import float_or, num, resolve_number, to_float
 
 logger = setup_logger("compliance_report", "logs/compliance.log")
 @lru_cache(maxsize=None)
@@ -75,10 +77,6 @@ def _gics_flags(fund_key: str, gics: Mapping[str, Any]) -> tuple:
 # ----------------------------------------------------------------------
 # Excel per-rule rows. Formulas hard-code column letters: keep key order.
 # ----------------------------------------------------------------------
-def _num(mapping: Mapping[str, Any], key: str) -> float:
-    return float(mapping.get(key, 0.0) or 0.0)
-
-
 def _pf(value: object) -> str:
     return "PASS" if value else "FAIL"
 
@@ -95,15 +93,8 @@ def _format_share_label(column: Optional[str]) -> str:
 
 
 def _extract_share_value(entry: Mapping[str, Any]) -> float:
-    if not isinstance(entry, Mapping):
-        return 0.0
-    for key in ("nav_shares", "iiv_shares", "shares", "quantity", "units"):
-        if key in entry:
-            try:
-                return float(entry.get(key) or 0.0)
-            except (TypeError, ValueError):
-                continue
-    return 0.0
+    shares_keys = ("nav_shares", "iiv_shares", "shares", "quantity", "units")
+    return resolve_number(entry, shares_keys) if isinstance(entry, Mapping) else 0.0
 
 
 def _prospectus_row(report_date, fund_name, payload, calc, r):
@@ -139,7 +130,7 @@ def _forty_act_row(report_date, fund_name, payload, calc, r):
     share_label = _format_share_label(calc.get("share_column_used"))
     issuer_limited_str = _join(
         calc.get("issuer_limited_securities", []) or [],
-        lambda sec: f"({sec.get('eqyticker')}, {_extract_share_value(sec):,.0f}, {_num(sec, 'net_market_value'):,.2f})",
+        lambda sec: f"({sec.get('eqyticker')}, {_extract_share_value(sec):,.0f}, {num(sec, 'net_market_value'):,.2f})",
     )
     excluded = calc.get("excluded_securities", []) or []
     excluded_str = ", ".join(excluded) if excluded else "None"
@@ -147,18 +138,12 @@ def _forty_act_row(report_date, fund_name, payload, calc, r):
         calc.get("remaining_stocks_details", []) or [],
         lambda e: (
             f"({e.get('eqyticker')}, {_extract_share_value(e):,.0f}, "
-            f"{_num(e, 'vest_weight'):.2%}, {_num(e, 'vest_ownership_of_float'):.7%})"
+            f"{num(e, 'vest_weight'):.2%}, {num(e, 'vest_ownership_of_float'):.7%})"
         ),
     )
 
-    max_ownership_raw = calc.get("max_ownership_float", 0.0)
-    try:
-        max_ownership = float(max_ownership_raw if max_ownership_raw is not None else 0.0)
-    except (TypeError, ValueError):
-        max_ownership = 0.0
-    if pd.isna(max_ownership):
-        max_ownership = 0.0
-    occ_market_value = _num(calc, "occ_market_value")
+    max_ownership = to_float(calc.get("max_ownership_float", 0.0))
+    occ_market_value = num(calc, "occ_market_value")
 
     notes = ""
     if fund_name in {"FDND", "TDVI"} and payload.get("condition_40act_2a"):
@@ -179,20 +164,20 @@ def _forty_act_row(report_date, fund_name, payload, calc, r):
             ("Condition 40 Act 2a", f'=IF(O{r}=0,"PASS","FAIL")'),
             ("Condition 40 Act 2b", f'=IF(VALUE(U{r})="","",IF(VALUE(U{r})<=0.1,"PASS","FAIL"))'),
             ("Condition 2a OCC", f'=IF(V{r}=0,"PASS",IF(V{r}<=0.05*M{r},"PASS","FAIL"))'),
-            ("Total Assets", _num(calc, "total_assets")),
-            ("Non-Qualifying Assets Weight", _num(calc, "non_qualifying_assets_1_wgt")),
-            ("Qualifying Assets Pct", _num(calc, "qualifying_assets_pct")),
-            ("Net Assets", _num(calc, "net_assets")),
-            ("Expenses", abs(_num(calc, "expenses"))),
-            ("Issuer Limited Assets (Condition 2a) Sum", _num(calc, "issuer_limited_sum")),
+            ("Total Assets", num(calc, "total_assets")),
+            ("Non-Qualifying Assets Weight", num(calc, "non_qualifying_assets_1_wgt")),
+            ("Qualifying Assets Pct", num(calc, "qualifying_assets_pct")),
+            ("Net Assets", num(calc, "net_assets")),
+            ("Expenses", abs(num(calc, "expenses"))),
+            ("Issuer Limited Assets (Condition 2a) Sum", num(calc, "issuer_limited_sum")),
             (f"Issuer Limited Assets (Condition 2a) (Ticker, {share_label}, Mkt Value)", issuer_limited_str),
             ("Excluded Securities (25% Bucket)", excluded_str),
-            ("Cumulative Weight of Excluded Securities", _num(calc, "cumulative_weight_excluded")),
-            ("Cumulative Weight of Remaining Securities", _num(calc, "cumulative_weight_remaining")),
+            ("Cumulative Weight of Excluded Securities", num(calc, "cumulative_weight_excluded")),
+            ("Cumulative Weight of Remaining Securities", num(calc, "cumulative_weight_remaining")),
             (f"Remaining Securities (Ticker, {share_label}, Vest Weight, Vest Ownership of Float)", remaining_str),
             ("Max Ownership % of Float in 75% bucket", f"{max_ownership:.5%}"),
             ("OCC Market Value", occ_market_value),
-            ("OCC Weight", _num(calc, "occ_weight")),
+            ("OCC Weight", num(calc, "occ_weight")),
             ("Notes", notes),
         ]
     )
@@ -201,22 +186,22 @@ def _forty_act_row(report_date, fund_name, payload, calc, r):
 def _irs_row(report_date, fund_name, payload, calc, r):
     large_securities_str = _join(
         calc.get("large_securities", []) or [],
-        lambda sec: f"({sec.get('eqyticker', '')}, {_num(sec, 'tna_wgt'):.2%})",
+        lambda sec: f"({sec.get('eqyticker', '')}, {num(sec, 'tna_wgt'):.2%})",
     )
     overlap_records = calc.get("overlap", []) or []
-    overlap_weight_total = _num(calc, "overlap_weight_sum")
+    overlap_weight_total = num(calc, "overlap_weight_sum")
     overlap_summary = _join(
         overlap_records,
-        lambda item: f"{item.get('security_ticker', '')}: {_num(item, 'security_weight'):.2%}",
+        lambda item: f"{item.get('security_ticker', '')}: {num(item, 'security_weight'):.2%}",
     )
     if overlap_records and not overlap_weight_total:
-        overlap_weight_total = sum(_num(item, "security_weight") for item in overlap_records)
+        overlap_weight_total = sum(num(item, "security_weight") for item in overlap_records)
     if pd.isna(overlap_weight_total):
         overlap_weight_total = 0.0
 
     def holding(key):
         held = calc.get(key, {}) or {}
-        return f"{held.get('eqyticker', 'N/A')} ({_num(held, 'tna_wgt'):.2%})"
+        return f"{held.get('eqyticker', 'N/A')} ({num(held, 'tna_wgt'):.2%})"
 
     return OrderedDict(
         [
@@ -227,18 +212,18 @@ def _irs_row(report_date, fund_name, payload, calc, r):
             ("condition_IRS_2_a_5", f'=IF(L{r}<=0.5,"PASS","FAIL")'),
             ("condition_IRS_2_a_10", _pf(payload.get("condition_IRS_2_a_10"))),
             ("condition_IRS_2_b", _pf(payload.get("condition_IRS_2_b", True))),
-            ("total_assets", _num(calc, "total_assets")),
-            ("qualifying_assets_value", _num(calc, "qualifying_assets_value")),
-            ("expenses", abs(_num(calc, "expenses"))),
-            ("5% Gross Assets Threshold ($)", _num(calc, "five_pct_gross_assets")),
-            ("sum_large_securities_weights", _num(calc, "sum_large_securities_weights")),
+            ("total_assets", num(calc, "total_assets")),
+            ("qualifying_assets_value", num(calc, "qualifying_assets_value")),
+            ("expenses", abs(num(calc, "expenses"))),
+            ("5% Gross Assets Threshold ($)", num(calc, "five_pct_gross_assets")),
+            ("sum_large_securities_weights", num(calc, "sum_large_securities_weights")),
             ("large_securities_count", int(calc.get("large_securities_count", 0) or 0)),
             ("large_securities", large_securities_str),
             ("overlap_weight", float(overlap_weight_total)),
             ("overlap_constituents", overlap_summary),
             ("bottom_50_largest_holding", holding("bottom_50_largest")),
             ("bottom_50_second_largest_holding", holding("bottom_50_second_largest")),
-            ("total_tbill_value", _num(calc, "total_tbill_value")),
+            ("total_tbill_value", num(calc, "total_tbill_value")),
         ]
     )
 
@@ -256,10 +241,10 @@ def _illiquid_row(report_date, fund_name, payload, calc, r):
         [
             ("Date", report_date),
             ("Fund", fund_name),
-            ("Total Assets", _num(calc, "total_assets")),
-            ("Total Illiquid Value", _num(calc, "total_illiquid_value")),
-            ("Illiquid Percentage", _num(calc, "illiquid_percentage")),
-            ("Equity Holdings Percentage", _num(calc, "equity_holdings_percentage")),
+            ("Total Assets", num(calc, "total_assets")),
+            ("Total Illiquid Value", num(calc, "total_illiquid_value")),
+            ("Illiquid Percentage", num(calc, "illiquid_percentage")),
+            ("Equity Holdings Percentage", num(calc, "equity_holdings_percentage")),
             ("Max 15% Illiquid Compliance", f'=IF(E{r}<=0.15,"PASS","FAIL")'),
         ]
     )
@@ -290,10 +275,10 @@ def _12d1_row(report_date, fund_name, payload, calc, r):
         [
             ("Date", report_date),
             ("Fund", fund_name),
-            ("Total Assets", _num(calc, "total_assets")),
+            ("Total Assets", num(calc, "total_assets")),
             ("Investment Companies", holdings_str),
-            ("Ownership % Max", _num(calc, "ownership_pct_max")),
-            ("Equity Market Value Sum", _num(calc, "equity_market_value_sum")),
+            ("Ownership % Max", num(calc, "ownership_pct_max")),
+            ("Equity Market Value Sum", num(calc, "equity_market_value_sum")),
             ("Test 1 (<=3% Ownership)", f'=IF(E{r}<=0.03,"PASS","FAIL")'),
             ("Test 2 (<=5% Total Assets)", f'=IF(F{r}/C{r}<=0.05,"PASS","FAIL")'),
             ("Test 3 (<=10% Total Assets)", f'=IF(F{r}/C{r}<=0.10,"PASS","FAIL")'),
@@ -336,9 +321,9 @@ def _12d3_row(report_date, fund_name, payload, calc, r):
             ("12d3 Sec Biz Compliant", f'=IF(AND(C{r}="PASS",D{r}="PASS",E{r}="PASS"),"PASS","FAIL")'),
             ("SEC-Related Businesses (Shs Out %)", sec_related_str),
             ("Combined Holdings (Portfolio %)", combined_str),
-            ("Total Assets", _num(calc, "total_assets")),
-            ("Max Ownership %", f"{_num(calc, 'max_ownership_pct'):.8%}"),
-            ("Max Weight", _num(calc, "max_weight")),
+            ("Total Assets", num(calc, "total_assets")),
+            ("Max Ownership %", f"{num(calc, 'max_ownership_pct'):.8%}"),
+            ("Max Weight", num(calc, "max_weight")),
         ]
     )
 
@@ -392,8 +377,7 @@ class ComplianceReport:
         gics_mapping: Optional[pd.DataFrame] = None,
     ) -> None:
         self.report_date = normalize_report_date(report_date)
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir = ensure_dir(output_dir)
         self.file_path = self.output_dir / f"{file_name_prefix}_{self.report_date}.xlsx"
 
         self.gics_mapping = gics_mapping.copy() if isinstance(gics_mapping, pd.DataFrame) else pd.DataFrame()
@@ -589,14 +573,9 @@ class ComplianceReport:
                     exceeding_index_vals = calc.get("exceeding_index", {}) or {}
 
                     for category, fund_wt in fund_weights.items():
-                        try:
-                            fund_weight_value = float(fund_wt)
-                        except (TypeError, ValueError):
-                            fund_weight_value = 0.0
-                        try:
-                            index_weight_value = float(index_weights.get(category, 0.0) or 0.0)
-                        except (TypeError, ValueError):
-                            index_weight_value = 0.0
+                        # Weights are floats (Series.to_dict()); `or 0.0` keeps -0.0 -> 0.0.
+                        fund_weight_value = float_or(fund_wt, 0.0)
+                        index_weight_value = float_or(index_weights.get(category, 0.0) or 0.0, 0.0)
 
                         sector_name = sector_lookup.get(gics_class, {}).get(
                             str(category).strip().upper(), "N/A"
@@ -923,11 +902,8 @@ class ComplianceReportPDF(BaseReportPDF):
         self.pdf.set_font("Arial", "", 9)
 
     def _header_row(self, widths, headers, height: float, font_size: int) -> None:
-        self.pdf.set_font("Arial", "B", font_size)
-        self.pdf.set_fill_color(230, 230, 230)
-        for width, header in zip(widths, headers):
-            self.pdf.cell(width, height, self._sanitize_text(header), border=1, align="C", fill=True)
-        self.pdf.ln(height)
+        headers = [self._sanitize_text(header) for header in headers]
+        draw_header_row(self.pdf, widths, headers, height, font_size, (230, 230, 230), height)
 
     def _value_cell(self, width: float, height: float, text: str, align: str, highlight_fail: bool) -> None:
         if highlight_fail:

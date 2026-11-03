@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any, Dict, Mapping, Optional, Tuple
 import pandas as pd
 from processing.fund import Fund
+from reporting.report_utils import non_empty
+from utilities.numbers import num
 
 ASSET_ORDER: Tuple[str, ...] = ("equity", "options", "treasury")
 
@@ -58,7 +60,7 @@ class TradingComplianceAnalyzer:
         for fund_name in fund_names:
             comparison = self._compare_fund(fund_name)
             fund_details[fund_name] = comparison
-            if float(comparison["trade_info"].get("total_traded", 0.0) or 0.0):
+            if num(comparison["trade_info"], "total_traded"):
                 total_funds_traded += 1
 
         return {
@@ -188,7 +190,7 @@ class TradingComplianceAnalyzer:
             ante_notional = self._calculate_notional(ante_df, ante_quantities, asset_type=key)
 
             # Splice closed positions back in so sell-to-close shows up.
-            if key == "options" and isinstance(ante_df, pd.DataFrame) and not ante_df.empty:
+            if key == "options" and non_empty(ante_df):
                 ante_only = ante_df[~ante_df["optticker"].isin(post_df["optticker"])].copy()
                 if not ante_only.empty:
                     ante_only["iiv_shares"] = 0.0
@@ -201,8 +203,8 @@ class TradingComplianceAnalyzer:
             if activity_details["buys"] or activity_details["sells"]:
                 trade_activity[key] = activity_details
 
-            buy_value = float(activity_details["net"].get("buy_value", 0.0) or 0.0)
-            sell_value = float(activity_details["net"].get("sell_value", 0.0) or 0.0)
+            buy_value = num(activity_details["net"], "buy_value")
+            sell_value = num(activity_details["net"], "sell_value")
             net_trades[key] = {
                 "buy_quantity": buy_quantity,
                 "sell_quantity": sell_quantity,
@@ -242,7 +244,7 @@ class TradingComplianceAnalyzer:
         snapshot = getattr(getattr(fund, "data", None), "current", None)
         for source in ("vest", "custodian"):
             holdings = getattr(getattr(snapshot, source, None), attribute, None)
-            if isinstance(holdings, pd.DataFrame) and not holdings.empty:
+            if non_empty(holdings):
                 return holdings.copy()
         return pd.DataFrame()
 
@@ -259,7 +261,7 @@ class TradingComplianceAnalyzer:
 
     @staticmethod
     def _extract_trade_series(df: pd.DataFrame) -> pd.Series:
-        if not isinstance(df, pd.DataFrame) or df.empty:
+        if not non_empty(df):
             return pd.Series(dtype=float)
         if "trade_rebal" not in df.columns:
             return pd.Series(0.0, index=df.index, dtype=float)
@@ -267,7 +269,7 @@ class TradingComplianceAnalyzer:
 
     @staticmethod
     def _calculate_notional(df: pd.DataFrame, quantities: pd.Series, *, asset_type: str) -> float:
-        if not isinstance(df, pd.DataFrame) or df.empty or "price" not in df.columns or quantities.empty:
+        if not non_empty(df) or "price" not in df.columns or quantities.empty:
             return 0.0
         prices = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
 
@@ -287,7 +289,7 @@ class TradingComplianceAnalyzer:
 
     @staticmethod
     def _resolve_quantity_series(df: pd.DataFrame, *, preferred: Optional[str] = None) -> pd.Series:
-        if not isinstance(df, pd.DataFrame) or df.empty:
+        if not non_empty(df):
             return pd.Series(dtype=float)
 
         column = preferred or "nav_shares"
@@ -305,7 +307,7 @@ class TradingComplianceAnalyzer:
             "net": {"buy_quantity": 0.0, "sell_quantity": 0.0, "buy_value": 0.0, "sell_value": 0.0},
         }
 
-        if not isinstance(holdings, pd.DataFrame) or holdings.empty:
+        if not non_empty(holdings):
             return empty_result
 
         trade_series = self._extract_trade_series(holdings)

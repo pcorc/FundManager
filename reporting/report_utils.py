@@ -5,7 +5,12 @@ from __future__ import annotations
 import numbers
 from collections.abc import Mapping
 from datetime import date, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Tuple
+
+import pandas as pd
+from openpyxl.styles import PatternFill
+from openpyxl.utils import get_column_letter
 
 if TYPE_CHECKING:
     from services.compliance_checker import ComplianceResult
@@ -36,6 +41,25 @@ def format_number(value: Any, digits: int = 0) -> str:
         format_spec = f"{{:,.{digits}f}}"
         return format_spec.format(value)
     return str(value)
+
+
+def non_empty(df: Any) -> bool:
+    return isinstance(df, pd.DataFrame) and not df.empty
+
+
+def ensure_dir(path: str | Path) -> Path:
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def solid_fill(color: str) -> PatternFill:
+    return PatternFill(start_color=color, end_color=color, fill_type="solid")
+
+
+def set_widths(ws: Any, count: int, width: float) -> None:
+    for col in range(1, count + 1):
+        ws.column_dimensions[get_column_letter(col)].width = width
 
 
 # ---------------------------------------------------------------------------

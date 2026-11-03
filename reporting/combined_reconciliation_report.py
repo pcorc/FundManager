@@ -7,7 +7,9 @@ from typing import Any, Dict, Iterable, Mapping, Sequence
 
 from fpdf import FPDF
 
+from reporting.base_report_pdf import draw_header_row
 from reporting.holdings_recon_renderer import HoldingsReconciliationRenderer
+from utilities.numbers import fmt_num as _fmt, num, resolve_number
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +56,6 @@ GL_COLS = [
 ]
 
 
-def _fmt(value: Any, digits: int = 2) -> str:
-    try:
-        return f"{float(value):,.{digits}f}"
-    except (TypeError, ValueError):
-        return ""
-
-
 def _format_currency(value: Any, *, digits: int = 2) -> str:
     if value in (None, ""):
         return ""
@@ -68,17 +63,6 @@ def _format_currency(value: Any, *, digits: int = 2) -> str:
         return f"${float(value):,.{digits}f}"
     except (TypeError, ValueError):
         return str(value)
-
-
-def _resolve_number(nav: Mapping[str, Any], keys: Iterable[str]) -> float:
-    for key in keys:
-        if key not in nav:
-            continue
-        try:
-            return float(nav.get(key) or 0.0)
-        except (TypeError, ValueError):
-            continue
-    return 0.0
 
 
 def _summary_count(section: Mapping[str, Any], *keys: str) -> int:
@@ -192,11 +176,8 @@ class CombinedReconciliationReport:
         self.pdf.set_text_color(0, 0, 0)
 
     def _header_row(self, cols: Sequence[tuple[str, float]], height: float, size: int) -> None:
-        self.pdf.set_font("Arial", "B", size)
-        self.pdf.set_fill_color(240, 240, 240)
-        for label, width in cols:
-            self.pdf.cell(width, height, label, border=1, fill=True, align="C")
-        self.pdf.ln()
+        widths, labels = [width for _, width in cols], [label for label, _ in cols]
+        draw_header_row(self.pdf, widths, labels, height, size, (240, 240, 240))
 
     def _page_title(self, link_id: int, title: str, size: int, height: float) -> None:
         self.pdf.add_page()
@@ -250,12 +231,9 @@ class CombinedReconciliationReport:
         self.pdf.set_font("Arial", size=8)
 
         for fund_name, nav_data in sorted(self.nav.items()):
-            nav_diff = float(nav_data.get("NAV Diff ($)") or 0.0)
+            nav_diff = num(nav_data, "NAV Diff ($)")
             ok2 = bool(nav_data.get("NAV Good (2 Digit)"))
-            opt_px_diff = (
-                    float(nav_data.get("combined_gl_cust") or 0.0)
-                    - float(nav_data.get("combined_gl_vest") or 0.0)
-            )
+            opt_px_diff = num(nav_data, "combined_gl_cust") - num(nav_data, "combined_gl_vest")
 
             self._fund_cell(fund_name, cols[0][1], 7, 8)
             values = [
@@ -324,19 +302,19 @@ class CombinedReconciliationReport:
         for fund_name, nav in sorted(self.nav.items()):
             values: dict[str, float | str] = {"fund": fund_name}
             for key, _, _, _, nav_keys in GL_COLS[1:]:
-                values[key] = _resolve_number(nav, nav_keys)
+                values[key] = resolve_number(nav, nav_keys)
             values["gl_today"] = (
                 values["eqt_gl"] + values["opt_gl"] + values["flex_gl"] + values["tsy_gl"] + values["assign_gl"]
                 - values["accruals"] - abs(values["distributions"]) + values["other"]
             )
             rows.append(values)
             for key in totals:
-                totals[key] += float(values[key] or 0.0)
+                totals[key] += num(values, key)
 
         selected = [
             (key, label, width)
             for key, label, width, always, _ in GL_COLS
-            if always or any(abs(float(row[key] or 0.0)) > 0 for row in rows)
+            if always or any(abs(num(row, key)) > 0 for row in rows)
         ]
         total_pref_width = sum(width for _, _, width in selected)
         scale = min(1.0, available_width / total_pref_width) if total_pref_width else 1.0
@@ -349,7 +327,7 @@ class CombinedReconciliationReport:
         for row in rows:
             self._fund_cell(str(row["fund"]), widths["fund"], 6, 8)
             for key in value_cols:
-                self.pdf.cell(widths[key], 6, f"{float(row[key] or 0.0):,.0f}", border=1, align="R")
+                self.pdf.cell(widths[key], 6, f"{num(row, key):,.0f}", border=1, align="R")
             self.pdf.ln()
 
         self.pdf.set_font("Arial", "B", 8)
@@ -360,22 +338,16 @@ class CombinedReconciliationReport:
         self.pdf.ln()
 
     # ------------------------------------------------------------------
-    def _section_banner(self, title: str, size: int, height: float, gap: float) -> None:
-        self.pdf.set_fill_color(230, 230, 230)
-        self.pdf.set_font("Arial", "B", size)
-        self.pdf.cell(0, height, title, ln=True, fill=True)
-        self.pdf.ln(gap)
-
     def _add_fund_detail_page(self, fund_name: str) -> None:
         self.pdf.add_page()
         if fund_name in self.fund_links:
             self.pdf.set_link(self.fund_links[fund_name], page=self.pdf.page_no())
 
         self._add_navigation_bar(fund_name)
-        self._section_banner(f"Fund: {fund_name} - Details", 16, 12, 5)
+        self.pdf._draw_section_header(f"Fund: {fund_name} - Details", size=16, height=12, gap=5)
 
         # ===== NAV Reconciliation section (always rendered) =====
-        self._section_banner("NAV Reconciliation", 14, 10, 3)
+        self.pdf._draw_section_header("NAV Reconciliation", gap=3)
         nav_data = self.nav.get(fund_name)
         if nav_data:
             try:
@@ -393,7 +365,7 @@ class CombinedReconciliationReport:
             self.pdf.add_page()
         else:
             self.pdf.ln(10)
-        self._section_banner("Holdings Reconciliation", 14, 10, 4)
+        self.pdf._draw_section_header("Holdings Reconciliation")
 
         holdings_data = self.holdings[fund_name].get("details", {}) if fund_name in self.holdings else None
         if holdings_data:

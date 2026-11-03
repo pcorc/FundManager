@@ -1,19 +1,15 @@
 from __future__ import annotations
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping
 
 import pandas as pd
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.utils import get_column_letter
+from openpyxl.styles import Alignment, Font
 
+from reporting.reconciliation_reporting import GeneratedReconciliationReport
+from reporting.report_utils import set_widths, solid_fill
 
-@dataclass
-class GeneratedNAVReconciliationReport:
-    """File locations for generated NAV reconciliation artefacts."""
-
-    excel_path: Optional[str]
+GeneratedNAVReconciliationReport = GeneratedReconciliationReport  # same single excel_path field
 
 
 class NAVReconciliationExcelReport:
@@ -196,8 +192,7 @@ class NAVReconciliationExcelReport:
             f'=IF(ROUND(C{cust_nav_row},2)=ROUND(C{expected_nav_row},2),"PASS","FAIL")',
         )
 
-        for col in range(1, 12):
-            ws.column_dimensions[get_column_letter(col)].width = 14
+        set_widths(ws, 11, 14)
         ws.freeze_panes = "A4"
 
     # ------------------------------------------------------------------
@@ -257,7 +252,7 @@ class NAVReconciliationExcelReport:
                 adj_cell = ws.cell(row=data_row, column=column, value=adjusted)
                 adj_cell.number_format = currency
                 if always_highlight or abs(adjusted - raw) > 0.001:
-                    adj_cell.fill = PatternFill(start_color="FFFF99", end_color="FFFF99", fill_type="solid")
+                    adj_cell.fill = solid_fill("FFFF99")
 
             # G/L (Cust) and G/L (Vest/Adj) = (Price T - Price T-1) * Qty
             ws.cell(
@@ -315,8 +310,7 @@ class NAVReconciliationExcelReport:
             cell.font = self.header_font
             cell.alignment = Alignment(horizontal="center", wrap_text=True)
 
-        good_fill = PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
-        bad_fill = PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")
+        good_fill, bad_fill = solid_fill("90EE90"), solid_fill("FFB6C1")
         currency, nav_fmt = self.CURRENCY_FORMAT, self.NAV_FORMAT
 
         current_row = header_row + 1
@@ -360,8 +354,7 @@ class NAVReconciliationExcelReport:
 
             current_row += 1
 
-        for column_index in range(1, last_col + 1):
-            worksheet.column_dimensions[get_column_letter(column_index)].width = 16
+        set_widths(worksheet, last_col, 16)
 
         return worksheet
 

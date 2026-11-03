@@ -1,6 +1,6 @@
 """Holdings reconciliation reporting utilities."""
 from __future__ import annotations
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Font
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -10,8 +10,13 @@ import numpy as np
 import pandas as pd
 
 from config.fund_definitions import FUND_DEFINITIONS
-from reporting.report_utils import _normalize_reconciliation_payload, normalize_report_date
-from utilities.reconciliation_utils import split_flex_price_frames
+from reporting.report_utils import (
+    _normalize_reconciliation_payload,
+    ensure_dir,
+    non_empty,
+    normalize_report_date,
+    solid_fill,
+)
 
 _PRICE_KEYS: Tuple[str, str] = ("price_discrepancies_T", "price_discrepancies_T1")
 _PRICE_SUFFIXES: Tuple[str, str] = ("_price_T", "_price_T-1")
@@ -52,8 +57,22 @@ RECON_DESCRIPTOR_REGISTRY: Dict[str, ReconDescriptor] = {
 }
 
 
-def _non_empty(df: Any) -> bool:
-    return isinstance(df, pd.DataFrame) and not df.empty
+def vehicle_wrapper(fund: str) -> str:
+    """Lower-cased FUND_DEFINITIONS vehicle_wrapper ('' when unset)."""
+    return (FUND_DEFINITIONS.get(fund, {}).get("vehicle_wrapper") or "").lower()
+
+
+def split_flex_price_frames(df: Any, flag_column: str = "is_flex") -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """(FLEX rows, non-FLEX rows) copies of ``df``; all rows are non-FLEX without the flag column."""
+    if not non_empty(df):
+        return pd.DataFrame(), pd.DataFrame()
+
+    flag_series = df.get(flag_column)
+    if flag_series is None:
+        return pd.DataFrame(), df.copy()
+
+    mask = flag_series.fillna(False).astype(bool)
+    return df.loc[mask].copy(), df.loc[~mask].copy()
 
 
 def top_option_prices(df: pd.DataFrame) -> pd.DataFrame:
@@ -104,7 +123,7 @@ class ReconciliationReport:
                         continue
                     subresults = subresults or {}
                     holdings = subresults.get("final_recon")
-                    if _non_empty(holdings):
+                    if non_empty(holdings):
                         flat[(fund, date_str, recon_type)] = self._prepare_holdings_df(
                             holdings, fund, date_str, recon_type, descriptor.ticker
                         )
@@ -112,7 +131,7 @@ class ReconciliationReport:
                         price = subresults.get(price_key) if price_key else None
                         if descriptor.select_standard_prices:
                             price = split_flex_price_frames(price)[1]
-                        if _non_empty(price):
+                        if non_empty(price):
                             flat[(fund, date_str, recon_type + suffix)] = self._prepare_price_df(
                                 price, fund, date_str, recon_type, descriptor.ticker
                             )
@@ -124,7 +143,7 @@ class ReconciliationReport:
         self, flat: FlatResults, fund: str, date_str: str, subresults: Mapping[str, Any], recon_type: str
     ) -> None:
         regular_df = subresults.get("regular_options")
-        if _non_empty(regular_df):
+        if non_empty(regular_df):
             flat[(fund, date_str, "custodian_option_regular")] = self._prepare_holdings_df(
                 regular_df, fund, date_str, "custodian_option_regular", "optticker"
             )
@@ -139,7 +158,7 @@ class ReconciliationReport:
         self, flat: FlatResults, fund: str, date_str: str, subresults: Mapping[str, Any], recon_type: str
     ) -> None:
         final_df = subresults.get("final_recon")
-        if not _non_empty(final_df):
+        if not non_empty(final_df):
             return
 
         if "breakdown" not in final_df.columns or "discrepancy_type" not in final_df.columns:
@@ -186,7 +205,7 @@ class ReconciliationReport:
         return df[cols_to_keep] if cols_to_keep else df
 
     def _limit_option_prices(self, df: pd.DataFrame, fund: str, recon_type: str) -> pd.DataFrame:
-        vehicle = (FUND_DEFINITIONS.get(fund, {}).get("vehicle_wrapper") or "").lower()
+        vehicle = vehicle_wrapper(fund)
         recon_lower = recon_type.lower()
         if (
             df.empty
@@ -270,8 +289,7 @@ class ReconciliationReport:
         )
 
         worksheet = writer.sheets["RECONCILIATION BREAKS SUMMARY"]
-        red_fill = PatternFill(start_color="FFC8C8", end_color="FFC8C8", fill_type="solid")
-        orange_fill = PatternFill(start_color="FFC896", end_color="FFC896", fill_type="solid")
+        red_fill, orange_fill = solid_fill("FFC8C8"), solid_fill("FFC896")
 
         # Row 1 = header (fund names); row 2+ = data rows in the order of summary_df.index.
         for r_offset, recon_label in enumerate(summary_df.index, start=2):
@@ -422,7 +440,7 @@ class ReconciliationReport:
         # Header styles are applied for every sheet by _apply_header_styles;
         # this method only handles the price-specific column tinting + alignment.
         worksheet = writer.sheets["COMPREHENSIVE PRICE COMPARISON"]
-        weight_fill = PatternFill(start_color="E2F0D9", end_color="E2F0D9", fill_type="solid")
+        weight_fill = solid_fill("E2F0D9")
         col_index = {cell.value: idx for idx, cell in enumerate(worksheet[1], start=1)}
 
         for header, fill in (("Option Weight", weight_fill), ("% Difference", None)):
@@ -445,7 +463,7 @@ class ReconciliationReport:
 
     @staticmethod
     def _apply_header_styles(writer: pd.ExcelWriter) -> None:
-        header_fill = PatternFill(start_color="D3E4F7", end_color="D3E4F7", fill_type="solid")
+        header_fill = solid_fill("D3E4F7")
         header_font = Font(bold=True)
         for worksheet in writer.sheets.values():
             for cell in worksheet[1]:
@@ -468,8 +486,7 @@ def generate_reconciliation_reports(
         return GeneratedReconciliationReport(None)
 
     date_str = normalize_report_date(report_date)
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
+    output_path = ensure_dir(output_dir)
 
     excel_path = output_path / f"{file_name_prefix}_{date_str}.xlsx"
     structured_details = {date_str: {fund: payload.get("details", {}) for fund, payload in normalized.items()}}

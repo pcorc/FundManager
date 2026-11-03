@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import os
-from typing import Tuple
+from typing import Optional, Sequence, Tuple
 import unicodedata
 
 from fpdf import FPDF
+
+
+def draw_header_row(pdf: FPDF, widths: Sequence[float], headers: Sequence[str], height: float, size: int,
+                    fill_rgb: Tuple[int, int, int], ln_height: Optional[float] = None) -> None:
+    """Bold, filled, centred header cells; ``ln_height=None`` keeps a bare ``ln()``."""
+    pdf.set_font("Arial", "B", size)
+    pdf.set_fill_color(*fill_rgb)
+    for width, header in zip(widths, headers):
+        pdf.cell(width, height, header, border=1, align="C", fill=True)
+    pdf.ln(ln_height)
 
 
 class BaseReportPDF:
