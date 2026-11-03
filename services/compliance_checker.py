@@ -616,20 +616,6 @@ class ComplianceChecker:
             qualifying_assets_value = float(holdings_df["net_market_value"].sum())
             overlap_weight_sum = float(overlap_details_df.get("overlap_weight", pd.Series()).sum())
 
-            # if fund.name in {"DOGG"}:
-            #     tmp_df = vest_eqy_holdings.copy()
-            #     tmp_df["net_market_value"] = tmp_df["equity_market_value"]
-            #     if total_net_assets:
-            #         # need to join on vest_flex_holdings and holidngs_df and left_join equity_underlying_ticker and right_join on eqyticker
-            #         tmp_df["tna_wgt"] = tmp_df["equity_market_value"] / total_net_assets
-            #     else:
-            #         tmp_df["tna_wgt"] = 0.0
-            #     condition_IRS_2_a_50 = (
-            #         (total_net_assets - expenses) / total_net_assets >= IRS_QUALIFYING_ASSETS_MIN
-            #         if total_net_assets
-            #         else False
-            #     )
-            # else:
             if qualifying_assets_value > total_assets and total_net_assets:
                 condition_IRS_2_a_50 = (
                     (total_net_assets - expenses) / total_net_assets >= IRS_QUALIFYING_ASSETS_MIN
@@ -958,32 +944,6 @@ class ComplianceChecker:
             }
 
             diversification_failure_duration = None
-            if (
-                self.session is not None
-                and self.base_cls is not None
-                and hasattr(self.base_cls, "classes")
-                and hasattr(self.base_cls.classes, "compliance_daily_results")
-            ):
-                try:
-                    t_minus_one_date = pd.to_datetime(self.date) - pd.DateOffset(days=1)
-                    result_yesterday = (
-                        self.session.query(
-                            self.base_cls.classes.compliance_daily_results.analysis_type,
-                            self.base_cls.classes.compliance_daily_results.diversification_failure_duration_40act,
-                        )
-                        .filter(
-                            self.base_cls.classes.compliance_daily_results.etf == fund.name,
-                            self.base_cls.classes.compliance_daily_results.date == t_minus_one_date,
-                        )
-                        .first()
-                    )
-                    if result_yesterday:
-                        diversification_failure_duration = (
-                            result_yesterday.diversification_failure_duration_40act
-                        )
-                except Exception as exc:  # pragma: no cover - optional path
-                    logger.debug("Unable to fetch prior diversification history: %s", exc)
-
             if diversification_failure_duration is None:
                 if all([condition_1_met, condition_2a_met, condition_2b_met]):
                     diversification_failure_duration = 0
@@ -1023,21 +983,6 @@ class ComplianceChecker:
         Check IRC diversification compliance.
         Only applies to VIT (Variable Insurance Trust) funds.
         """
-        # Check if fund has vehicle_type attribute and if it's VIT
-        vehicle_type = fund.vehicle or ""
-
-        if vehicle_type.lower() != VEHICLE_VIT.lower():
-            # Return a skipped result for non-VIT funds
-            return ComplianceResult(
-                is_compliant=True,
-                details={
-                    "rule": "IRC Diversification",
-                    "skipped": True,
-                    "reason": f"IRC diversification applies only to VIT vehicles (fund vehicle: {vehicle_type})",
-                },
-                calculations={},
-            )
-
         try:
             regular_options = fund.data.current.vest.options
             vest_eqy_holdings = fund.data.current.vest.equity
