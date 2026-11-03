@@ -339,95 +339,20 @@ class Fund:
 # ----------------------------------------------------------------------
 # Registry factory (replaces the old FundRegistry class)
 # ----------------------------------------------------------------------
-def _load_account_numbers(session, base_cls) -> Dict[str, Dict[str, Any]]:
-    """Load per-fund custodian account numbers from the accounts_mapping schema."""
-    account_numbers_tbl = getattr(base_cls.classes, "account_numbers", None)
-    if account_numbers_tbl is None:
-        return {}
-
-    query = session.query(
-        account_numbers_tbl.fund,
-        account_numbers_tbl.account_type,
-        account_numbers_tbl.service_provider,
-        account_numbers_tbl.account_number,
-    )
-    df = pd.read_sql(query.statement, session.bind)
-
-    mapping: Dict[str, Dict[str, Any]] = {}
-    for _, row in df.iterrows():
-        fund_key = (row.get("fund") or "").strip() if isinstance(row.get("fund"), str) else ""
-        if not fund_key:
-            continue
-        account_number = row.get("account_number")
-        if pd.isna(account_number):
-            continue
-        account_number = str(account_number).strip()
-        if not account_number:
-            continue
-
-        account_type = row.get("account_type")
-        service_provider = row.get("service_provider")
-        account_type_key = account_type.strip().lower() if isinstance(account_type, str) else None
-        provider_key = service_provider.strip().lower() if isinstance(service_provider, str) else None
-
-        fund_numbers = mapping.setdefault(fund_key, {})
-
-        if provider_key == "sg" and account_type_key != "collateral":
-            accounts = fund_numbers.setdefault("sg", [])
-            if account_number not in accounts:
-                accounts.append(account_number)
-            continue
-
-        key = account_type_key or provider_key or "other"
-        existing = fund_numbers.get(key)
-        if existing is None:
-            fund_numbers[key] = account_number
-        elif isinstance(existing, list):
-            if account_number not in existing:
-                existing.append(account_number)
-        elif existing != account_number:
-            fund_numbers[key] = [existing, account_number]
-
-    return mapping
-
-
-def _derive_custodian_account_number(numbers: Dict[str, Any]) -> Optional[str]:
-    if not numbers:
-        return None
-    sg = numbers.get("sg")
-    candidates = (
-        [numbers.get(key) for key in ("account_number_custodian", "custodian", "primary", "account")]
-        + [sg if isinstance(sg, list) else None]
-        + [value for key, value in numbers.items() if key != "collateral"]
-    )
-    for value in candidates:
-        if isinstance(value, (str, list)) and value:
-            return value if isinstance(value, str) else value[0]
-    return None
-
-
 def build_fund_registry(
     session: Any = None,
     base_cls: Any = None,
     *,
     definitions: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> FundRegistry:
-    """Build a {fund_name: Fund} registry from FUND_DEFINITIONS, enriched with
-    account numbers when a DB session is provided."""
+    """Build a {fund_name: Fund} registry from FUND_DEFINITIONS. ``session`` and
+    ``base_cls`` are accepted for existing callers and unused."""
     definitions = definitions if definitions is not None else FUND_DEFINITIONS
-
-    account_numbers: Dict[str, Dict[str, Any]] = {}
-    if session is not None and base_cls is not None:
-        account_numbers = _load_account_numbers(session, base_cls)
 
     registry: FundRegistry = {}
     for fund_name, payload in definitions.items():
         config = dict(payload)
         config.setdefault("fund", fund_name)
-        numbers = account_numbers.get(fund_name)
-        if numbers:
-            config["account_numbers"] = numbers
-            config.setdefault("account_number_custodian", _derive_custodian_account_number(numbers))
         registry[fund_name] = Fund(name=fund_name, config=config)
     return registry
 

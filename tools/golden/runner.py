@@ -3,10 +3,9 @@
 Usage (invoked by golden.py, one subprocess per scenario):
     python runner.py <scenario> <record|replay> <data_dir> <run_root>
 
-The three live-code DB touchpoints are wrapped:
+The two live-code DB touchpoints are wrapped:
     BulkDataLoader.load_all_data_for_date   (all holdings / NAV / trades views)
     config.fund_definitions.load_cohorts_from_db
-    processing.fund._load_account_numbers
 Replay is keyed (not sequence-based) so refactored code may call them in a
 different order or a different number of times; an unrecorded key raises.
 Email is always intercepted at EmailManager._send_email and never sent.
@@ -35,7 +34,6 @@ def _key(target_date, previous_date, analysis_type) -> str:
 def install_hooks(mode: str, data_dir: Path):
     import config.fund_definitions as fd
     import processing.bulk_data_loader as bdl
-    import processing.fund as fund_mod
 
     data_dir.mkdir(parents=True, exist_ok=True)
     loads_path = data_dir / "loads.pkl"
@@ -45,7 +43,6 @@ def install_hooks(mode: str, data_dir: Path):
 
     orig_load = bdl.BulkDataLoader.load_all_data_for_date
     orig_cohorts = fd.load_cohorts_from_db
-    orig_accounts = fund_mod._load_account_numbers
 
     loader_logger = logging.getLogger(bdl.__name__)
 
@@ -89,15 +86,8 @@ def install_hooks(mode: str, data_dir: Path):
             target.clear()
             target.update(static["cohorts"][strategy])
 
-    def accounts(session, base_cls):
-        if mode == "record":
-            static["accounts"] = orig_accounts(session, base_cls)
-            static_path.write_bytes(pickle.dumps(static))
-        return copy.deepcopy(static["accounts"])
-
     bdl.BulkDataLoader.load_all_data_for_date = load
     fd.load_cohorts_from_db = cohorts
-    fund_mod._load_account_numbers = accounts
 
 
 def install_email_capture(emails: list):
