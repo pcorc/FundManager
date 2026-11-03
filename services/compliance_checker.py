@@ -683,7 +683,9 @@ class ComplianceChecker:
             "expected_registration_status": expected_status,
             "actual_registration_status": fund_status_today,
         }
-        return ComplianceResult(actual_diversified == expected_diversified, details, calculations)
+        # Only a fund registered as diversified that is not operating as diversified fails; a
+        # non-diversified registration permits operating either way.
+        return ComplianceResult(actual_diversified or not expected_diversified, details, calculations)
 
     def diversification_IRC_check(self, fund: Fund) -> ComplianceResult:
         """IRC diversification; the dispatcher only runs it for VIT funds."""

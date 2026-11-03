@@ -180,5 +180,33 @@ class MissingSharesOutstandingTests(unittest.TestCase):
         self.assertTrue(str(row["Condition 40 Act 2b"]).startswith("=IF("))
 
 
+class FortyActRegistrationTests(unittest.TestCase):
+    """D8: only a fund registered diversified that is not operating as diversified fails."""
+
+    DIVERSIFIED = dict(eqyticker=[f"T{i}" for i in range(25)], equity_market_value=[40.0] * 25,
+                       nav_shares=[1.0] * 25, EQY_SH_OUT_million=[1_000_000.0] * 25)
+    CONCENTRATED = dict(eqyticker=["A", "B", "C"], equity_market_value=[400.0, 300.0, 300.0],
+                        nav_shares=[1.0] * 3, EQY_SH_OUT_million=[1_000_000.0] * 3)
+
+    def _check(self, registration, holdings):
+        fund = _fund("RDVI", equity=_equity(**holdings))
+        fund.diversification_status = registration
+        return ComplianceChecker({fund.name: fund}).diversification_40act_check(fund)
+
+    def test_verdict_by_registration_and_operation(self):
+        cases = [
+            ("diversified", self.DIVERSIFIED, "diversified", True),
+            ("diversified", self.CONCENTRATED, "non-diversified", False),
+            ("non_diversified", self.DIVERSIFIED, "diversified", True),  # FGSI/RDVI/SDVD case
+            ("non_diversified", self.CONCENTRATED, "non-diversified", True),
+            (None, self.CONCENTRATED, "non-diversified", True),  # unknown registration
+        ]
+        for registration, holdings, status_today, compliant in cases:
+            result = self._check(registration, holdings)
+            self.assertEqual(result.calculations["fund_status_today"], status_today, registration)
+            self.assertIs(result.is_compliant, compliant, (registration, status_today))
+            self.assertEqual(result.details["actual_registration_status"], status_today)
+
+
 if __name__ == "__main__":
     unittest.main()
