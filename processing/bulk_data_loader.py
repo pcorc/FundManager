@@ -242,43 +242,72 @@ class BulkDataLoader:
             d for d in (target_date, previous_date, tplus_one, previous_tplus_one)
             if d is not None
         })
+        # v_index_holdings keys S&P/CBOE indexes by the benchmark code, but NASDAQ indexes by a fund
+        # ticker that tracks them (NQDVRIS rows are under "RDVI"): fall back to those tickers.
+        aliases = self._index_aliases(list(index_to_funds))
+        codes = list(dict.fromkeys(
+            [*index_to_funds, *(f.name for fs in index_to_funds.values() for f in fs),
+             *(a for names in aliases.values() for a in names)]
+        ))
         df = self._query_sql(
             f"SELECT * FROM {VIEW_SCHEMA}.v_index_holdings "
             "WHERE `date` IN :dates AND fund IN :codes",
-            dates=dates, codes=list(index_to_funds.keys()),
+            dates=dates, codes=codes,
         )
 
         for index_code, funds in index_to_funds.items():
-            code_df = df[df["fund"] == index_code] if not df.empty else df
-            if code_df.empty:
-                for fund in funds:
+            for fund in funds:
+                code_df = pd.DataFrame()
+                for code in (index_code, fund.name, *aliases.get(index_code, ())):
+                    code_df = df[df["fund"] == code] if not df.empty else df
+                    if not code_df.empty:
+                        break
+                if code_df.empty:
                     self._stash(store, fund.name, "index", pd.DataFrame())
                     if previous_date is not None:
                         self._stash(store, fund.name, "index_t1", pd.DataFrame())
-                continue
+                    continue
 
-            code_df = code_df.copy()
-            code_df["date"] = pd.to_datetime(code_df["date"], errors="coerce").dt.date
-            source = str(code_df["source"].iloc[0]).lower()
-            kind = _INDEX_SOURCE_DATES.get(source, "target")
-            if kind == "tplus_one":
-                cur_date, prev_date = tplus_one, (previous_tplus_one or previous_date)
-            else:
-                cur_date, prev_date = target_date, previous_date
+                code_df = code_df.copy()
+                code_df["date"] = pd.to_datetime(code_df["date"], errors="coerce").dt.date
+                source = str(code_df["source"].iloc[0]).lower()
+                kind = _INDEX_SOURCE_DATES.get(source, "target")
+                if kind == "tplus_one":
+                    cur_date, prev_date = tplus_one, (previous_tplus_one or previous_date)
+                else:
+                    cur_date, prev_date = target_date, previous_date
 
-            current = code_df[code_df["date"] == cur_date].copy() if cur_date else pd.DataFrame()
-            previous = code_df[code_df["date"] == prev_date].copy() if prev_date else pd.DataFrame()
-            for fund in funds:
-                # The view repeats the constituents once per fund_ticker on the index; keep this fund's copy.
+                current = code_df[code_df["date"] == cur_date].copy() if cur_date else pd.DataFrame()
+                previous = code_df[code_df["date"] == prev_date].copy() if prev_date else pd.DataFrame()
                 self._stash(store, fund.name, "index", self._own_rows(current, fund.name))
                 if previous_date is not None:
                     self._stash(store, fund.name, "index_t1", self._own_rows(previous, fund.name))
 
+    def _index_aliases(self, index_codes: List[str]) -> Dict[str, List[str]]:
+        """Benchmark code -> sorted tickers of every fund (selected or not) that tracks it."""
+        df = self._query_sql(
+            f"SELECT fund_ticker, index_ticker_join FROM {VIEW_SCHEMA}.v_fund_metadata "
+            "WHERE index_ticker_join IN :codes",
+            codes=index_codes,
+        )
+        aliases: Dict[str, List[str]] = {}
+        if df.empty or not {"fund_ticker", "index_ticker_join"}.issubset(df.columns):
+            return aliases
+        for code, group in df[df["index_ticker_join"].isin(index_codes)].groupby("index_ticker_join"):
+            aliases[code] = sorted(group["fund_ticker"].dropna().astype(str).unique())
+        return aliases
+
     @staticmethod
     def _own_rows(df: pd.DataFrame, fund_name: str) -> pd.DataFrame:
+        """The view repeats an index's constituents once per fund_ticker (NULL on NASDAQ rows); keep one copy."""
         if df.empty or "fund_ticker" not in df.columns:
             return df.copy()
-        return df[df["fund_ticker"] == fund_name].copy()
+        owners = df["fund_ticker"]
+        if (owners == fund_name).any():
+            return df[owners == fund_name].copy()
+        if owners.isna().any():
+            return df[owners.isna()].copy()
+        return df[owners == owners.iloc[0]].copy()
 
     @staticmethod
     def _bday_shift(anchor: Optional[date], offset: int) -> Optional[date]:

@@ -88,7 +88,7 @@ class LoaderMetadataOrderTests(unittest.TestCase):
 
         with mock.patch.object(loader, "_query_sql", side_effect=fake_sql):
             loader.load_all_data_for_date(DAY, previous_date=PREV, analysis_type="eod")
-        self.assertEqual(seen["codes"], ["SPATI"])
+        self.assertEqual(seen["codes"], ["SPATI", "KNG"])  # benchmark code, then the tracking fund tickers
         self.assertEqual(seen["vehicles"], {"KNG": "etf", "PF227": "private_fund"})
         self.assertEqual(registry["KNG"].expense_ratio, 0.0075)
 
@@ -118,6 +118,46 @@ class LoaderMetadataOrderTests(unittest.TestCase):
                 self.assertEqual(sorted(frame["eqyticker"]), ["AAPL", "MSFT"], (name, key))
                 self.assertEqual(set(frame["fund_ticker"]), {name})
                 self.assertEqual(set(frame["date"]), {day})
+
+    def test_nasdaq_index_keyed_by_tracking_fund_ticker_with_null_fund_ticker(self):
+        # v_fund_metadata says NQDVRIS, but the view stores those NASDAQ constituents under fund="RDVI"
+        # with fund_ticker NULL; R21126 (same benchmark) is run without RDVI in the registry.
+        registry = {n: f for n, f in build_fund_registry().items() if n == "R21126"}
+        loader = BulkDataLoader(session=None, fund_registry=registry)
+        metadata = [{"fund_ticker": "R21126", "eod_report_strategy": "CEF", "index_ticker_join": "NQDVRIS"},
+                    {"fund_ticker": "RDVI", "eod_report_strategy": "TIF", "index_ticker_join": "NQDVRIS"}]
+        t1, prev_t1 = date(2026, 11, 2), DAY  # NASDAQ publishes for T+1
+        index_rows = pd.DataFrame([
+            {"source": "nasdaq", "date": day, "fund": "RDVI", "fund_ticker": None, "eqyticker": tkr,
+             "weight_index": 0.5}
+            for day in (t1, prev_t1) for tkr in ("ABT", "ADM")
+        ])
+        seen = {}
+
+        def fake_sql(sql, **params):
+            if "v_fund_metadata" in sql and "index_ticker_join IN" in sql:
+                return pd.DataFrame(metadata)
+            if "v_fund_metadata" in sql:
+                return pd.DataFrame(metadata[:1])
+            if "v_index_holdings" in sql:
+                seen["codes"] = params["codes"]
+                return index_rows
+            return pd.DataFrame()
+
+        with mock.patch.object(loader, "_query_sql", side_effect=fake_sql):
+            store = loader.load_all_data_for_date(DAY, previous_date=PREV, analysis_type="eod")
+        self.assertEqual(seen["codes"], ["NQDVRIS", "R21126", "RDVI"])
+        for key, day in (("index", t1), ("index_t1", prev_t1)):
+            frame = store.fund_data["R21126"][key]
+            self.assertEqual(sorted(frame["eqyticker"]), ["ABT", "ADM"], key)
+            self.assertEqual(set(frame["date"]), {day})
+
+    def test_own_rows_keeps_one_copy(self):
+        frame = pd.DataFrame({"fund_ticker": ["A", "A", "B", "B"], "eqyticker": ["X", "Y", "X", "Y"]})
+        self.assertEqual(list(BulkDataLoader._own_rows(frame, "B")["fund_ticker"]), ["B", "B"])
+        self.assertEqual(list(BulkDataLoader._own_rows(frame, "C")["fund_ticker"]), ["A", "A"])
+        nulls = pd.DataFrame({"fund_ticker": [None, None], "eqyticker": ["X", "Y"]})
+        self.assertEqual(list(BulkDataLoader._own_rows(nulls, "C")["eqyticker"]), ["X", "Y"])
 
 
 class SnapshotBuildTests(unittest.TestCase):
