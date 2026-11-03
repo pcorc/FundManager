@@ -279,8 +279,10 @@ def _commodities_row(report_date, fund_name, payload, calc, r):
 def _12d1_row(report_date, fund_name, payload, calc, r):
     holdings_str = _join(
         calc.get("investment_companies", []) or [],
-        lambda h: f"{h.get('ticker')} ({(h.get('ownership_pct') or 0):.2%})",
+        lambda h: f"{h.get('ticker')} ({_ownership_text(h.get('ownership_pct'), '.2%')})",
     )
+    # With an N/A ownership test the AND formula would read FAIL, so write the checker's verdict.
+    test_1_na = _na_status(payload.get("test_1_status"))
     return OrderedDict(
         [
             ("Date", report_date),
@@ -289,10 +291,11 @@ def _12d1_row(report_date, fund_name, payload, calc, r):
             ("Investment Companies", holdings_str),
             ("Ownership % Max", num(calc, "ownership_pct_max")),
             ("Equity Market Value Sum", num(calc, "equity_market_value_sum")),
-            ("Test 1 (<=3% Ownership)", f'=IF(E{r}<=0.03,"PASS","FAIL")'),
+            ("Test 1 (<=3% Ownership)", test_1_na or f'=IF(E{r}<=0.03,"PASS","FAIL")'),
             ("Test 2 (<=5% Total Assets)", f'=IF(F{r}/C{r}<=0.05,"PASS","FAIL")'),
             ("Test 3 (<=10% Total Assets)", f'=IF(F{r}/C{r}<=0.10,"PASS","FAIL")'),
-            ("12d1(a) Compliant", f'=IF(AND(G{r}="PASS",H{r}="PASS",I{r}="PASS"),"PASS","FAIL")'),
+            ("12d1(a) Compliant", _pf(payload.get("twelve_d1a_other_inv_cos_compliant")) if test_1_na
+             else f'=IF(AND(G{r}="PASS",H{r}="PASS",I{r}="PASS"),"PASS","FAIL")'),
         ]
     )
 
@@ -300,12 +303,13 @@ def _12d1_row(report_date, fund_name, payload, calc, r):
 def _12d2_row(report_date, fund_name, payload, calc, r):
     holdings = calc.get("insurance_holdings", [])
     holdings_str = ", ".join(
-        f"{h.get('eqyticker') or h.get('ticker')} ({(h.get('ownership_pct') or 0)*100:.5f}%)" for h in holdings
+        f"{h.get('eqyticker') or h.get('ticker')} ({_ownership_text(h.get('ownership_pct'), '.5%')})"
+        for h in holdings
     ) or "None"
     return {
         "Date": report_date,
         "Fund": fund_name,
-        "Compliant": _pf(payload.get("test_pass")),
+        "Compliant": _na_status(payload.get("test_status")) or _pf(payload.get("test_pass")),
         "Total Assets": calc.get("total_assets", 0.0),
         "Insurance Holdings": holdings_str,
     }
@@ -314,21 +318,24 @@ def _12d2_row(report_date, fund_name, payload, calc, r):
 def _12d3_row(report_date, fund_name, payload, calc, r):
     sec_related_str = _join(
         calc.get("sec_related_businesses", []) or [],
-        lambda biz: f"{biz.get('eqyticker')} ({(biz.get('ownership_pct') or 0) * 100:.5f}%)",
+        lambda biz: f"{biz.get('eqyticker')} ({_ownership_text(biz.get('ownership_pct'), '.5%')})",
     )
     combined_str = _join(
         calc.get("combined_holdings", []) or [],
         lambda h: f"{h.get('eqyticker')} ({(h.get('vest_weight') or 0) * 100:.2f}%)",
     )
+    # With an N/A ownership test the AND formula would read FAIL, so write the checker's verdict.
+    rule_1_na = _na_status(payload.get("rule_1_status"))
     # Rule 3 points at column L, which is past the last column (known issue, kept as-is).
     return OrderedDict(
         [
             ("Date", report_date),
             ("Fund", fund_name),
-            ("Rule 1 (<=5% equities)", f'=IF(K{r}<=0.05,"PASS","FAIL")'),
+            ("Rule 1 (<=5% equities)", rule_1_na or f'=IF(K{r}<=0.05,"PASS","FAIL")'),
             ("Rule 2 (<=10% debt)", _pf(payload.get("rule_2_pass"))),
             ("Rule 3 (<=5% total assets)", f'=IF(L{r}<=0.05,"PASS","FAIL")'),
-            ("12d3 Sec Biz Compliant", f'=IF(AND(C{r}="PASS",D{r}="PASS",E{r}="PASS"),"PASS","FAIL")'),
+            ("12d3 Sec Biz Compliant", _pf(payload.get("twelve_d3_sec_biz_compliant")) if rule_1_na
+             else f'=IF(AND(C{r}="PASS",D{r}="PASS",E{r}="PASS"),"PASS","FAIL")'),
             ("SEC-Related Businesses (Shs Out %)", sec_related_str),
             ("Combined Holdings (Portfolio %)", combined_str),
             ("Total Assets", num(calc, "total_assets")),
@@ -756,7 +763,7 @@ _PDF_SECTIONS = (
         "Rule 12d1-1", "twelve_d1a_other_inv_cos", "12d1", (),
         (
             ("Status", "status", "top", "is_compliant"),
-            ("Test 1", "status", "detail", "test_1_pass"),
+            ("Test 1", "status", "first_detail", ("test_1_status", "test_1_pass")),
             ("Test 2", "status", "detail", "test_2_pass"),
             ("Test 3", "status", "detail", "test_3_pass"),
         ),
@@ -764,7 +771,8 @@ _PDF_SECTIONS = (
     (
         "Rule 12d2", "twelve_d2_insurance_cos", "12d2", (),
         (
-            ("Status", "status", "top", "is_compliant"),
+            # A single test: its status (N/A when shares outstanding is missing), else the verdict.
+            ("Status", "status", "first_detail", ("test_status", "is_compliant")),
             ("Max Ownership", "pct", "calc", "max_ownership_pct"),
         ),
     ),
@@ -772,7 +780,7 @@ _PDF_SECTIONS = (
         "Rule 12d3", "twelve_d3_sec_biz", "12d3", (),
         (
             ("Overall Status", "status", "top", "is_compliant"),
-            ("Rule 1 (<=5%)", "status", "detail", "rule_1_pass"),
+            ("Rule 1 (<=5%)", "status", "first_detail", ("rule_1_status", "rule_1_pass")),
             ("Rule 2 (<=10%)", "status", "detail", "rule_2_pass"),
             ("Rule 3 (<=5%)", "status", "detail", "rule_3_pass"),
         ),
@@ -886,6 +894,8 @@ class ComplianceReportPDF(BaseReportPDF):
             value = self._first_not_none(*(self._get_calculation(payload, key) for key in field))
         elif source == "detail":
             value = self._get_detail(payload, field)
+        elif source == "first_detail":
+            value = self._first_not_none(*(self._get_detail(payload, key) for key in field))
         elif source == "registrations_match":
             value = self._registrations_match(payload)
         else:

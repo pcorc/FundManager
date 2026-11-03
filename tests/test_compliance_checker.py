@@ -199,6 +199,61 @@ class MissingSharesOutstandingTests(unittest.TestCase):
         self.assertEqual(irs.calculations["missing_shares_out"], 0)
 
 
+class TwelveDMissingSharesOutstandingTests(unittest.TestCase):
+    """D6 review: 12d1/12d2/12d3 ownership flags missing shares outstanding as N/A instead of 0%."""
+
+    def _holdings(self, industry, **extra):
+        # X: 2% owned; Y: shares held, no shares outstanding.
+        return _equity(eqyticker=["X", "Y"], equity_market_value=[10.0, 10.0], nav_shares=[20.0, 500.0],
+                       EQY_SH_OUT_million=[1_000.0, None], GICS_INDUSTRY_NAME=[industry] * 2, **extra)
+
+    def test_12d2_missing_is_na(self):
+        from reporting.compliance_reporting import _12d2_row
+        fund = _fund("RDVI", equity=self._holdings("Insurance"))
+        result = ComplianceChecker({fund.name: fund}).twelve_d2_insurance_cos(fund)
+        self.assertTrue(result.is_compliant)
+        self.assertEqual(result.details["test_status"], "N/A (no shares outstanding data)")
+        self.assertEqual(result.calculations["missing_shares_out_tickers"], ["Y"])
+        self.assertAlmostEqual(result.calculations["max_ownership_pct"], 0.02)
+        row = _12d2_row("2026-10-30", fund.name, dict(result.details), result.calculations, 2)
+        self.assertEqual(row["Compliant"], "N/A (no shares outstanding data)")
+        self.assertEqual(row["Insurance Holdings"], "X (2.00000%), Y (N/A (no shares out))")
+
+        fund.data.current.vest.equity.loc[0, "nav_shares"] = 60.0  # 6% of X: a real breach still fails
+        result = ComplianceChecker({fund.name: fund}).twelve_d2_insurance_cos(fund)
+        self.assertFalse(result.is_compliant)
+        self.assertEqual(result.details["test_status"], "FAIL")
+
+    def test_12d3_rule_1_missing_is_na(self):
+        from reporting.compliance_reporting import _12d3_row
+        fund = _fund("RDVI", equity=self._holdings("Capital Markets"))
+        result = ComplianceChecker({fund.name: fund}).twelve_d3_sec_biz(fund)
+        self.assertTrue(result.details["rule_1_pass"])
+        self.assertEqual(result.details["rule_1_status"], "N/A (no shares outstanding data)")
+        self.assertEqual(result.calculations["missing_shares_out"], 1)
+        row = _12d3_row("2026-10-30", fund.name, dict(result.details), result.calculations, 2)
+        self.assertEqual(row["Rule 1 (<=5% equities)"], "N/A (no shares outstanding data)")
+        self.assertEqual(row["12d3 Sec Biz Compliant"], "PASS" if result.is_compliant else "FAIL")
+        self.assertIn("Y (N/A (no shares out))", row["SEC-Related Businesses (Shs Out %)"])
+
+    def test_12d1_uses_held_shares_and_flags_missing(self):
+        from reporting.compliance_reporting import _12d1_row
+        fund = _fund("RDVI", equity=self._holdings("Capital Markets", REGULATORY_STRUCTURE=["RIC", "RIC"]),
+                     ta=10_000.0)
+        result = ComplianceChecker({fund.name: fund}).twelve_d1a_other_inv_cos(fund)
+        self.assertAlmostEqual(result.calculations["ownership_pct_max"], 0.02)  # held shares, not "quantity"
+        self.assertTrue(result.details["test_1_pass"])
+        self.assertEqual(result.details["test_1_status"], "N/A (no shares outstanding data)")
+        row = _12d1_row("2026-10-30", fund.name, dict(result.details), result.calculations, 2)
+        self.assertEqual(row["Test 1 (<=3% Ownership)"], "N/A (no shares outstanding data)")
+        self.assertEqual(row["12d1(a) Compliant"], "PASS")
+
+        fund.data.current.vest.equity.loc[0, "nav_shares"] = 40.0  # 4% > 3%
+        result = ComplianceChecker({fund.name: fund}).twelve_d1a_other_inv_cos(fund)
+        self.assertFalse(result.details["test_1_pass"])
+        self.assertEqual(result.details["test_1_status"], "FAIL")
+
+
 class FortyActRegistrationTests(unittest.TestCase):
     """D8: only a fund registered diversified that is not operating as diversified fails."""
 
