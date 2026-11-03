@@ -321,6 +321,18 @@ class SummaryMetricsTests(unittest.TestCase):
             if has_summary:
                 self.assertEqual(report.sheet_data["Summary"]["Equity"].tolist(), [100.0])
 
+    def test_summary_sheet_option_mv_columns(self):
+        """D4: the three Option MV columns read regular / flex / total option MV."""
+        import tempfile
+        from reporting.compliance_reporting import ComplianceReport
+        results = self.checker.run_compliance_tests(["summary_metrics"])
+        results[self.fund.name]["summary_metrics"].calculations.update(
+            option_market_value=-3.0, flex_option_market_value=-2.0, total_option_market_value=-5.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            sheet = ComplianceReport(results, "2026-10-30", tmp).sheet_data["Summary"]
+        self.assertEqual(sheet.loc[0, ["Regular Option MV", "Flex Option MV", "Total Option MV"]].tolist(),
+                         [-3.0, -2.0, -5.0])
+
     def test_pdf_gics_overview_without_summary_section(self):
         from unittest import mock
         from reporting.compliance_reporting import ComplianceReportPDF

@@ -47,11 +47,15 @@ _SUMMARY_FIELDS = (
     ("Total Assets", "total_assets"),
     ("Total Net Assets", "total_net_assets"),
 )
-# "Option MV" is not in the sheet columns, so the three Option MV columns are always 0.0.
-_SUMMARY_COLUMNS = [
-    "Date", "Fund", "Cash", "Treasury", "Equity", "Option DAN",
-    "Regular Option MV", "Flex Option MV", "Total Option MV", "Total Assets", "Total Net Assets",
-]
+# The Summary sheet splits the PDF's (regular) "Option MV" into regular / flex / total.
+_SUMMARY_SHEET_FIELDS = (
+    *_SUMMARY_FIELDS[:4],
+    ("Regular Option MV", "option_market_value"),
+    ("Flex Option MV", "flex_option_market_value"),
+    ("Total Option MV", "total_option_market_value"),
+    *_SUMMARY_FIELDS[5:],
+)
+_SUMMARY_COLUMNS = ["Date", "Fund", *(column for column, _ in _SUMMARY_SHEET_FIELDS)]
 
 _SUMMARY_ALIAS = "summary"  # processing.api accepts it for the summary_metrics step
 
@@ -511,7 +515,7 @@ class ComplianceReport:
                     continue
                 combined = {**fund_totals, **summary}
                 row = {"Date": date_str, "Fund": fund_name}
-                row.update((column, combined.get(key, 0.0)) for column, key in _SUMMARY_FIELDS)
+                row.update((column, combined.get(key, 0.0)) for column, key in _SUMMARY_SHEET_FIELDS)
                 rows.append(row)
 
         if not rows:
