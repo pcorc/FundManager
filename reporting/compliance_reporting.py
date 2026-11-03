@@ -916,11 +916,7 @@ class ComplianceReportPDF(BaseReportPDF):
             row: list[str] = [self._sanitize_text(label)]
             for fund in self.fund_order:
                 fund_payload = self.grouped_results.get(fund, {})
-                try:
-                    value = self._metric_value(fund_payload, test_key, fmt, source, field)
-                except Exception:
-                    value = ""
-                row.append(self._sanitize_text(str(value or "")))
+                row.append(self._sanitize_text(self._cell_text(fund_payload, test_key, fmt, source, field)))
             rows.append(row)
 
         estimated_height = 5.0 + (4.2 * len(rows)) + 6
@@ -931,6 +927,17 @@ class ComplianceReportPDF(BaseReportPDF):
         self._draw_metric_table(["Metric", *self.fund_order], rows, skip_fail_labels)
         self._draw_footnotes_section(footnote_key)
         self.pdf.ln(2)
+
+    def _cell_text(self, fund_data, test_key, fmt, source, field) -> str:
+        # The checker runs IRC only for VIT funds; another fund in the run has no IRC result,
+        # so its column reads N/A rather than blank statuses and a measured-looking 0% exposure.
+        if test_key == "diversification_IRC_check" and test_key not in (fund_data or {}):
+            return "N/A"
+        try:
+            value = self._metric_value(fund_data, test_key, fmt, source, field)
+        except Exception:
+            value = ""
+        return str(value or "")
 
     def _metric_value(self, fund_data, test_key, fmt, source, field) -> object:
         if source == "status_or_skip" or (fmt == "status" and self._is_test_skipped(fund_data, test_key)):

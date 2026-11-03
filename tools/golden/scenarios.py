@@ -34,6 +34,10 @@ SCENARIOS = {
     "multi_mode_funds": dict(
         mode=["compliance", "nav"], funds=["KNG", "RDVI"], start_date="2026-10-30", output_tag="pair",
     ),
+    # A VIT fund next to an ETF: the IRC PDF section has a column for a fund the IRC test does not apply to.
+    "compliance_vit_mix": dict(
+        mode="compliance", funds=["FTCSH", "KNG"], start_date="2026-10-30", output_tag="vitmix",
+    ),
 }
 
 # Direct RunRequest kwargs (the UI path: cohort names resolved inside run()) that

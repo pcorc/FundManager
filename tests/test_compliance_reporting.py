@@ -44,5 +44,26 @@ class IrsCondition2bTests(unittest.TestCase):
         self.assertEqual(self._cell({}), "")
 
 
+class IrcNonVitColumnTests(unittest.TestCase):
+    """D11: in a run mixing a VIT fund with others, a non-VIT column of the IRC table reads N/A."""
+
+    IRC = "diversification_IRC_check"
+    VIT = {IRC: {"is_compliant": True, "condition_IRC_55": True, "calculations": {"top_1": 0.0419}}}
+
+    def _cell(self, fund_data, label):
+        _, fmt, source, field = _row(self.IRC, label)
+        return _pdf()._cell_text(fund_data, self.IRC, fmt, source, field)
+
+    def test_vit_fund_shows_its_result(self):
+        self.assertEqual(self._cell(self.VIT, "Overall Status"), "PASS")
+        self.assertEqual(self._cell(self.VIT, "Condition 55"), "PASS")
+        self.assertEqual(self._cell(self.VIT, "Top 1 Exposure"), "4.19000%")
+
+    def test_fund_without_irc_result_reads_na_not_zero(self):
+        etf = {IRS: {"is_compliant": True}}
+        for label in ("Overall Status", "Condition 55", "Top 1 Exposure", "Top 4 Exposure"):
+            self.assertEqual(self._cell(etf, label), "N/A", label)
+
+
 if __name__ == "__main__":
     unittest.main()
