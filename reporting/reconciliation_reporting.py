@@ -42,12 +42,6 @@ RECON_DESCRIPTOR_REGISTRY: Dict[str, ReconDescriptor] = {
         price_ticker="eqyticker",
         extra_callbacks=("_append_holdings_breakdowns",),
     ),
-    "custodian_equity_t1": ReconDescriptor(
-        holdings_key="final_recon",
-        holdings_ticker="eqyticker",
-        price_keys=(None, None),
-        extra_callbacks=("_append_holdings_breakdowns",),
-    ),
     "custodian_option": ReconDescriptor(
         holdings_key="final_recon",
         holdings_ticker="optticker",
@@ -55,30 +49,11 @@ RECON_DESCRIPTOR_REGISTRY: Dict[str, ReconDescriptor] = {
         price_transform="_select_standard_option_prices",
         extra_callbacks=("_append_option_breakdowns","_append_holdings_breakdowns"),
     ),
-    "custodian_option_t1": ReconDescriptor(
-        holdings_key="final_recon",
-        holdings_ticker="optticker",
-        price_keys=(None, None),
-        extra_callbacks=("_append_option_t1_breakdowns","_append_holdings_breakdowns"),
-    ),
-    "index_equity": ReconDescriptor(
-        holdings_key="holdings_discrepancies",
-        holdings_ticker="eqyticker",
-        holdings_builder="_prepare_index_holdings_df",
-        price_ticker="eqyticker",
-        price_cust_col="price_index",
-    ),
     "custodian_flex_option": ReconDescriptor(
         holdings_key="final_recon",
         holdings_ticker="optticker",
         price_ticker="optticker",
         price_transform=None,  # Don't filter FLEX price breaks
-        extra_callbacks=("_append_holdings_breakdowns",),
-    ),
-    "custodian_flex_option_t1": ReconDescriptor(
-        holdings_key="final_recon",
-        holdings_ticker="optticker",
-        price_keys=(None, None),
         extra_callbacks=("_append_holdings_breakdowns",),
     ),
     "custodian_treasury": ReconDescriptor(
@@ -89,27 +64,6 @@ RECON_DESCRIPTOR_REGISTRY: Dict[str, ReconDescriptor] = {
         require_holdings=False,
         extra_callbacks=("_append_holdings_breakdowns",),
     ),
-    "custodian_treasury_t1": ReconDescriptor(
-        holdings_key="final_recon",
-        holdings_ticker="cusip",
-        price_keys=(None, "price_discrepancies_T1"),
-        price_ticker="cusip",
-        require_holdings=False,
-        extra_callbacks=("_append_holdings_breakdowns",),
-    ),
-    # "sg_option": ReconDescriptor(
-    #     holdings_key="final_recon",
-    #     holdings_ticker="optticker",
-    #     price_keys=("price_discrepancies", None),
-    #     price_ticker="optticker",
-    # ),
-    # "sg_equity": ReconDescriptor(
-    #     holdings_key="final_recon",
-    #     holdings_ticker="equity_ticker",
-    #     price_keys=("price_discrepancies", None),
-    #     price_ticker="equity_ticker",
-    # ),
-
 }
 
 
@@ -134,11 +88,7 @@ class ReconResult:
 
     def to_flat_dict(self) -> Dict[Tuple[str, str, str], pd.DataFrame]:
         flat: Dict[Tuple[str, str, str], pd.DataFrame] = {}
-        if self.recon_type == "index_equity":
-            flat[(self.fund, self.date_str, self.recon_type)] = (
-                self.holdings_df if isinstance(self.holdings_df, pd.DataFrame) else pd.DataFrame()
-            )
-        elif self.holdings_df is not None and not self.holdings_df.empty:
+        if self.holdings_df is not None and not self.holdings_df.empty:
             flat[(self.fund, self.date_str, self.recon_type)] = self.holdings_df
         if self.price_df_t is not None and not self.price_df_t.empty:
             flat[(self.fund, self.date_str, f"{self.recon_type}_price_T")] = self.price_df_t
@@ -147,8 +97,6 @@ class ReconResult:
         return flat
 
     def has_data(self) -> bool:
-        if self.recon_type == "index_equity":
-            return True
         return any(
             [
                 self.holdings_df is not None and not self.holdings_df.empty,
@@ -238,9 +186,6 @@ class ReconciliationReport:
             # If holdings are required but no key is defined, treat as no data.
             return None
 
-        if recon_type == "index_equity" and holdings_df is None:
-            holdings_df = pd.DataFrame()
-
         price_t, price_t1 = self._build_price_dfs(
             descriptor,
             subresults,
@@ -291,20 +236,6 @@ class ReconciliationReport:
         if not flex_price_t1.empty:
             flat[(fund, date_str, "custodian_option_flex_price_T-1")] = self._prepare_price_df(
                 flex_price_t1, fund, date_str, "custodian_option_flex_price_T-1", "optticker",
-            )
-
-    def _append_option_t1_breakdowns(
-        self,
-        flat: Dict[Tuple[str, str, str], pd.DataFrame],
-        fund: str,
-        date_str: str,
-        subresults: Mapping[str, Any],
-        recon_type: str | None = None,
-    ) -> None:
-        flex_df = subresults.get("flex_options")
-        if isinstance(flex_df, pd.DataFrame) and not flex_df.empty:
-            flat[(fund, date_str, "custodian_option_flex_holdings_t1")] = self._prepare_holdings_df(
-                flex_df, fund, date_str, "custodian_option_flex_holdings_t1", "optticker",
             )
 
     def _append_holdings_breakdowns(
@@ -414,36 +345,6 @@ class ReconciliationReport:
     def _select_standard_option_prices(self, df: pd.DataFrame) -> pd.DataFrame:
         _flex, standard = split_flex_price_frames(df)
         return standard
-
-    def _prepare_index_holdings_df(
-        self,
-        df: pd.DataFrame,
-        fund: str,
-        date_str: str,
-        recon_type: str,
-        ticker_col: str,
-    ) -> pd.DataFrame:
-        df = df.copy()
-        df["FUND"] = fund
-        df["RECON_TYPE"] = recon_type
-        df["DATE"] = date_str
-        if "discrepancy_type" not in df.columns:
-            df["discrepancy_type"] = "Holdings Mismatch"
-
-        cols_to_keep = [
-            col
-            for col in [
-                "FUND",
-                "RECON_TYPE",
-                "DATE",
-                ticker_col,
-                "discrepancy_type",
-                "in_vest",
-                "in_index",
-            ]
-            if col in df.columns
-        ]
-        return df[cols_to_keep] if cols_to_keep else df
 
     # ------------------------------------------------------------------
     def _prepare_holdings_df(
@@ -779,7 +680,6 @@ class ReconciliationReport:
     def _create_system_specific_tabs(self, writer: pd.ExcelWriter) -> None:
         """Create system-specific reconciliation tabs."""
         system_tabs = {
-            "INDEX_RECONCILIATION": ["index_equity"],
             "FLEX_OPTION_RECONCILIATION": ["custodian_flex_option"],  # NEW
             "SG_RECONCILIATION": ["sg_equity", "sg_option"],
         }
@@ -801,7 +701,6 @@ class ReconciliationReport:
         "custodian_flex_option",
         "custodian_option",
         "custodian_treasury",
-        "index_equity",
     )
 
     def _extract_source_from_recon_type(self, recon_type: str) -> str:

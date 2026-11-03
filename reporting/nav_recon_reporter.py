@@ -7,7 +7,6 @@ from datetime import date, datetime
 from typing import Any, Mapping, Optional
 from pathlib import Path
 
-from processing.fund_manager import ProcessingResults
 from reporting.nav_recon_reporting import (
     GeneratedNAVReconciliationReport,
     generate_nav_reconciliation_reports,
@@ -27,42 +26,10 @@ class GeneratedReconciliationArtefacts:
     combined_reconciliation_pdf: Optional[str]
 
 
-def _extract_results(
-        results: ProcessingResults | None,
-        attribute: str,
-) -> Mapping[str, Any]:
-    """
-    Extract results from ProcessingResults and convert dataclasses to dicts.
-
-    This is the single conversion point for NAVReconciliationResults objects.
-    They must be converted here before entering the reporting pipeline.
-    """
-    if results is None:
-        return {}
-
-    payload: dict[str, Any] = {}
-
-    for fund_name, fund_result in results.fund_results.items():
-        value = getattr(fund_result, attribute, None)
-
-        if not value:
-            continue
-
-        # Convert NAVReconciliationResults dataclass to legacy dict format
-        if hasattr(value, 'to_legacy_dict'):
-            payload[fund_name] = value.to_legacy_dict()
-        else:
-            # Already a dict or other format, use as-is
-            payload[fund_name] = value
-
-    return payload
-
-
 def build_nav_reconciliation_reports(
-        results: ProcessingResults | None = None,
+        *,
         report_date: date | datetime | str = None,
         output_dir: str = "",
-        *,
         file_name_prefix: str = "reconciliation_summary",
         create_pdf: bool = True,
         holdings_results: Mapping[str, Any] | None = None,
@@ -70,8 +37,8 @@ def build_nav_reconciliation_reports(
 ) -> Optional[GeneratedReconciliationArtefacts]:
     """Build holdings/NAV reconciliation artefacts using provided payloads."""
 
-    derived_holdings: Mapping[str, Any] = holdings_results or _extract_results(results, "reconciliation_results")
-    derived_nav: Mapping[str, Any] = nav_results or _extract_results(results, "nav_results")
+    derived_holdings: Mapping[str, Any] = holdings_results or {}
+    derived_nav: Mapping[str, Any] = nav_results or {}
 
     if not derived_holdings and not derived_nav:
         return None

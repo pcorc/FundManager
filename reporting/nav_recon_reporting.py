@@ -362,44 +362,6 @@ class NAVReconciliationExcelReport:
         ws.cell(row=row, column=3, value=f'=IF(ROUND(C{cust_nav_row},2)=ROUND(C{expected_nav_row},2),"PASS","FAIL")')
         row += 2
 
-        # ===== Option Price Sensitivity (Custodian vs Vest) =====
-        impact_present = (
-            nav_data.get("Option Price Impact ($)") not in (None, 0, 0.0)
-            or nav_data.get("Option MV (Vest Prices)")
-            or nav_data.get("Option MV (Custodian Prices)")
-        )
-        if impact_present:
-            ws.cell(row=row, column=1, value="OPTION PRICE SENSITIVITY (Custodian vs Vest)").font = self.header_font
-            row += 1
-            ws.cell(
-                row=row, column=1,
-                value="Only option price breaks > $1 counted. Shows NAV sensitivity to option price source.",
-            ).font = Font(italic=True, size=9)
-            row += 1
-
-            sens_rows = [
-                ("  Option MV (Vest Prices)",        nav_data.get("Option MV (Vest Prices)", 0), self.currency_format),
-                ("  Option MV (Custodian Prices)",   nav_data.get("Option MV (Custodian Prices)", 0), self.currency_format),
-                ("  G/L Impact of Custodian Prices", nav_data.get("Option Price Impact ($)", 0), self.currency_format),
-                ("  Expected NAV (Vest Opt Prices)", nav_data.get("Expected NAV (Vest Opt Prices)", 0), self.nav_format),
-                ("  Expected NAV (Cust Opt Prices)", nav_data.get("Expected NAV (Custodian Opt Prices)", 0), self.nav_format),
-            ]
-            for label, value, fmt in sens_rows:
-                ws.cell(row=row, column=1, value=label)
-                ws.cell(row=row, column=3, value=value).number_format = fmt
-                row += 1
-
-            nav_good_cust = nav_data.get("NAV Good (Cust Opt Prices)")
-            if nav_good_cust is not None:
-                ws.cell(row=row, column=1, value="  NAV Good (Cust Opt Prices)")
-                good_cell = ws.cell(row=row, column=3, value="PASS" if bool(nav_good_cust) else "FAIL")
-                good_cell.fill = (
-                    PatternFill(start_color="90EE90", end_color="90EE90", fill_type="solid")
-                    if bool(nav_good_cust)
-                    else PatternFill(start_color="FFB6C1", end_color="FFB6C1", fill_type="solid")
-                )
-                row += 1
-
         self._sheet_refs[fund_name]["prior_nav"] = f"C{beg_tna_row}"
 
         for col in range(1, 12):

@@ -71,9 +71,6 @@ class HoldingsReconciliationRenderer:
         recon_lower = recon_type.lower()
         if "t-1" in recon_lower or recon_lower.endswith("_t1"):
             return
-        if recon_type == "index_equity":
-            self._print_index_equity_section(recon_data)
-            return
         if recon_type == "custodian_equity":
             self._print_custodian_equity_section(recon_data)
             return
@@ -82,14 +79,6 @@ class HoldingsReconciliationRenderer:
                 recon_data,
                 fund_name=fund_name,
                 is_flex=False,
-            )
-            return
-        if recon_type == "custodian_option_t1":
-            self._print_custodian_option_section(
-                recon_data,
-                fund_name=fund_name,
-                is_flex=False,
-                is_t1=True,
             )
             return
 
@@ -248,17 +237,6 @@ class HoldingsReconciliationRenderer:
             self.pdf.cell(0, 5, f"... and {len(df) - 10} more rows", ln=1)
 
     # ------------------------------------------------------------------
-    def _print_index_equity_section(self, recon_data: Mapping[str, Any]) -> None:
-        holdings_df = recon_data.get("holdings_discrepancies")
-        if isinstance(holdings_df, pd.DataFrame) and not holdings_df.empty:
-            self._draw_two_column_table([("Holdings Breaks", len(holdings_df))])
-            self._print_discrepancy_table(holdings_df, "Holdings Discrepancies")
-        else:
-            self._draw_two_column_table([("Holdings Breaks", 0)])
-
-        price_t = recon_data.get("price_discrepancies_T")
-        self._print_price_discrepancies(price_t, price_label="Index")
-
     def _print_custodian_equity_section(self, recon_data: Mapping[str, Any]) -> None:
         final_df = recon_data.get("final_recon")
         price_t = recon_data.get("price_discrepancies_T")
