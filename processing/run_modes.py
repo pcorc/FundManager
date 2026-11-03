@@ -653,19 +653,6 @@ def _build_trading_email_payload(
     )
 
 
-def _compliance_status(test_result) -> str:
-    """Reduce a compliance test result to PASS / FAIL / N/A."""
-    if test_result is None:
-        return "N/A"
-    is_compliant = getattr(test_result, "is_compliant", None)
-    if is_compliant is None and isinstance(test_result, Mapping):
-        is_compliant = test_result.get("is_compliant")
-    if is_compliant is True:
-        return "PASS"
-    if is_compliant is False:
-        return "FAIL"
-    return "N/A"
-
 __all__ = [
     "DataLoadRequest",
     "RangeRunResults",

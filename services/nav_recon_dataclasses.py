@@ -42,11 +42,6 @@ class AssetClassGainLoss:
     adjusted_gl: float
     ticker_details: list[TickerGainLoss] = field(default_factory=list)
 
-    @property
-    def has_details(self) -> bool:
-        """Check if ticker-level details exist."""
-        return len(self.ticker_details) > 0
-
     def to_detail_dataframe(self) -> pd.DataFrame:
         """Convert ticker details to DataFrame."""
         if not self.ticker_details:
@@ -72,18 +67,6 @@ class NAVComponents:
     distributions: float = 0.0
     flows_adjustment: float = 0.0
     other: float = 0.0
-
-    @property
-    def total_gl_raw(self) -> float:
-        """Total raw gain/loss across all components."""
-        return (
-                self.equity.raw_gl +
-                self.options.raw_gl +
-                self.flex_options.raw_gl +
-                self.treasury.raw_gl +
-                self.assignment_gl +
-                self.other - abs(self.distributions)
-        )
 
     @property
     def total_gl_adjusted(self) -> float:

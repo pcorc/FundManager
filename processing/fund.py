@@ -396,22 +396,6 @@ class Fund:
         breaks = self.data.price_breaks.get(asset_class)
         return breaks if isinstance(breaks, pd.DataFrame) else pd.DataFrame()
 
-    def get_assignments(self, filter_date: Optional[date | str] = None) -> pd.DataFrame:
-        assignments = self.data.assignments
-        if assignments is None or assignments.empty:
-            return pd.DataFrame()
-        if filter_date is None:
-            return assignments.copy()
-
-        date_cols = [c for c in assignments.columns if "date" in str(c).lower()]
-        if not date_cols:
-            return assignments.copy()
-
-        df = assignments.copy()
-        df[date_cols[0]] = pd.to_datetime(df[date_cols[0]], errors="coerce")
-        target = pd.Timestamp(filter_date).normalize()
-        return df[df[date_cols[0]].dt.normalize() == target]
-
     # ------------------------------------------------------------------
     # Option-roll settlement helpers
     # ------------------------------------------------------------------

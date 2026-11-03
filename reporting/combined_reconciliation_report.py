@@ -174,16 +174,6 @@ class CombinedReconciliationReport:
         self.pdf.cell(0, 6, "", ln=True, align="R")
         self.pdf.link(x, y, 160, 6, link_id)
 
-    def _add_toc_sub_link(self, text: str, link_id: int) -> None:
-        self.pdf.set_font("Arial", size=10)
-        self.pdf.set_text_color(0, 0, 150)
-        self.pdf.cell(8)
-        x, y = self.pdf.get_x(), self.pdf.get_y()
-        self.pdf.cell(152, 5, f"- {text}", ln=False)
-        self.pdf.set_text_color(0, 0, 0)
-        self.pdf.cell(0, 5, "", ln=True, align="R")
-        self.pdf.link(x, y, 152, 5, link_id)
-
     def _add_nav_summary_page(self) -> None:
         self.pdf.add_page()
         self.pdf.set_link(self.pdf.summary_links.get("nav", self.pdf.top_link), page=self.pdf.page_no())

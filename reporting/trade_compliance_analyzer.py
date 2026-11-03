@@ -3,25 +3,9 @@
 from __future__ import annotations
 from collections import defaultdict
 
-from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 import pandas as pd
 from processing.fund import Fund
-
-
-@dataclass
-class FundComplianceComparison:
-    """Summary of compliance changes for a single fund."""
-
-    fund_name: str
-    trade_info: Dict[str, Any]
-    overall_before: str
-    overall_after: str
-    status_change: str
-    violations_before: int
-    violations_after: int
-    num_changes: int
-    checks: Dict[str, Dict[str, Any]]
 
 
 class TradingComplianceAnalyzer:
@@ -577,14 +561,6 @@ class TradingComplianceAnalyzer:
             except (TypeError, ValueError):
                 continue
         return metrics
-
-    def _get_top_trades(trades_list: list, n: int = 5) -> list:
-        """Get top N trades sorted by market value."""
-        if not trades_list:
-            return []
-        # Sort by market value (descending) and take top N
-        sorted_trades = sorted(trades_list, key=lambda x: abs(float(x.get("market_value", 0))), reverse=True)
-        return sorted_trades[:n]
 
     def _calculate_trade_activity(
             self,

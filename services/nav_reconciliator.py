@@ -510,43 +510,6 @@ class NAVReconciliator:
             )
         return None
 
-    def _calculate_flex_price_impact(self) -> dict:
-        """Flex option G/L two ways — vest prices vs custodian prices.
-        True G/L = (price_T - price_T-1) * qty * 100, matched on flex contract code."""
-        if not self.has_flex_option:
-            return {}
-
-        def _prep(src) -> pd.DataFrame:
-            df = src.copy()
-            if df.empty:
-                return pd.DataFrame(columns=["flex_code", "price", "qty"])
-            code = df["equity_underlying_ticker"] if "equity_underlying_ticker" in df.columns else df.get("cusip")
-            return pd.DataFrame({
-                "flex_code": code,
-                "price": pd.to_numeric(df.get("price"), errors="coerce"),
-                "qty": pd.to_numeric(df.get("nav_shares", df.get("shares_cust")), errors="coerce").fillna(0.0),
-            })
-
-        vt  = _prep(self.fund.data.current.vest.flex_options)
-        vt1 = _prep(self.fund.data.previous.vest.flex_options)
-        ct  = _prep(self.fund.data.current.custodian.flex_options)
-        ct1 = _prep(self.fund.data.previous.custodian.flex_options)
-        if vt.empty:
-            return {}
-
-        base = vt.rename(columns={"price": "pv_t"})
-        base = base.merge(vt1.rename(columns={"price": "pv_t1"})[["flex_code", "pv_t1"]], on="flex_code", how="left")
-        base = base.merge(ct.rename(columns={"price": "pc_t"})[["flex_code", "pc_t"]], on="flex_code", how="left")
-        base = base.merge(ct1.rename(columns={"price": "pc_t1"})[["flex_code", "pc_t1"]], on="flex_code", how="left")
-
-        gl_vest = float(((base["pv_t"] - base["pv_t1"]) * base["qty"] * 100).sum())
-        gl_cust = float(((base["pc_t"] - base["pc_t1"]) * base["qty"] * 100).sum())
-        return {
-            "flex_gl_vest_prices": gl_vest,
-            "flex_gl_custodian_prices": gl_cust,
-            "flex_gl_price_impact": gl_cust - gl_vest,
-        }
-
     def _calculate_price_sensitivity(self, summary) -> dict:
         """Option price sensitivity: listed + flex option G/L computed with vest
         vs custodian prices, and Expected NAV under each pricing source.
@@ -794,69 +757,6 @@ class NAVReconciliator:
         days = 3 if analysis_dt.weekday() == 4 else 1
 
         return tna * expense_ratio * (days / 365)
-
-    def _calculate_option_price_impact(self, summary) -> dict:
-        """Custodian-vs-vest option-price sensitivity. Covers BOTH listed and
-        flex options (concat'd) so flex-only CEFs are also handled. Counts
-        material price breaks (> $1) and computes Expected NAV under both
-        vest and custodian option prices."""
-        cur = self.fund.data.current
-
-        def _opt_frame(vest_df, cust_df):
-            """Merge a vest options frame against the matching custodian frame."""
-            if vest_df is None or cust_df is None or vest_df.empty or cust_df.empty:
-                return None
-            if 'optticker' not in vest_df.columns or 'optticker' not in cust_df.columns:
-                return None
-            cust_px = cust_df[['optticker', 'price']].rename(columns={'price': 'price_cust'})
-            merged = vest_df.merge(cust_px, on='optticker', how='inner')
-            if merged.empty:
-                return None
-            merged['price_vest'] = pd.to_numeric(merged.get('price'), errors='coerce')
-            merged['price_cust'] = pd.to_numeric(merged['price_cust'], errors='coerce')
-            merged['qty'] = pd.to_numeric(merged.get('nav_shares'), errors='coerce').fillna(0.0)
-            merged['abs_diff'] = (merged['price_vest'] - merged['price_cust']).abs()
-            return merged
-
-        listed = _opt_frame(cur.vest.options, cur.custodian.options)
-        flex = _opt_frame(cur.vest.flex_options, cur.custodian.flex_options)
-
-        frames = [f for f in (listed, flex) if f is not None]
-        if not frames:
-            return {
-                "option_mv_vest_prices": 0.0,
-                "option_mv_custodian_prices": 0.0,
-                "option_price_impact": 0.0,
-                "expected_nav_vest_prices": summary.expected_nav,
-                "expected_nav_custodian_prices": summary.expected_nav,
-                "material_break_count": 0,
-                "nav_good_cust_opt": bool(summary.nav_good_4_decimal),
-            }
-
-        merged = pd.concat(frames, ignore_index=True, sort=False)
-        material = merged[merged['abs_diff'] > 1.0]
-        mv_vest = float((merged['price_vest'] * merged['qty'] * 100).sum())
-        mv_cust = float((merged['price_cust'] * merged['qty'] * 100).sum())
-        impact = mv_cust - mv_vest
-
-        shares = summary.shares_outstanding or 0
-        exp_nav_vest = summary.expected_nav
-        exp_nav_cust = (summary.expected_tna + impact) / shares if shares else exp_nav_vest
-        #nav_good_cust = abs(round(summary.custodian_nav - exp_nav_cust, 4)) <= 0.0001
-
-        # Round both NAVs to 2 decimals first, then compare (matches the 2-dec check)
-        nav_good_cust = round(float(summary.custodian_nav or 0), 2) == round(float(exp_nav_cust or 0), 2)
-
-        return {
-            "option_mv_vest_prices": mv_vest,
-            "option_mv_custodian_prices": mv_cust,
-            "option_price_impact": impact,
-            "expected_nav_vest_prices": exp_nav_vest,
-            "expected_nav_custodian_prices": exp_nav_cust,
-            "material_break_count": int(len(material)),
-            "nav_good_cust_opt": bool(nav_good_cust),
-        }
-
 
     def _calculate_distributions(self) -> float:
         """

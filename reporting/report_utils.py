@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import numbers
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping
 from datetime import date, datetime
 from typing import Any, Dict, Tuple
 
-import pandas as pd
 
 try:  # pragma: no cover - optional import for typing only
     from services.compliance_checker import ComplianceResult
@@ -27,23 +26,6 @@ def normalize_report_date(value: date | datetime | str) -> str:
     if isinstance(value, date):
         return value.isoformat()
     return str(value)
-
-
-def ensure_dataframe(value: Any) -> pd.DataFrame:
-    """Coerce arbitrary objects into a :class:`pandas.DataFrame`."""
-
-    if value is None:
-        return pd.DataFrame()
-    if isinstance(value, pd.DataFrame):
-        return value.copy()
-    if isinstance(value, Mapping):
-        # If mapping already looks like {column: sequence}
-        if value and all(isinstance(v, Sequence) and not isinstance(v, (str, bytes)) for v in value.values()):
-            return pd.DataFrame(value)
-        return pd.DataFrame([value])
-    if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
-        return pd.DataFrame(list(value))
-    return pd.DataFrame({"value": [value]})
 
 
 def format_number(value: Any, digits: int = 0) -> str:
@@ -86,39 +68,6 @@ def flatten_compliance_results(results_by_date: Mapping[str, Mapping[str, Any]])
         for fund_name, data in fund_results.items():
             flattened[(fund_name, date_str)] = dict(data)
     return flattened
-
-
-def summarise_compliance_status(normalized_results: Mapping[str, Any]) -> Dict[str, int]:
-    """Return aggregate PASS/FAIL counts from normalized compliance data."""
-
-    summary = {
-        "funds": 0,
-        "funds_in_breach": 0,
-        "total_checks": 0,
-        "failed_checks": 0,
-    }
-
-    for fund_results in normalized_results.values():
-        summary["funds"] += 1
-        fund_failed = False
-        for check_name, payload in fund_results.items():
-            if check_name in {"summary_metrics", "fund_current_totals"}:
-                continue
-            summary["total_checks"] += 1
-            if isinstance(payload, Mapping):
-                status = payload.get("is_compliant")
-                if status is False:
-                    summary["failed_checks"] += 1
-                    fund_failed = True
-                elif isinstance(status, str) and status.upper() == "FAIL":
-                    summary["failed_checks"] += 1
-                    fund_failed = True
-            elif isinstance(payload, str) and payload.upper() == "FAIL":
-                summary["failed_checks"] += 1
-                fund_failed = True
-        if fund_failed:
-            summary["funds_in_breach"] += 1
-    return summary
 
 
 # ---------------------------------------------------------------------------
@@ -175,91 +124,9 @@ def _normalize_reconciliation_payload(raw_results: Mapping[str, Any]) -> Dict[st
     return normalized
 
 
-def summarise_reconciliation_breaks(normalized_results: Mapping[str, Dict[str, Any]]) -> Dict[str, int]:
-    """Aggregate break counts across all funds."""
-
-    totals: Dict[str, int] = {}
-    for fund_payload in normalized_results.values():
-        summary = fund_payload.get("summary", {})
-        if not isinstance(summary, Mapping):
-            continue
-        for recon_type, metrics in summary.items():
-            if isinstance(metrics, Mapping):
-                values = metrics.values()
-            elif isinstance(metrics, Iterable) and not isinstance(metrics, (str, bytes)):
-                values = metrics
-            else:
-                values = [metrics]
-
-            total_breaks = 0
-            for value in values:
-                if isinstance(value, numbers.Number):
-                    total_breaks += int(value)
-            totals[recon_type] = totals.get(recon_type, 0) + total_breaks
-    return totals
-
-
 # ---------------------------------------------------------------------------
 # NAV reconciliation helpers
 # ---------------------------------------------------------------------------
-
-def _normalize_nav_payload(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
-    """
-    Normalize the NAV payload to ensure consistent structure.
-
-    Unwraps date-keyed structure if present and returns fund-level data.
-    """
-    if not payload:
-        return {}
-
-    # Detect and unwrap date-keyed structure if present
-    first_key = next(iter(payload.keys()))
-    first_value = payload[first_key]
-
-    # Check if this is date-wrapped: {date: {fund: payload}}
-    if isinstance(first_value, dict) and first_value:
-        sample_nested_key = next(iter(first_value.keys()))
-        sample_nested_value = first_value.get(sample_nested_key)
-
-        # If nested value has NAV-specific keys, parent is date wrapper
-        if isinstance(sample_nested_value, dict) and any(
-                key in sample_nested_value
-                for key in ["Beginning TNA", "Expected NAV", "Custodian NAV",
-                            "Expected TNA", "NAV Diff ($)", "summary", "detailed_calculations"]
-        ):
-            # This is date-wrapped, unwrap to fund level
-            fund_level_data = first_value
-        else:
-            # Already fund-level
-            fund_level_data = payload
-    else:
-        # Already fund-level
-        fund_level_data = payload
-
-    # Return as dict, ensuring we have fund-level data
-    normalized: Dict[str, Any] = {}
-    for fund_name, fund_data in fund_level_data.items():
-        if isinstance(fund_data, dict):
-            normalized[fund_name] = fund_data
-
-    return normalized
-
-def summarise_nav_differences(normalized_results: Mapping[str, Dict[str, Any]]) -> Dict[str, float]:
-    """Aggregate NAV differences across funds."""
-
-    totals = {"funds": 0, "absolute_difference": 0.0}
-    for payload in normalized_results.values():
-        summary = payload.get("summary", {})
-        if not summary:
-            continue
-        totals["funds"] += 1
-        diff = summary.get("difference")
-        try:
-            totals["absolute_difference"] += abs(float(diff)) if diff is not None else 0.0
-        except (TypeError, ValueError):
-            continue
-    return totals
-
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -289,22 +156,3 @@ def _expand_compliance_result(test_name: str, result: ComplianceResult) -> Dict[
     return expanded
 
 
-def build_daily_result_row(
-    report_date: date,
-    fund_name: str,
-    fund_data: Mapping[str, Any],
-    analysis_type: str,
-) -> Dict[str, Any]:
-    """Create a serialisable representation of a fund-day compliance result."""
-
-    summary = fund_data.get("summary_metrics", {})
-    return {
-        "date": report_date,
-        "etf": fund_name,
-        "analysis_type": analysis_type,
-        "cash_value": summary.get("cash_value"),
-        "treasury": summary.get("treasury"),
-        "equity_market_value": summary.get("equity_market_value"),
-        "option_delta_adjusted_notional": summary.get("option_delta_adjusted_notional"),
-        "option_market_value": summary.get("option_market_value"),
-    }

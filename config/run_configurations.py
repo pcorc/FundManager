@@ -44,21 +44,6 @@ def get_fund_group(group_name: str) -> Set[str]:
     return groups[group_name]
 
 
-def build_fund_list(*items) -> List[str]:
-    """Combine fund groups, single tickers, or lists of tickers into a sorted list."""
-    combined: Set[str] = set()
-    for item in items:
-        if isinstance(item, set):
-            combined |= item
-        elif isinstance(item, list):
-            combined |= set(item)
-        elif isinstance(item, str):
-            combined.add(item)
-        else:
-            raise TypeError(f"Unsupported type in build_fund_list: {type(item)}")
-    return sorted(combined)
-
-
 def exclude_funds(base, *exclude_items) -> List[str]:
     """Return base with the given groups / lists / tickers removed (sorted)."""
     if isinstance(base, set):
@@ -219,36 +204,11 @@ def build_run(
 # DATE CALCULATION UTILITIES
 # ============================================================================
 
-def calculate_business_day_offset(base_date: date, offset: int) -> date:
-    """Business-day offset (positive=forward, negative=back) from base_date."""
-    if offset == 0:
-        return base_date
-    direction = 1 if offset > 0 else -1
-    target = abs(offset)
-    current = base_date
-    moved = 0
-    while moved < target:
-        current += timedelta(days=direction)
-        if current.weekday() < 5:
-            moved += 1
-    return current
-
-
 def ensure_business_day(input_date: date) -> date:
     """Return input_date if it's Mon-Fri, else the previous Friday."""
     if input_date.weekday() < 5:
         return input_date
     return input_date - timedelta(days=input_date.weekday() - 4)
-
-
-def calculate_date_offsets(base_date: date) -> Dict[str, date]:
-    """Return {'t', 't1', 't2'} for T, T-1, T-2 business days from base_date."""
-    t = ensure_business_day(base_date)
-    return {
-        "t":  t,
-        "t1": calculate_business_day_offset(t, -1),
-        "t2": calculate_business_day_offset(t, -2),
-    }
 
 
 def generate_business_date_range(start_date: date, end_date: date) -> List[date]:
