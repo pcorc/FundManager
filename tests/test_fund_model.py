@@ -17,8 +17,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pandas as pd  # noqa: E402
 
 from config import fund_definitions  # noqa: E402
-from processing.bulk_data_loader import BulkDataLoader  # noqa: E402
+from processing.bulk_data_loader import BulkDataLoader, BulkDataStore  # noqa: E402
 from processing.fund import build_fund_registry  # noqa: E402
+from processing.fund_manager import FundManager  # noqa: E402
 
 DAY, PREV = date(2026, 10, 30), date(2026, 10, 29)
 
@@ -117,6 +118,48 @@ class LoaderMetadataOrderTests(unittest.TestCase):
                 self.assertEqual(sorted(frame["eqyticker"]), ["AAPL", "MSFT"], (name, key))
                 self.assertEqual(set(frame["fund_ticker"]), {name})
                 self.assertEqual(set(frame["date"]), {day})
+
+
+class SnapshotBuildTests(unittest.TestCase):
+    def test_previous_snapshot_uses_t1_index_and_both_carry_overlap(self):
+        registry = build_fund_registry()
+        frames = {
+            "index": pd.DataFrame({"eqyticker": ["AAPL"], "weight_index": [0.6]}),
+            "index_t1": pd.DataFrame({"eqyticker": ["MSFT"], "weight_index": [0.4]}),
+            "overlap": pd.DataFrame({"security_ticker": ["AAPL"], "security_weight": [0.07]}),
+            "overlap_t1": pd.DataFrame({"security_ticker": ["MSFT"], "security_weight": [0.06]}),
+        }
+        store = BulkDataStore(date=str(DAY), fund_data={"HE3B1": frames}, loaded_funds={"HE3B1"})
+        fund = registry["HE3B1"]
+        FundManager(registry, store)._populate_fund_data(fund)
+        self.assertEqual(list(fund.data.current.index.equity["eqyticker"]), ["AAPL"])
+        self.assertEqual(list(fund.data.previous.index.equity["eqyticker"]), ["MSFT"])
+        self.assertEqual(list(fund.data.current.overlap["security_ticker"]), ["AAPL"])
+        self.assertEqual(list(fund.data.previous.overlap["security_ticker"]), ["MSFT"])
+
+
+class IndexFlexOverlapTests(unittest.TestCase):
+    def test_overlap_spreads_long_flex_value_over_constituents(self):
+        from processing.fund import FundData, FundHoldings, FundSnapshot
+        from services.compliance_checker import ComplianceChecker
+
+        fund = build_fund_registry()["HE3B1"]  # index FLEX fund
+        flex = pd.DataFrame({
+            "optticker": ["4SPX US 04/13/28 C6000.01", "4SPX US 04/13/28 P6000.01"],
+            "nav_shares": [19, -19],  # Vest flex frames carry nav_shares, not nav_shares_option
+            "option_market_value": [4_000_000.0, -300_000.0],
+        })
+        fund.data = FundData(current=FundSnapshot(vest=FundHoldings(flex_options=flex)))
+        holdings = pd.DataFrame({"eqyticker": ["AAPL", "MSFT"], "equity_market_value": [100.0, 50.0],
+                                 "option_market_value": [0.0, 0.0]})
+        overlap = pd.DataFrame({"security_ticker": ["AAPL", "MSFT"], "security_weight": [0.075, 0.06]})
+
+        checker = ComplianceChecker(funds={fund.name: fund}, analysis_type="eod")
+        merged, details = checker._calculate_index_overlap_adjustments(fund, holdings, overlap, 10_000_000.0)
+        self.assertEqual(list(details["security_ticker"]), ["AAPL", "MSFT"])
+        self.assertAlmostEqual(details["overlap_market_value"].iloc[0], 4_000_000.0 * 0.075)
+        self.assertAlmostEqual(details["overlap_weight"].iloc[1], 4_000_000.0 * 0.06 / 10_000_000.0)
+        self.assertAlmostEqual(merged["net_market_value"].iloc[0], 100.0 + 300_000.0)
 
 
 if __name__ == "__main__":

@@ -176,7 +176,9 @@ class ComplianceChecker:
         if flex_positions.empty:
             return _base_result(holdings_df)
 
-        long_flex = flex_positions.loc[_num(flex_positions, "nav_shares_option") > 0].copy()
+        # Vest flex frames carry nav_shares (nav_shares_option only exists after an equity/option merge).
+        qty_col = "nav_shares_option" if "nav_shares_option" in flex_positions.columns else "nav_shares"
+        long_flex = flex_positions.loc[_num(flex_positions, qty_col) > 0].copy()
         if long_flex.empty:
             long_flex = flex_positions.loc[_num(flex_positions, "option_market_value") > 0].copy()
 

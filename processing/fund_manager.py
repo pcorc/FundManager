@@ -240,7 +240,8 @@ class FundManager:
             nav = d.get(f"nav{sfx}", pd.DataFrame())
             return FundSnapshot(
                 **holdings,
-                index=FundHoldings(equity=d.get("index", pd.DataFrame())),  # T index for both snapshots
+                index=FundHoldings(equity=d.get(f"index{sfx}", pd.DataFrame())),
+                overlap=d.get(f"overlap{sfx}", pd.DataFrame()),
                 cash=_sum_numeric(d.get(f"cash{sfx}", pd.DataFrame()), ["cash_value"]),
                 **{name: _first_numeric(nav, columns) for name, columns in _NAV_FIELDS.items()},
                 equity_trades=d.get(f"equity_trades{sfx}", pd.DataFrame()),
