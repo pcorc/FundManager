@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Mapping, Optional, Tuple
+import numpy as np
 import pandas as pd
 from processing.fund import Fund
 from reporting.report_utils import non_empty
@@ -18,8 +19,8 @@ _TICKER_COLUMNS: Dict[str, Tuple[str, ...]] = {
 
 
 def _bool_status(value: Any) -> Optional[str]:
-    # Exact bool only: numpy.bool_ results deliberately resolve to UNKNOWN.
-    if isinstance(value, bool):
+    # numpy.bool_ too: checks comparing numpy floats return it.
+    if isinstance(value, (bool, np.bool_)):
         return "PASS" if value else "FAIL"
     return None
 
@@ -74,8 +75,9 @@ class TradingComplianceAnalyzer:
 
     # ------------------------------------------------------------------
     def _compare_fund(self, fund_name: str) -> Dict[str, Any]:
-        ante_results = self.results_ex_ante.get(fund_name)
-        post_results = self.results_ex_post.get(fund_name)
+        # A fund can be on one side only (e.g. it failed to process in the other pass).
+        ante_results = self.results_ex_ante.get(fund_name) or {}
+        post_results = self.results_ex_post.get(fund_name) or {}
         trade_info = self._build_trade_info(fund_name, ante_results, post_results)
 
         checks = {}
@@ -134,16 +136,20 @@ class TradingComplianceAnalyzer:
     ) -> Dict[str, Any]:
         base_info = dict(self.traded_funds_info.get(fund_name, {}))
 
-        # base_info (the ex-post Fund) wins; ante and post holdings both come from it.
-        fund = self._resolve_fund_object(base_info, ante_results, post_results)
+        # base_info carries the ex-post Fund and a copy of the Fund taken after the ex-ante pass
+        # (both passes populate fund.data on the same Fund object).
+        fund = self._resolve_fund_object(base_info, post_results, ante_results)
+        ante_fund = base_info.get("ex_ante_fund_object")
+        if not isinstance(ante_fund, Fund):
+            ante_fund = fund  # no ex-ante copy given: both sides read the ex-post holdings
 
-        for key, value in self._compute_trade_summary(fund).items():
+        for key, value in self._compute_trade_summary(fund, ante_fund).items():
             if key not in base_info or base_info[key] in (None, "", {}, [], ()):  # type: ignore[arg-type]
                 base_info[key] = value
 
         return base_info
 
-    def _compute_trade_summary(self, fund: Optional[Fund]) -> Dict[str, Any]:
+    def _compute_trade_summary(self, fund: Optional[Fund], ante_fund: Optional[Fund] = None) -> Dict[str, Any]:
         # Trading analysis runs intraday — the custodian hasn't reported T's TNA/TA yet,
         # so fund.data.current.{tna,ta} would be zero. Use the previous (T-1) snapshot
         # the bulk loader populated with the prior-day custodian numbers, falling back
@@ -168,7 +174,7 @@ class TradingComplianceAnalyzer:
 
         for key in ASSET_ORDER:
             post_df = self._get_holdings(fund, key)
-            ante_df = self._get_holdings(fund, key)
+            ante_df = self._get_holdings(ante_fund if ante_fund is not None else fund, key)
 
             post_quantities = self._resolve_quantity_series(post_df, preferred="iiv_shares")
             ante_quantities = self._resolve_quantity_series(ante_df, preferred="nav_shares")
@@ -188,10 +194,16 @@ class TradingComplianceAnalyzer:
 
             post_notional = self._calculate_notional(post_df, post_quantities, asset_type=key)
             ante_notional = self._calculate_notional(ante_df, ante_quantities, asset_type=key)
+            # Trade-value fallback without trade_rebal values: the ex-post holdings' share change
+            # (nav_shares -> iiv_shares) at ex-post prices, so ex-ante -> ex-post price moves are not trades.
+            post_start_notional = self._calculate_notional(
+                post_df, self._resolve_quantity_series(post_df, preferred="nav_shares"), asset_type=key
+            )
 
             # Splice closed positions back in so sell-to-close shows up.
-            if key == "options" and non_empty(ante_df):
-                ante_only = ante_df[~ante_df["optticker"].isin(post_df["optticker"])].copy()
+            if key == "options" and non_empty(ante_df) and "optticker" in ante_df.columns:
+                post_tickers = post_df["optticker"] if "optticker" in post_df.columns else []
+                ante_only = ante_df[~ante_df["optticker"].isin(post_tickers)].copy()
                 if not ante_only.empty:
                     ante_only["iiv_shares"] = 0.0
                     ante_only["trade_rebal"] = -pd.to_numeric(
@@ -216,7 +228,7 @@ class TradingComplianceAnalyzer:
 
             trade_total = buy_value + sell_value
             if trade_total <= 0.0:
-                trade_total = abs(post_notional - ante_notional)
+                trade_total = abs(post_notional - post_start_notional)
             total_traded += trade_total
 
             asset_trade_summary[key] = {

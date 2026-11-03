@@ -9,6 +9,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Mapping, NamedTuple, Optional
 
+import numpy as np
 import pandas as pd
 
 from config.constants import (
@@ -1113,7 +1114,7 @@ class ComplianceReportPDF(BaseReportPDF):
 
     @staticmethod
     def _status_text(value: object) -> str:
-        if isinstance(value, bool):
+        if isinstance(value, (bool, np.bool_)):  # numpy.bool_ from checks on numpy values
             return "PASS" if value else "FAIL"
         if isinstance(value, str):
             upper = value.strip().upper()
@@ -1126,7 +1127,7 @@ class ComplianceReportPDF(BaseReportPDF):
 
     @staticmethod
     def _yes_no(value: object) -> str:
-        if isinstance(value, bool):
+        if isinstance(value, (bool, np.bool_)):
             return "Yes" if value else "No"
         return ""
 
