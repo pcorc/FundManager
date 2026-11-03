@@ -415,5 +415,39 @@ class GicsIndustryGroupTests(unittest.TestCase):
         self.assertEqual(_gics_flags("RDVI", result.details)[:2], (True, False))
         self.assertEqual(_gics_flags("RDVI", {})[:2], (False, False))  # error results carry no flags
 
+
+class SkippedRuleTests(unittest.TestCase):
+    """D10: a rule the checker skipped reads N/A in the PDF and "N/A (skipped: reason)" in Excel."""
+
+    def setUp(self):
+        fund = _fund("KNG", equity=_equity(eqyticker=["AAA"], equity_market_value=[100.0],
+                                           nav_shares=[1.0], EQY_SH_OUT_million=[1_000.0]))
+        fund.config["vehicle_wrapper"] = "private_fund"  # what v_fund_metadata supplies (D1)
+        self.fund = fund
+        self.results = ComplianceChecker({fund.name: fund}).run_compliance_tests(
+            ["diversification_IRS_check", "diversification_40act_check"])
+
+    def test_excel_rows(self):
+        import tempfile
+        from reporting.compliance_reporting import ComplianceReport
+        with tempfile.TemporaryDirectory() as tmp:
+            sheets = ComplianceReport(self.results, "2026-10-30", tmp).sheet_data
+        irs = sheets["IRS_Diversification"].iloc[0]
+        self.assertEqual(irs["condition_IRS_1"], "N/A (skipped: Private funds are not RICs under IRS \u00a7851)")
+        self.assertTrue(pd.isna(irs["total_assets"]))
+        forty = sheets["40Act_Diversification"].iloc[0]
+        self.assertTrue(forty["Condition 40 Act 1"].startswith("N/A (skipped: Private funds"))
+        self.assertEqual(forty["Fund"], "KNG")
+
+    def test_pdf_reads_flattened_skip(self):
+        from reporting.compliance_reporting import ComplianceReportPDF
+        pdf = ComplianceReportPDF.__new__(ComplianceReportPDF)  # helpers only; no file is written
+        fund_data = {"diversification_IRS_check": {"is_compliant": True, "skipped": True, "calculations": {}},
+                     "real_estate_check": {"is_compliant": True, "calculations": {}}}
+        self.assertEqual(pdf._status_or_skip(fund_data, "diversification_IRS_check"), "N/A")
+        self.assertEqual(pdf._metric_value(fund_data, "diversification_IRS_check", "status", "detail",
+                                           "condition_IRS_1"), "N/A")
+        self.assertEqual(pdf._metric_value(fund_data, "real_estate_check", "status", "top", "is_compliant"), "PASS")
+
 if __name__ == "__main__":
     unittest.main()

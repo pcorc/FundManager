@@ -383,6 +383,19 @@ def _12d3_row(report_date, fund_name, payload, calc, r):
     )
 
 
+def _is_verdict(value: object) -> bool:
+    return isinstance(value, str) and (value.startswith(("=", "N/A")) or value in {"PASS", "FAIL"})
+
+
+def _skipped_row(row: Mapping[str, object], reason: object) -> Dict[str, object]:
+    """A rule the checker skipped: its verdict / formula cells say why, the other values stay blank."""
+    status = f"N/A (skipped: {reason})" if reason else "N/A (skipped)"
+    return {
+        column: value if column in ("Date", "Fund") else (status if _is_verdict(value) else None)
+        for column, value in row.items()
+    }
+
+
 class _RuleSheet(NamedTuple):
     key: str
     sheet: str
@@ -524,7 +537,8 @@ class ComplianceReport:
                 if not spec.raw_calc:
                     calc = calc or {}
                 # Excel row of this record: header is row 1, data starts at row 2.
-                rows.append(spec.row(report_date, fund_name, payload, calc, len(rows) + 2))
+                row = spec.row(report_date, fund_name, payload, calc, len(rows) + 2)
+                rows.append(_skipped_row(row, payload.get("reason")) if payload.get("skipped") else row)
 
         if rows:
             self.sheet_data[spec.sheet] = self._append_footnotes(pd.DataFrame(rows), spec.footnote)
@@ -914,7 +928,7 @@ class ComplianceReportPDF(BaseReportPDF):
         self.pdf.ln(2)
 
     def _metric_value(self, fund_data, test_key, fmt, source, field) -> object:
-        if source == "status_or_skip":
+        if source == "status_or_skip" or (fmt == "status" and self._is_test_skipped(fund_data, test_key)):
             return self._status_or_skip(fund_data, test_key)
         payload = self._get_test_payload(fund_data, test_key)
         if source == "summary":
@@ -1032,11 +1046,12 @@ class ComplianceReportPDF(BaseReportPDF):
         return test_name in self.allowed_tests
 
     def _is_test_skipped(self, fund_data: Mapping[str, Any], key: str) -> bool:
+        # The checker's details are flattened into the payload (report_utils); a nested
+        # "details" mapping is still honoured.
         payload = self._get_test_payload(fund_data, key)
-        details = payload.get("details") if isinstance(payload, Mapping) else None
-        if not isinstance(details, Mapping):
-            return False
-        return bool(details.get("skipped") or details.get("skip"))
+        details = payload.get("details")
+        details = details if isinstance(details, Mapping) else {}
+        return bool(payload.get("skipped") or details.get("skipped") or details.get("skip"))
 
     def _status_or_skip(self, fund_data: Mapping[str, Any], key: str) -> str:
         if self._is_test_skipped(fund_data, key):
