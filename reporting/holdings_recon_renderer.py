@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Sequence
 from config.fund_definitions import FUND_DEFINITIONS
+from reporting.reconciliation_reporting import top_option_prices
 
 import numpy as np
 import pandas as pd
@@ -34,7 +35,7 @@ class HoldingsReconciliationRenderer:
             self._ensure_page_space(15)
             self._draw_subsection_header(recon_type)
             self._print_recon_section(recon_type, payload, fund_name=fund_name)
-            if recon_type in {"custodian_equity", "custodian_option", "custodian_option_t1", "custodian_option_flex", "custodian_flex_option"}:
+            if recon_type in {"custodian_equity", "custodian_option", "custodian_flex_option"}:
                 self.pdf.ln(3)
             else:
                 self.pdf.ln(1)
@@ -68,20 +69,12 @@ class HoldingsReconciliationRenderer:
         *,
         fund_name: str,
     ) -> None:
-        recon_lower = recon_type.lower()
-        if "t-1" in recon_lower or recon_lower.endswith("_t1"):
-            return
         if recon_type == "custodian_equity":
             self._print_custodian_equity_section(recon_data)
             return
         if recon_type == "custodian_option":
-            self._print_custodian_option_section(
-                recon_data,
-                fund_name=fund_name,
-                is_flex=False,
-            )
+            self._print_custodian_option_section(recon_data, fund_name=fund_name)
             return
-
         if recon_type == "custodian_treasury":
             if self._has_recon_activity(recon_data):
                 self._print_custodian_treasury_section(recon_data)
@@ -129,15 +122,6 @@ class HoldingsReconciliationRenderer:
         if isinstance(price_t, pd.DataFrame):
             counts["Price"] += len(price_t)
             counts["Total"] += len(price_t)
-
-        holdings_df = recon_data.get("holdings_discrepancies")
-        if isinstance(holdings_df, pd.DataFrame) and not holdings_df.empty:
-            counts["Holdings"] += len(holdings_df)
-
-        weight_df = recon_data.get("significant_diffs")
-        if isinstance(weight_df, pd.DataFrame) and not weight_df.empty:
-            counts["Weight"] += len(weight_df)
-
         return counts
 
     # ------------------------------------------------------------------
@@ -237,73 +221,39 @@ class HoldingsReconciliationRenderer:
             self.pdf.cell(0, 5, f"... and {len(df) - 10} more rows", ln=1)
 
     # ------------------------------------------------------------------
-    def _print_custodian_equity_section(self, recon_data: Mapping[str, Any]) -> None:
+    def _print_holdings_block(
+        self, recon_data: Mapping[str, Any], title: str, extra_rows: Sequence[tuple[str, int]] = ()
+    ) -> bool:
         final_df = recon_data.get("final_recon")
-        price_t = recon_data.get("price_discrepancies_T")
         has_holdings = isinstance(final_df, pd.DataFrame) and not final_df.empty
-        has_price = isinstance(price_t, pd.DataFrame) and not price_t.empty
-
+        self._draw_two_column_table([("Holdings Breaks", len(final_df) if has_holdings else 0), *extra_rows])
         if has_holdings:
-            self._draw_two_column_table([("Holdings Breaks", len(final_df))])
-            self._print_discrepancy_table(final_df, "Holdings Discrepancies")
-        else:
-            self._draw_two_column_table([("Holdings Breaks", 0)])
+            self._print_discrepancy_table(final_df, title)
+        return has_holdings
 
+    def _print_custodian_equity_section(self, recon_data: Mapping[str, Any]) -> None:
+        price_t = recon_data.get("price_discrepancies_T")
+        has_holdings = self._print_holdings_block(recon_data, "Holdings Discrepancies")
         self._print_price_discrepancies(price_t, price_label="Custodian")
-
-        if not has_holdings and not has_price:
+        if not has_holdings and not (isinstance(price_t, pd.DataFrame) and not price_t.empty):
             self._draw_two_column_table([("Status", "All reconciliations successful - no breaks found")])
 
-    def _print_custodian_option_section(
-        self,
-        recon_data: Mapping[str, Any],
-        *,
-        fund_name: str,
-        is_flex: bool,
-        is_t1: bool = False,
-    ) -> None:
-        final_df = recon_data.get("final_recon")
-        if isinstance(final_df, pd.DataFrame) and not final_df.empty:
-            rows = [("Holdings Breaks", len(final_df))]
-        else:
-            rows = [("Holdings Breaks", 0)]
+    def _print_custodian_option_section(self, recon_data: Mapping[str, Any], *, fund_name: str) -> None:
         regular_df = recon_data.get("regular_options")
-        flex_df = recon_data.get("flex_options")
+        extra_rows = []
         if isinstance(regular_df, pd.DataFrame) and not regular_df.empty:
-            rows.append(("Regular Options", len(regular_df)))
-        if isinstance(flex_df, pd.DataFrame) and not flex_df.empty:
-            rows.append(("FLEX Options", len(flex_df)))
-        self._draw_two_column_table(rows)
-
-        if isinstance(final_df, pd.DataFrame) and not final_df.empty:
-            self._print_discrepancy_table(final_df, "Option Discrepancies")
-
-        price_t = recon_data.get("price_discrepancies_T")
-
+            extra_rows.append(("Regular Options", len(regular_df)))
+        self._print_holdings_block(recon_data, "Option Discrepancies", extra_rows)
         self._print_price_discrepancies(
-            price_t,
+            recon_data.get("price_discrepancies_T"),
             price_label="Custodian",
             fund_name=fund_name,
-            recon_type="custodian_option_flex" if is_flex else "custodian_option",
-            is_flex=is_flex,
+            recon_type="custodian_option",
         )
 
-    def _print_custodian_treasury_section(
-        self,
-        recon_data: Mapping[str, Any],
-        *,
-        is_t1: bool = False,
-    ) -> None:
-        final_df = recon_data.get("final_recon")
-        holdings_label = "Holdings Breaks T-1" if is_t1 else "Holdings Breaks"
-        if isinstance(final_df, pd.DataFrame) and not final_df.empty:
-            self._draw_two_column_table([(holdings_label, len(final_df))])
-            self._print_discrepancy_table(final_df, "Treasury Discrepancies")
-        else:
-            self._draw_two_column_table([(holdings_label, 0)])
-
-        price_t = recon_data.get("price_discrepancies_T")
-        self._print_price_discrepancies(price_t, price_label="Custodian")
+    def _print_custodian_treasury_section(self, recon_data: Mapping[str, Any]) -> None:
+        self._print_holdings_block(recon_data, "Treasury Discrepancies")
+        self._print_price_discrepancies(recon_data.get("price_discrepancies_T"), price_label="Custodian")
 
     # ------------------------------------------------------------------
     def _print_price_discrepancies(
@@ -313,10 +263,9 @@ class HoldingsReconciliationRenderer:
         price_label: str,
         fund_name: str | None = None,
         recon_type: str | None = None,
-        is_flex: bool = False,
     ) -> None:
         if isinstance(price_t, pd.DataFrame) and not price_t.empty:
-            filtered = self._filter_option_price_breaks(price_t, fund_name, recon_type, is_flex)
+            filtered = self._filter_option_price_breaks(price_t, fund_name, recon_type)
             self._draw_two_column_table([(f"{price_label} Price Breaks T", len(filtered))])
             self._print_discrepancy_table(filtered, f"{price_label} Price Breaks T")
         else:
@@ -329,7 +278,6 @@ class HoldingsReconciliationRenderer:
             price_df: pd.DataFrame,
             fund_name: str | None,
             recon_type: str | None,
-            is_flex: bool,
     ) -> pd.DataFrame:
         if not isinstance(price_df, pd.DataFrame) or price_df.empty:
             return pd.DataFrame()
@@ -359,22 +307,13 @@ class HoldingsReconciliationRenderer:
         vehicle = (FUND_DEFINITIONS.get(fund_name, {}).get("vehicle_wrapper") or "").lower()
         if vehicle not in {"private_fund", "closed_end_fund"}:
             return working
-
-        if is_flex:
-            return working
-
-        if "option_weight" in working.columns:
-            working = working.sort_values("option_weight", ascending=False)
-        elif "price_diff" in working.columns:
-            working = working.sort_values("price_diff", ascending=False)
-
-        return working.head(5)
+        return top_option_prices(working)
 
     def _fund_has_holdings_data(self, recon_data: Mapping[str, Mapping[str, Any]]) -> bool:
         for payload in recon_data.values():
             if not isinstance(payload, Mapping):
                 continue
-            if self._has_recon_activity(payload) or self._payload_has_content(payload):
+            if self._payload_has_content(payload):
                 return True
         return False
 
