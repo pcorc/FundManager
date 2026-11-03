@@ -1,11 +1,31 @@
 """Analytics for comparing ex-ante and ex-post compliance results."""
 
 from __future__ import annotations
-from collections import defaultdict
 
 from typing import Any, Dict, Mapping, Optional, Tuple
 import pandas as pd
 from processing.fund import Fund
+
+ASSET_ORDER: Tuple[str, ...] = ("equity", "options", "treasury")
+
+_TICKER_COLUMNS: Dict[str, Tuple[str, ...]] = {
+    "equity": ("ticker", "equity_ticker", "eqyticker", "symbol", "underlying_symbol"),
+    "options": ("ticker", "optticker", "occ_symbol", "option_ticker"),
+    "treasury": ("cusip", "ticker", "security_id", "bond_ticker"),
+}
+
+
+def _bool_status(value: Any) -> Optional[str]:
+    # Exact bool only: numpy.bool_ results deliberately resolve to UNKNOWN.
+    if isinstance(value, bool):
+        return "PASS" if value else "FAIL"
+    return None
+
+
+def _str_status(value: Any) -> Optional[str]:
+    if isinstance(value, str) and value.upper() in {"PASS", "FAIL"}:
+        return value.upper()
+    return None
 
 
 class TradingComplianceAnalyzer:
@@ -26,7 +46,6 @@ class TradingComplianceAnalyzer:
         }
 
     # ------------------------------------------------------------------
-    # ------------------------------------------------------------------
     def analyze(self) -> Dict[str, Any]:
         """Return a serialisable comparison of compliance changes."""
 
@@ -34,65 +53,19 @@ class TradingComplianceAnalyzer:
             set(self.results_ex_ante) | set(self.results_ex_post) | set(self.traded_funds_info)
         )
 
-        summary = {
-            "total_funds_analyzed": len(fund_names),
-            "total_funds_traded": 0,
-            "funds_with_compliance_changes": 0,
-            "funds_into_compliance": 0,
-            "funds_out_of_compliance": 0,
-            "funds_unchanged": 0,
-            "total_checks_changed": 0,
-            "total_violations_before": 0,
-            "total_violations_after": 0,
-            "total_traded_notional": 0.0,
-        }
-
         fund_details: Dict[str, Dict[str, Any]] = {}
-        summary_metric_totals = {
-            "ex_ante": defaultdict(float),
-            "ex_post": defaultdict(float),
-        }
-
+        total_funds_traded = 0
         for fund_name in fund_names:
             comparison = self._compare_fund(fund_name)
             fund_details[fund_name] = comparison
-
-            if comparison["num_changes"]:
-                summary["funds_with_compliance_changes"] += 1
-            if comparison["status_change"] == "INTO_COMPLIANCE":
-                summary["funds_into_compliance"] += 1
-            elif comparison["status_change"] == "OUT_OF_COMPLIANCE":
-                summary["funds_out_of_compliance"] += 1
-            else:
-                summary["funds_unchanged"] += 1
-
-            summary["total_checks_changed"] += comparison["num_changes"]
-            summary["total_violations_before"] += comparison["violations_before"]
-            summary["total_violations_after"] += comparison["violations_after"]
-
-            fund_summary_metrics = comparison.get("summary_metrics", {}) or {}
-            for phase in ("ex_ante", "ex_post"):
-                metrics = fund_summary_metrics.get(phase, {}) or {}
-                aggregates = summary_metric_totals[phase]
-                for key, value in metrics.items():
-                    try:
-                        aggregates[key] += float(value)
-                    except (TypeError, ValueError):
-                        continue
-
-            trade_total = float(comparison["trade_info"].get("total_traded", 0.0) or 0.0)
-            if trade_total:
-                summary["total_funds_traded"] += 1
-            summary["total_traded_notional"] += trade_total
+            if float(comparison["trade_info"].get("total_traded", 0.0) or 0.0):
+                total_funds_traded += 1
 
         return {
             "date": self.date,
             "summary": {
-                **summary,
-                "summary_metrics_totals": {
-                    "ex_ante": dict(summary_metric_totals["ex_ante"]),
-                    "ex_post": dict(summary_metric_totals["ex_post"]),
-                },
+                "total_funds_analyzed": len(fund_names),
+                "total_funds_traded": total_funds_traded,
             },
             "funds": fund_details,
         }
@@ -106,8 +79,8 @@ class TradingComplianceAnalyzer:
         checks = {}
         violations_before = 0
         violations_after = 0
-        num_changes = 0
 
+        # Precedence is intentional: only the ex-post side drops these keys.
         check_names = sorted(
             set(ante_results.keys()) | set(post_results.keys()) - {"summary_metrics", "fund_object"}
         )
@@ -117,21 +90,18 @@ class TradingComplianceAnalyzer:
             post_status = self._extract_status(post_results.get(check))
             if ante_status == post_status == "UNKNOWN":
                 continue
-            changed = ante_status != post_status
 
             if ante_status == "FAIL":
                 violations_before += 1
             if post_status == "FAIL":
                 violations_after += 1
-            if changed:
-                num_changes += 1
 
             checks[check] = {
                 "status_before": ante_status,
                 "status_after": post_status,
                 "violations_before": 1 if ante_status == "FAIL" else 0,
                 "violations_after": 1 if post_status == "FAIL" else 0,
-                "changed": changed,
+                "changed": ante_status != post_status,
             }
 
         overall_before = self._overall_status(ante_results)
@@ -144,25 +114,13 @@ class TradingComplianceAnalyzer:
             elif overall_after == "FAIL":
                 status_change = "OUT_OF_COMPLIANCE"
 
-        summary_metrics = {
-            "ex_ante": self._extract_summary_metrics_payload(
-                self._get_summary_payload(ante_results)
-            ),
-            "ex_post": self._extract_summary_metrics_payload(
-                self._get_summary_payload(post_results)
-            ),
-        }
         return {
             "fund_name": fund_name,
             "trade_info": trade_info,
-            "overall_before": overall_before,
-            "overall_after": overall_after,
             "status_change": status_change,
             "violations_before": violations_before,
             "violations_after": violations_after,
-            "num_changes": num_changes,
             "checks": checks,
-            "summary_metrics": summary_metrics,
         }
 
     # ------------------------------------------------------------------
@@ -174,141 +132,16 @@ class TradingComplianceAnalyzer:
     ) -> Dict[str, Any]:
         base_info = dict(self.traded_funds_info.get(fund_name, {}))
 
+        # base_info (the ex-post Fund) wins; ante and post holdings both come from it.
         fund = self._resolve_fund_object(base_info, ante_results, post_results)
 
-        computed_info = self._compute_trade_summary(
-            ante_results,
-            post_results,
-            fund=fund,
-            fallback_sources=(base_info,),
-        )
-
-        for key, value in computed_info.items():
+        for key, value in self._compute_trade_summary(fund).items():
             if key not in base_info or base_info[key] in (None, "", {}, [], ()):  # type: ignore[arg-type]
                 base_info[key] = value
 
         return base_info
 
-    def _compute_trade_summary(
-            self,
-            ante_results: Mapping[str, Any],
-            post_results: Mapping[str, Any],
-            *,
-            fund: Optional[Fund] = None,
-            fallback_sources: Tuple[Mapping[str, Any], ...] = (),
-    ) -> Dict[str, Any]:
-
-        asset_mappings: Tuple[Tuple[str, str], ...] = (
-            ("equity", "equity"),
-            ("options", "options"),
-            ("treasury", "treasury"),
-        )
-
-        final_shares: Dict[str, float] = {}
-        initial_shares: Dict[str, float] = {}
-        net_trades: Dict[str, Dict[str, float]] = {}
-        notional_changes: Dict[str, float] = {}
-        ex_ante_market_values: Dict[str, float] = {}
-        ex_post_market_values: Dict[str, float] = {}
-        trade_activity: Dict[str, Dict[str, Any]] = {}
-        asset_trade_totals: Dict[str, float] = {}
-        total_traded = 0.0
-
-        for key, attr in asset_mappings:
-            post_df = self._get_holdings(
-                post_results,
-                attr,
-                fund=fund,
-                additional_sources=fallback_sources,
-            )
-            ante_df = self._get_holdings(
-                ante_results,
-                attr,
-                fund=fund,
-                additional_sources=fallback_sources,
-            )
-
-            _, post_quantities = self._resolve_quantity_series(post_df, preferred="iiv_shares")
-            _, ante_quantities = self._resolve_quantity_series(ante_df, preferred="nav_shares")
-
-            final_quantity = float(post_quantities.sum())
-            initial_quantity = float(ante_quantities.sum())
-
-            trade_rebal_series = self._extract_trade_series(post_df)
-            quantity_delta = float(trade_rebal_series.sum())
-            if quantity_delta == 0.0:
-                quantity_delta = final_quantity - initial_quantity
-
-            final_shares[key] = final_quantity
-            initial_shares[key] = initial_quantity
-
-            buy_quantity = float(trade_rebal_series[trade_rebal_series > 0.0].sum())
-            sell_quantity = abs(
-                float(trade_rebal_series[trade_rebal_series < 0.0].sum())
-            )
-            if buy_quantity == 0.0 and sell_quantity == 0.0:
-                if quantity_delta >= 0.0:
-                    buy_quantity = quantity_delta
-                else:
-                    sell_quantity = abs(quantity_delta)
-
-            net_trades[key] = {
-                "buy_quantity": buy_quantity,
-                "sell_quantity": sell_quantity,
-                "net_quantity": quantity_delta,
-                "buys": buy_quantity,
-                "sells": sell_quantity,
-                "net": quantity_delta,
-            }
-
-            post_notional = self._calculate_notional(post_df, "iiv_shares", asset_type=key)
-            ante_notional = self._calculate_notional(ante_df, "nav_shares", asset_type=key)
-            notional_delta = post_notional - ante_notional
-            notional_changes[key] = notional_delta
-
-            ex_ante_market_values[key] = ante_notional
-            ex_post_market_values[key] = post_notional
-
-            # Splice closed positions back in so sell-to-close shows up.
-            if key == "options" and isinstance(ante_df, pd.DataFrame) and not ante_df.empty:
-                ante_only = ante_df[~ante_df["optticker"].isin(post_df["optticker"])].copy()
-                if not ante_only.empty:
-                    ante_only["iiv_shares"] = 0.0
-                    ante_only["trade_rebal"] = -pd.to_numeric(
-                        ante_only.get("nav_shares", 0.0), errors="coerce"
-                    ).fillna(0.0)
-                    post_df = pd.concat([post_df, ante_only], ignore_index=True)
-
-            activity_details = self._calculate_trade_activity(post_df, asset_type=key)
-
-            if activity_details["buys"] or activity_details["sells"]:
-                trade_activity[key] = activity_details
-            else:
-                net_payload = activity_details.get("net", {}) if activity_details else {}
-                net_values = [
-                    float(net_payload.get(field, 0.0) or 0.0)
-                    for field in ("buy_quantity", "sell_quantity", "buy_value", "sell_value")
-                ]
-                if any(net_values):
-                    trade_activity[key] = activity_details
-
-            net_payload = activity_details.get("net", {}) if activity_details else {}
-            buy_value = float(net_payload.get("buy_value", 0.0) or 0.0)
-            sell_value = float(net_payload.get("sell_value", 0.0) or 0.0)
-            net_trades[key].update(
-                {
-                    "buy_value": buy_value,
-                    "sell_value": sell_value,
-                    "net_value": buy_value - sell_value,
-                }
-            )
-
-            trade_total = buy_value + sell_value
-            if trade_total <= 0.0:
-                trade_total = abs(notional_delta)
-            asset_trade_totals[key] = trade_total
-            total_traded += trade_total
-
+    def _compute_trade_summary(self, fund: Optional[Fund]) -> Dict[str, Any]:
         # Trading analysis runs intraday — the custodian hasn't reported T's TNA/TA yet,
         # so fund.data.current.{tna,ta} would be zero. Use the previous (T-1) snapshot
         # the bulk loader populated with the prior-day custodian numbers, falling back
@@ -323,22 +156,68 @@ class TradingComplianceAnalyzer:
             except (TypeError, ValueError):
                 return 0.0
 
-        total_net_assets = (
-                _from_snapshot(previous_snapshot, "tna")
-                or _from_snapshot(current_snapshot, "tna")
-        )
-        total_assets = (
-                _from_snapshot(previous_snapshot, "ta")
-                or _from_snapshot(current_snapshot, "ta")
-        )
+        total_net_assets = _from_snapshot(previous_snapshot, "tna") or _from_snapshot(current_snapshot, "tna")
+        total_assets = _from_snapshot(previous_snapshot, "ta") or _from_snapshot(current_snapshot, "ta")
 
+        net_trades: Dict[str, Dict[str, float]] = {}
+        trade_activity: Dict[str, Dict[str, Any]] = {}
         asset_trade_summary: Dict[str, Dict[str, float]] = {}
+        total_traded = 0.0
 
-        for asset_key, trade_total in asset_trade_totals.items():
-            ante_notional = ex_ante_market_values.get(asset_key, 0.0)
-            post_notional = ex_post_market_values.get(asset_key, 0.0)
+        for key in ASSET_ORDER:
+            post_df = self._get_holdings(fund, key)
+            ante_df = self._get_holdings(fund, key)
 
-            asset_trade_summary[asset_key] = {
+            post_quantities = self._resolve_quantity_series(post_df, preferred="iiv_shares")
+            ante_quantities = self._resolve_quantity_series(ante_df, preferred="nav_shares")
+
+            trade_rebal_series = self._extract_trade_series(post_df)
+            quantity_delta = float(trade_rebal_series.sum())
+            if quantity_delta == 0.0:
+                quantity_delta = float(post_quantities.sum()) - float(ante_quantities.sum())
+
+            buy_quantity = float(trade_rebal_series[trade_rebal_series > 0.0].sum())
+            sell_quantity = abs(float(trade_rebal_series[trade_rebal_series < 0.0].sum()))
+            if buy_quantity == 0.0 and sell_quantity == 0.0:
+                if quantity_delta >= 0.0:
+                    buy_quantity = quantity_delta
+                else:
+                    sell_quantity = abs(quantity_delta)
+
+            post_notional = self._calculate_notional(post_df, post_quantities, asset_type=key)
+            ante_notional = self._calculate_notional(ante_df, ante_quantities, asset_type=key)
+
+            # Splice closed positions back in so sell-to-close shows up.
+            if key == "options" and isinstance(ante_df, pd.DataFrame) and not ante_df.empty:
+                ante_only = ante_df[~ante_df["optticker"].isin(post_df["optticker"])].copy()
+                if not ante_only.empty:
+                    ante_only["iiv_shares"] = 0.0
+                    ante_only["trade_rebal"] = -pd.to_numeric(
+                        ante_only.get("nav_shares", 0.0), errors="coerce"
+                    ).fillna(0.0)
+                    post_df = pd.concat([post_df, ante_only], ignore_index=True)
+
+            activity_details = self._calculate_trade_activity(post_df, asset_type=key)
+            if activity_details["buys"] or activity_details["sells"]:
+                trade_activity[key] = activity_details
+
+            buy_value = float(activity_details["net"].get("buy_value", 0.0) or 0.0)
+            sell_value = float(activity_details["net"].get("sell_value", 0.0) or 0.0)
+            net_trades[key] = {
+                "buy_quantity": buy_quantity,
+                "sell_quantity": sell_quantity,
+                "net_quantity": quantity_delta,
+                "buy_value": buy_value,
+                "sell_value": sell_value,
+                "net_value": buy_value - sell_value,
+            }
+
+            trade_total = buy_value + sell_value
+            if trade_total <= 0.0:
+                trade_total = abs(post_notional - ante_notional)
+            total_traded += trade_total
+
+            asset_trade_summary[key] = {
                 "trade_value": trade_total,
                 "pct_of_tna": self._safe_percent(trade_total, total_net_assets),
                 "pct_of_total_assets": self._safe_percent(trade_total, total_assets),
@@ -349,234 +228,81 @@ class TradingComplianceAnalyzer:
                 "ex_post_vs_ex_ante_pct": self._safe_percent(post_notional, ante_notional),
             }
 
-        trade_summary: Dict[str, Any] = {
-            "final_shares": final_shares,
-            "initial_shares": initial_shares,
+        return {
             "net_trades": net_trades,
             "total_traded": total_traded,
             "trade_activity": trade_activity,
-            "notional_changes": notional_changes,
-            "asset_trade_totals": asset_trade_totals,
             "asset_trade_summary": asset_trade_summary,
-            "ex_ante_market_values": ex_ante_market_values,
-            "ex_post_market_values": ex_post_market_values,
             "total_net_assets": total_net_assets,
             "total_assets": total_assets,
         }
 
-        return trade_summary
-
-
-    def _get_holdings(
-        self,
-        results: Mapping[str, Any],
-        attribute: str,
-        *,
-        fund: Optional[Fund] = None,
-        additional_sources: Tuple[Mapping[str, Any], ...] = (),
-    ) -> pd.DataFrame:
-        sources: Tuple[Mapping[str, Any], ...] = tuple(
-            source
-            for source in (results,) + tuple(additional_sources)
-            if isinstance(source, Mapping)
-        )
-
-        def _extract_frame(value: Any) -> Optional[pd.DataFrame]:
-            if isinstance(value, pd.DataFrame) and not value.empty:
-                return value
-            if isinstance(value, Mapping):
-                for nested_key in ("holdings", "positions", "data"):
-                    nested = value.get(nested_key)
-                    if isinstance(nested, pd.DataFrame) and not nested.empty:
-                        return nested
-            holder = getattr(value, "holdings", None)
-            if isinstance(holder, pd.DataFrame) and not holder.empty:
-                return holder
-            return None
-
-        candidate_keys = (
-            attribute,
-            f"{attribute}_holdings",
-            f"{attribute}_positions",
-            f"vest_{attribute}",
-            f"vest_{attribute}_holdings",
-            attribute.replace("_holdings", ""),
-        )
-
-        for source in sources:
-            for key in candidate_keys:
-                if key not in source:
-                    continue
-                candidate = _extract_frame(source.get(key))
-                if candidate is not None:
-                    return candidate.copy()
-
-        resolved_fund = fund
-        if not isinstance(resolved_fund, Fund):
-            resolved_fund = self._resolve_fund_object(*sources)
-
-        if isinstance(resolved_fund, Fund):
-            fund_df = self._get_holdings_from_fund(resolved_fund, attribute)
-            if not fund_df.empty:
-                return fund_df
-
-            snapshot = getattr(getattr(resolved_fund, "data", None), "current", None)
-            custodian = getattr(snapshot, "custodian", None)
-            if custodian is not None:
-                holdings = getattr(custodian, attribute, None)
-                if isinstance(holdings, pd.DataFrame) and not holdings.empty:
-                    return holdings.copy()
-
+    @staticmethod
+    def _get_holdings(fund: Optional[Fund], attribute: str) -> pd.DataFrame:
+        snapshot = getattr(getattr(fund, "data", None), "current", None)
+        for source in ("vest", "custodian"):
+            holdings = getattr(getattr(snapshot, source, None), attribute, None)
+            if isinstance(holdings, pd.DataFrame) and not holdings.empty:
+                return holdings.copy()
         return pd.DataFrame()
 
     @staticmethod
-    def _get_holdings_from_fund(fund: Fund, attribute: str) -> pd.DataFrame:
-        snapshot = getattr(getattr(fund, "data", None), "current", None)
-        vest_holdings = getattr(snapshot, "vest", None)
-        if vest_holdings is None:
-            return pd.DataFrame()
-
-        holdings = getattr(vest_holdings, attribute, None)
-        if isinstance(holdings, pd.DataFrame):
-            return holdings.copy()
-
-        return pd.DataFrame()
-
-    def _resolve_fund_object(
-        self,
-        *sources: Mapping[str, Any],
-    ) -> Optional[Fund]:
+    def _resolve_fund_object(*sources: Mapping[str, Any]) -> Optional[Fund]:
         for source in sources:
             if not isinstance(source, Mapping):
                 continue
-
             for key in ("fund", "fund_object"):
                 candidate = source.get(key)
                 if isinstance(candidate, Fund):
                     return candidate
-
-            nested = source.get("fund_data")
-            if isinstance(nested, Mapping):
-                candidate = nested.get("fund") or nested.get("fund_object")
-                if isinstance(candidate, Fund):
-                    return candidate
-
         return None
 
-
-    def _extract_trade_series(self, df: pd.DataFrame) -> pd.Series:
+    @staticmethod
+    def _extract_trade_series(df: pd.DataFrame) -> pd.Series:
         if not isinstance(df, pd.DataFrame) or df.empty:
             return pd.Series(dtype=float)
         if "trade_rebal" not in df.columns:
             return pd.Series(0.0, index=df.index, dtype=float)
         return pd.to_numeric(df["trade_rebal"], errors="coerce").fillna(0.0)
 
-    def _calculate_notional(
-        self,
-        df: pd.DataFrame,
-        quantity_column: str,
-        *,
-        asset_type: str,
-    ) -> float:
-        if not isinstance(df, pd.DataFrame) or df.empty:
-            return 0.0
-        if "price" not in df.columns:
-            return 0.0
-        _, quantities = self._resolve_quantity_series(df, preferred=quantity_column)
-        if quantities.empty:
+    @staticmethod
+    def _calculate_notional(df: pd.DataFrame, quantities: pd.Series, *, asset_type: str) -> float:
+        if not isinstance(df, pd.DataFrame) or df.empty or "price" not in df.columns or quantities.empty:
             return 0.0
         prices = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
 
+        # First existing multiplier column (not first positive value, unlike per-trade estimates).
+        multiplier_series = pd.Series(1.0, index=df.index, dtype=float)
         if asset_type == "options":
-            multiplier_series = None
+            multiplier_series = pd.Series(100.0, index=df.index, dtype=float)
             for column in ("contract_multiplier", "multiplier"):
                 if column in df.columns:
-                    multiplier_series = (
-                        pd.to_numeric(df[column], errors="coerce").fillna(100.0)
-                    )
+                    multiplier_series = pd.to_numeric(df[column], errors="coerce").fillna(100.0)
                     break
-            if multiplier_series is None:
-                multiplier_series = pd.Series(100.0, index=df.index, dtype=float)
-        else:
-            multiplier_series = pd.Series(1.0, index=df.index, dtype=float)
 
         try:
             return float((quantities * prices * multiplier_series).sum())
         except (TypeError, ValueError):
             return 0.0
 
-
-    def _resolve_quantity_series(
-        self, df: pd.DataFrame, *, preferred: Optional[str] = None
-    ) -> Tuple[str, pd.Series]:
+    @staticmethod
+    def _resolve_quantity_series(df: pd.DataFrame, *, preferred: Optional[str] = None) -> pd.Series:
         if not isinstance(df, pd.DataFrame) or df.empty:
-            column = preferred or "nav_shares"
-            return column, pd.Series(dtype=float)
+            return pd.Series(dtype=float)
 
         column = preferred or "nav_shares"
-        candidates = [column]
-        for fallback in ("nav_shares", "iiv_shares", "shares", "quantity", "units"):
-            if fallback not in candidates:
-                candidates.append(fallback)
-
-        for candidate in candidates:
+        fallbacks = ("nav_shares", "iiv_shares", "shares", "quantity", "units")
+        for candidate in [column] + [name for name in fallbacks if name != column]:
             if candidate in df.columns:
-                series = pd.to_numeric(df[candidate], errors="coerce").fillna(0.0)
-                return candidate, series
+                return pd.to_numeric(df[candidate], errors="coerce").fillna(0.0)
 
-        return column, pd.Series(0.0, index=df.index, dtype=float)
+        return pd.Series(0.0, index=df.index, dtype=float)
 
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _get_summary_payload(results: Optional[Mapping[str, Any]]) -> Mapping[str, Any]:
-        """Return the best available payload for summary metrics.
-
-        Some upstream pipelines provide summary totals under
-        ``fund_current_totals`` instead of ``summary_metrics``. This helper
-        normalises both shapes so downstream reporting can still render the
-        Summary Metrics tables.
-        """
-
-        if not isinstance(results, Mapping):
-            return {}
-
-        for key in ("summary_metrics", "fund_current_totals"):
-            payload = results.get(key)
-            if isinstance(payload, Mapping):
-                return payload
-
-        return {}
-
-    def _extract_summary_metrics_payload(self, result: Any) -> Dict[str, float]:
-        calculations: Mapping[str, Any]
-        if isinstance(result, Mapping):
-            calculations = result
-        else:
-            calculations = getattr(result, "calculations", {}) or {}
-
-        metrics: Dict[str, float] = {}
-        for key, value in calculations.items():
-            try:
-                metrics[key] = float(value)
-            except (TypeError, ValueError):
-                continue
-        return metrics
-
-    def _calculate_trade_activity(
-            self,
-            holdings: pd.DataFrame,
-            *,
-            asset_type: str,
-    ) -> Dict[str, Any]:
+    def _calculate_trade_activity(self, holdings: pd.DataFrame, *, asset_type: str) -> Dict[str, Any]:
         empty_result = {
             "buys": [],
             "sells": [],
-            "net": {
-                "buy_quantity": 0.0,
-                "sell_quantity": 0.0,
-                "buy_value": 0.0,
-                "sell_value": 0.0,
-            },
+            "net": {"buy_quantity": 0.0, "sell_quantity": 0.0, "buy_value": 0.0, "sell_value": 0.0},
         }
 
         if not isinstance(holdings, pd.DataFrame) or holdings.empty:
@@ -600,27 +326,20 @@ class TradingComplianceAnalyzer:
         total_buy_value = 0.0
         total_sell_value = 0.0
 
-        # Detect the correct ticker column for this asset type
-        ticker_column = self._detect_ticker_column(df, asset_type)
-        if ticker_column is None:
-            # Fallback to 'ticker' if no specific column found
-            ticker_column = 'ticker'
+        ticker_column = self._detect_ticker_column(df, asset_type) or "ticker"
 
         for _, row in df.iterrows():
             quantity = float(row.get("trade_rebal", 0.0))
             if quantity == 0.0:
                 continue
 
-            # Get ticker from the appropriate column
             ticker = ""
             if ticker_column in row:
                 ticker_value = row.get(ticker_column)
                 if pd.notna(ticker_value):
                     ticker = str(ticker_value).upper().strip()
 
-            # Calculate market value using the price and trade quantity
             market_value = self._estimate_trade_market_value(row, quantity, asset_type)
-
             trade_payload = {
                 "ticker": ticker,
                 "quantity": abs(quantity),
@@ -647,140 +366,75 @@ class TradingComplianceAnalyzer:
             },
         }
 
-    def _estimate_trade_market_value(
-            self,
-            row: pd.Series,
-            quantity: float,
-            asset_type: str,
-    ) -> float:
-        """Calculate market value using price and appropriate multiplier.
-
-        For the Trade Activity Details, we use the prices from the holdings data
-        with the trade_rebal quantities to get accurate market values.
-        """
+    @staticmethod
+    def _estimate_trade_market_value(row: pd.Series, quantity: float, asset_type: str) -> float:
+        """Market value of one trade: price x quantity x multiplier, or abs(qty x multiplier) without a price."""
         multiplier = 1.0
-
-        # For options, check for contract multiplier
         if asset_type == "options":
-            multiplier = 100.0  # Default for options
+            multiplier = 100.0  # Default for options; first positive multiplier column wins.
             for column in ("contract_multiplier", "multiplier"):
                 value = row.get(column)
                 if pd.notna(value):
                     try:
                         parsed = float(value)
-                        if parsed > 0:
-                            multiplier = parsed
-                            break
                     except (TypeError, ValueError):
                         continue
+                    if parsed > 0:
+                        multiplier = parsed
+                        break
 
-        # Get the price from the row
         price_value = 0.0
-        if "price" in row:
-            price_raw = row.get("price")
-            if pd.notna(price_raw):
-                try:
-                    price_value = float(price_raw)
-                except (TypeError, ValueError):
-                    price_value = 0.0
+        if "price" in row and pd.notna(row.get("price")):
+            try:
+                price_value = float(row.get("price"))
+            except (TypeError, ValueError):
+                price_value = 0.0
 
-        # Calculate market value
         if price_value > 0:
             return abs(price_value * quantity * multiplier)
-        else:
-            # Fallback if no price available
-            return abs(quantity * multiplier)
+        return abs(quantity * multiplier)
 
     @staticmethod
     def _detect_ticker_column(df: pd.DataFrame, asset_type: str) -> Optional[str]:
-        candidates = {
-            "equity": (
-                "ticker",
-                "equity_ticker",
-                "eqyticker",
-                "symbol",
-                "underlying_symbol",
-            ),
-            "options": (
-                "ticker",
-                "optticker",
-                "occ_symbol",
-                "option_ticker",
-            ),
-            "treasury": (
-                "cusip",
-                "ticker",
-                "security_id",
-                "bond_ticker",
-            ),
-        }
-
-        # Check each candidate column in order of preference
-        for column in candidates.get(asset_type, ("ticker",)):
-            if column in df.columns:
-                # Verify that the column has some non-null values
-                if df[column].notna().any():
-                    return column
-
-        # Final fallback - check if 'ticker' column exists even if not in candidates
+        for column in _TICKER_COLUMNS.get(asset_type, ("ticker",)):
+            if column in df.columns and df[column].notna().any():
+                return column
         if "ticker" in df.columns and df["ticker"].notna().any():
             return "ticker"
-
         return None
-
-
 
     # ------------------------------------------------------------------
     def _overall_status(self, payload: Mapping[str, Any]) -> str:
-        failures = 0
-        for name, result in payload.items():
-            if name == "summary_metrics":
-                continue
-            status = self._extract_status(result)
-            if status == "FAIL":
-                failures += 1
+        failures = sum(
+            1 for name, result in payload.items()
+            if name != "summary_metrics" and self._extract_status(result) == "FAIL"
+        )
         if failures:
             return "FAIL"
         return "PASS" if payload else "UNKNOWN"
 
-    def _extract_status(self, result: Any) -> str:
-        mapping: Optional[Mapping[str, Any]] = None
-        if isinstance(result, Mapping):
-            mapping = result
-        else:
-            attr_status = getattr(result, "is_compliant", None)
-            if isinstance(attr_status, bool):
-                return "PASS" if attr_status else "FAIL"
-            # Some result objects expose a ``status`` attribute or nested dict
-            attr_status_str = getattr(result, "status", None)
-            if isinstance(attr_status_str, str):
-                upper = attr_status_str.upper()
-                if upper in {"PASS", "FAIL"}:
-                    return upper
-            details = getattr(result, "details", None)
-            if isinstance(details, Mapping):
-                mapping = details
+    @staticmethod
+    def _extract_status(result: Any) -> str:
+        mapping: Optional[Mapping[str, Any]] = result if isinstance(result, Mapping) else None
         if mapping is None:
-            if isinstance(result, str):
-                value = result.upper()
-                if value in {"PASS", "FAIL"}:
-                    return value
-            return "UNKNOWN"
+            # Objects: is_compliant must be an exact bool, status a PASS/FAIL string.
+            status = _bool_status(getattr(result, "is_compliant", None)) or _str_status(
+                getattr(result, "status", None)
+            )
+            if status:
+                return status
+            details = getattr(result, "details", None)
+            if not isinstance(details, Mapping):
+                return _str_status(result) or "UNKNOWN"
+            mapping = details
 
-        status = mapping.get("is_compliant")
-        if isinstance(status, bool):
-            return "PASS" if status else "FAIL"
-        if isinstance(status, str):
-            upper = status.upper()
-            if upper in {"PASS", "FAIL"}:
-                return upper
-        status_value = mapping.get("status")
-        if isinstance(status_value, str):
-            upper = status_value.upper()
-            if upper in {"PASS", "FAIL"}:
-                return upper
-        return "UNKNOWN"
-
+        is_compliant = mapping.get("is_compliant")
+        return (
+            _bool_status(is_compliant)
+            or _str_status(is_compliant)
+            or _str_status(mapping.get("status"))
+            or "UNKNOWN"
+        )
 
     @staticmethod
     def _safe_percent(value: float, denominator: float) -> float:
