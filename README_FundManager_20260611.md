@@ -162,7 +162,8 @@ cfg = build_run(
     output_tag="etfs",
 )
 
-# Trading analysis on two funds, email suppressed
+# Trading analysis on two funds. Note: send_email is currently ignored for trading;
+# the trading-analysis email is always sent (the trading path has no switch yet).
 cfg = build_run(
     "trading_compliance",
     funds=["P2726", "RDVI"],
@@ -229,6 +230,9 @@ runs are unchanged). Design notes: `docs/ui_plan.md`.
 
 ```bash
 python -m streamlit run ui/app.py                                   # http://localhost:8501
+# behind the SSO proxy (FUNDMANAGER_UI_USER_HEADER set): listen on loopback, the proxy forwards to it
+python -m streamlit run ui/app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true
+# shared-password mode only (no user header): reachable on the internal network
 python -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
 ```
 
@@ -236,14 +240,21 @@ python -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501 --
   sidebar re-reads them), funds and exclusions with a live fund count; End of day
   (Compliance / Holdings recon / NAV recon) or Trading compliance; all rules or any
   subset; one as-of date or a range, per day or one stacked compliance workbook;
-  PDF, email, output tag. The request is checked with `processing.api.validate`
-  before **Run** is enabled. While a run is active the form is locked and a panel
+  PDF, email, output tag (blank = the CLI's tag for that run type, e.g. `eod`,
+  `compliance`, `time_series`, so the report file names match the CLI's). Weekend
+  dates snap to business days (an as-of Saturday runs Friday, a range runs its
+  first to last business day) and the caption lists the days that will run; there
+  is no holiday calendar. The request is checked with `processing.api.validate`
+  before **Run** is enabled. A stacked run with recon operations needs *Also write
+  daily reports* (the stacked workbook holds compliance only). Picks are kept while
+  you visit other pages. While a run is active the form is locked and a panel
   shows the progress bar (fund *index/total*), the stage, the log tail and **Cancel**;
   a refreshed or second browser reattaches to it. Afterwards: one download per
   report, **Download all (zip)**, the summary per day and any errors.
 - **Run history:** every past run (who, when, what, status, files) with its results
   and **Re-run** (loads the request back into the form, email off).
-- **Reports:** finished runs' reports by report date.
+- **Reports:** finished runs' reports by report date (each day a run wrote reports
+  for; a stacked workbook is listed under its range).
 
 Each run is one `python -m processing.worker` process (cwd = the run folder,
 `PYTHONPATH` = the repo) in `<FUNDMANAGER_UI_OUTPUT_ROOT>/<YYYYMMDD-HHMMSS>-<user>-<tag>/`,
@@ -251,9 +262,13 @@ which holds `request.json`, `progress.jsonl` (the worker's JSON-lines stdout),
 `run.log` (its stderr), `result.json`, `meta.json` (user, start/finish, request
 summary, exit code, cancelled / timed-out flags, publish history), `logs/` and
 `reports/`. Only one run happens per output root at a time (`.run.lock` holds the
-worker PID; a lock whose process is gone is cleared). Keep the output root short:
-report paths over 260 characters are handled with the `\\?\` path form, but plain
-Windows tools may struggle with them.
+worker PID and its process creation time; a lock whose process is gone, or whose PID
+now belongs to another process, is cleared, and Cancel never kills a process whose
+creation time does not match). A run keeps going if Streamlit restarts; the page
+reattaches, enforces the timeout and records the result when the worker ends.
+Keep the output root short (e.g. `C:\FundManager\ui_runs`; the sidebar warns when it
+is too long): report paths over 260 characters are handled with the `\\?\` path
+form, but Explorer and Excel may not open them from the run folder.
 
 | Var | Default | Purpose |
 |---|---|---|
@@ -272,12 +287,24 @@ Safety:
   request's `output_dir` with the run folder. **Publish** copies a finished run's
   `reports/` into `FUNDMANAGER_UI_PUBLISH_ROOT` (same sub-folders, existing files
   skipped, recorded in `meta.json`) only after a confirmation tick.
-- **Send email** is off by default (also on Re-run) and needs a second
-  confirmation tick. With `FUNDMANAGER_EMAIL_MODE=display` (the default) emails
-  open as Outlook drafts on the host running the UI.
+- **Send email** is off by default for End-of-day runs (also on Re-run) and needs a
+  second confirmation tick; both are cleared once a run starts, so every emailing
+  run is confirmed again. With `FUNDMANAGER_EMAIL_MODE=display` (the default)
+  emails open as Outlook drafts on the host running the UI.
+- **Trading compliance always sends** (or drafts) the trading-analysis email: the
+  backend's trading path has no `send_email` switch yet (`processing/run_modes.py`
+  `run_trading_mode`). The UI therefore shows *Send email* ticked and locked for
+  trading, warns, and requires the confirmation tick before **Run**.
 - Host it on the internal network only, behind the SSO proxy or with the shared
-  password. The DB connection string stays in `.env`; DB errors are shown only by
-  type.
+  password. With `FUNDMANAGER_UI_USER_HEADER` set the app trusts that header as
+  the user's identity, so Streamlit must only be reachable through the proxy
+  (`--server.address 127.0.0.1`, or a firewall rule) and the proxy must overwrite
+  any copy of the header sent by the client; otherwise anyone can claim any name.
+- The DB connection string stays in `.env`. A catalog failure is shown by
+  exception type only; worker errors and run-log tails are shown with
+  credentials masked (URL passwords, the `DB_CONNECTION_STRING` and
+  `FUNDMANAGER_SMTP_PASSWORD` values, MySQL user names) but are otherwise
+  verbatim, so they can still name the DB host.
 - Streamlit installs pyarrow, and recent pyarrow requires NumPy 2 while the
   project pins NumPy 1.26, so the UI avoids `st.dataframe` and renders tables as
   Markdown.
