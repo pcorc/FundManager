@@ -31,27 +31,13 @@ from reporting.trade_compliance_reporter import (
 
 _RECON_OPERATIONS = ("reconciliation", "nav_reconciliation")
 # (summary key prefix, reconciliation summary section) for the holdings email table.
-_HOLDINGS_EMAIL_SOURCES = (
-    ("equity", "custodian_equity"),
-    ("option", "custodian_option"),
-    ("flex_option", "custodian_flex_option"),
-    ("treasury", "custodian_treasury"),
-)
-_EOD_ATTACHMENT_KEYS = (
-    "reconciliation_summary_pdf",
-    "nav_reconciliation_excel",
-    "holdings_reconciliation_excel",
-    "compliance_pdf",
-    "compliance_excel",
-)
-_TRADING_ATTACHMENT_KEYS = (
-    "trading_compliance_combined_pdf",
-    "trading_compliance_combined_excel",
-    "trading_compliance_pdf",
-    "trading_compliance_excel",
-    "trading_ex_post_compliance_pdf",
-    "trading_ex_post_compliance_excel",
-)
+_HOLDINGS_EMAIL_SOURCES = (("equity", "custodian_equity"), ("option", "custodian_option"),
+                           ("flex_option", "custodian_flex_option"), ("treasury", "custodian_treasury"))
+_EOD_ATTACHMENT_KEYS = ("reconciliation_summary_pdf", "nav_reconciliation_excel", "holdings_reconciliation_excel",
+                        "compliance_pdf", "compliance_excel")
+_TRADING_ATTACHMENT_KEYS = ("trading_compliance_combined_pdf", "trading_compliance_combined_excel",
+                            "trading_compliance_pdf", "trading_compliance_excel",
+                            "trading_ex_post_compliance_pdf", "trading_ex_post_compliance_excel")
 
 
 def _subdir(base: Path, name: str) -> Path:

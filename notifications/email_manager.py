@@ -25,26 +25,13 @@ EMAIL_MODE = os.environ.get("FUNDMANAGER_EMAIL_MODE", "display")
 GL_COLUMNS = ("Equity G/L", "Option G/L", "Flex Option G/L", "Treasury G/L")
 _NAV_VALUE_COLUMNS = (("Expected NAV", "expected_nav"), ("Custodian NAV", "current_nav"), ("NAV Diff ($)", "difference"))
 _NAV_GOOD_COLUMNS = (("NAV Good (2 Digit)", "nav_good_two"), ("NAV Good (4 Digit)", "nav_good_four"))
-_HOLDINGS_COLUMNS = (
-    ("equity_holdings", "holdings"),
-    ("equity_price", "price"),
-    ("option_holdings", "holdings"),
-    ("option_price", "price"),
-    ("flex_option_holdings", "holdings"),
-    ("flex_option_price", "price"),
-    ("treasury_holdings", "holdings"),
-    ("treasury_price", "price"),
-    ("index_holdings", "holdings"),
-)
+# (summary key, break kind): equity/option/flex/treasury holdings+price, then index holdings.
+_HOLDINGS_COLUMNS = tuple(
+    (f"{asset}_{kind}", kind) for asset in ("equity", "option", "flex_option", "treasury") for kind in ("holdings", "price")
+) + (("index_holdings", "holdings"),)
 # (metric key, rendered as percent)
-_TRADE_COLUMNS = (
-    ("trade_value", False),
-    ("pct_of_tna", True),
-    ("pct_of_total_assets", True),
-    ("ex_ante_market_value", False),
-    ("ex_post_market_value", False),
-    ("market_value_delta", False),
-)
+_TRADE_COLUMNS = (("trade_value", False), ("pct_of_tna", True), ("pct_of_total_assets", True),
+                  ("ex_ante_market_value", False), ("ex_post_market_value", False), ("market_value_delta", False))
 _DEFAULT_RECIPIENTS = ["pcorcoran@vestfin.com"]
 
 
