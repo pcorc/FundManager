@@ -15,7 +15,7 @@ from typing import Dict, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 from processing.bulk_data_loader import BulkDataLoader, BulkDataStore
 from processing.fund_manager import FundManager, ProcessingResults
-from processing.fund import Fund, FundRegistry
+from processing.fund import FundRegistry
 from reporting.compliance_reporter import (
     build_compliance_reports,
     build_compliance_reports_for_range,
@@ -148,7 +148,6 @@ def run_eod_mode(
         )
 
     if any(name in params.operations for name in ("reconciliation", "nav_reconciliation")):
-        fund_registry = _extract_fund_registry(results)
         artefacts["reconciliation"] = build_nav_reconciliation_reports(
             holdings_results=reconciliation_payload if "reconciliation" in params.operations else None,
             nav_results=nav_payload if "nav_reconciliation" in params.operations else None,
@@ -206,7 +205,6 @@ def run_trading_mode(
         raise RuntimeError("Trading compliance run produced no compliance results to compare")
 
     # Extract fund registry from ex_post results for property-based reporting
-    fund_registry_ex_post = _extract_fund_registry(results_ex_post)
 
     # Extract traded funds information from the ex_post results
     # This should include the holdings data with trade_rebal information
@@ -240,7 +238,6 @@ def run_trading_mode(
         report_date=params.ex_post_date,
         output_dir=str(output_dir),
         traded_funds_info=traded_funds_info,  # Pass the populated traded_funds_info
-        fund_registry=fund_registry_ex_post,  # NEW: Pass fund registry for property-based reporting
         file_name_prefix=_build_prefix("trading_analysis"),
         create_pdf=params.create_pdf,
     )
@@ -353,7 +350,6 @@ def run_eod_range_mode(
 
         if any(name in operations for name in ("reconciliation", "nav_reconciliation")):
             # Extract fund registry for property-based reconciliation reporting
-            fund_registry = _extract_fund_registry(day_results)
 
             artefacts["reconciliation"] = build_nav_reconciliation_reports(
                 holdings_results=reconciliation_payload if "reconciliation" in operations else None,
@@ -457,26 +453,6 @@ def _run_operations(
     return manager.run_daily_operations(
         list(operations), compliance_tests=list(compliance_tests)
     )
-
-
-def _extract_fund_registry(results: ProcessingResults) -> Dict[str, Fund]:
-    """Extract Fund objects from ProcessingResults to create registry for reporting.
-
-    This enables property-based logic throughout the reporting pipeline,
-    allowing reports to leverage fund properties like is_private_fund,
-    uses_index_flex, etc.
-
-    Args:
-        results: ProcessingResults containing fund_results with Fund objects
-
-    Returns:
-        Dictionary mapping fund names to Fund objects
-    """
-    fund_registry: Dict[str, Fund] = {}
-    for fund_name, fund_result in results.fund_results.items():
-        if fund_result.fund:
-            fund_registry[fund_name] = fund_result.fund
-    return fund_registry
 
 
 def _iter_business_days(start: date, end: date):

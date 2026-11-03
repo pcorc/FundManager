@@ -8,7 +8,6 @@ from typing import Any, Dict, Iterable, Mapping
 from fpdf import FPDF
 
 from reporting.holdings_recon_renderer import HoldingsReconciliationRenderer
-from reporting.compliance_summary_extractor import extract_compliance_summary
 
 logger = logging.getLogger(__name__)
 
@@ -49,14 +48,11 @@ class CombinedReconciliationReport:
         holdings_recon_summary: Mapping[str, Iterable[Mapping[str, Any]]],
         date: str,
         output_path: str | Path,
-        *,
-        compliance_results: Mapping[str, Any] | None = None,
     ) -> None:
         self.nav_results = nav_reconciliation_results or {}
         self.holdings_results = holdings_reconciliation_results or {}
         self.nav_summary = nav_recon_summary or {}
         self.holdings_summary = holdings_recon_summary or {}
-        self.compliance_results = compliance_results or {}
         self.date = str(date)
         self._all_funds_cache: set[str] | None = None
         self._nav_data_cache: Dict[str, Dict[str, Any]] | None = None
@@ -84,8 +80,6 @@ class CombinedReconciliationReport:
 
     def _build_summary_links(self) -> Dict[str, int]:
         keys = ["nav", "holdings", "gl"]
-        if self.compliance_results:
-            keys.append("compliance")
         links: Dict[str, int] = {}
         for key in keys:
             link_id = self.pdf.add_link()
@@ -126,8 +120,6 @@ class CombinedReconciliationReport:
         self._add_title_page()
         self._add_nav_summary_page()
         self._add_holdings_summary_page()
-        if self.compliance_results:
-            self._add_compliance_summary_page()
         self._add_gl_components_page()
         for fund in sorted(self._get_all_funds()):
             self._add_fund_detail_page(fund)
@@ -156,9 +148,6 @@ class CombinedReconciliationReport:
             ("Holdings Reconciliation Summary", self.pdf.summary_links.get("holdings")),
             ("Gain/Loss Components", self.pdf.summary_links.get("gl")),
         ]
-
-        if self.compliance_results:
-            summary_sections.append(("Compliance Summary", self.pdf.summary_links.get("compliance")))
 
         for label, link_id in summary_sections:
             if link_id:
@@ -341,75 +330,6 @@ class CombinedReconciliationReport:
                 self.pdf.cell(width, 6, text, border=1, fill=True, align="C")
 
             self.pdf.ln()
-
-    def _add_compliance_summary_page(self) -> None:
-        self.pdf.add_page()
-        link_id = self.pdf.summary_links.get("compliance")
-        if link_id:
-            self.pdf.set_link(link_id, page=self.pdf.page_no())
-
-        self.pdf.set_font("Arial", "B", 14)
-        self.pdf.cell(0, 10, "Compliance Summary", ln=True, align="C")
-        self.pdf.cell(0, 6, f"Date: {self.date}", ln=True, align="C")
-        self.pdf.ln(5)
-
-        summary = extract_compliance_summary(self.compliance_results)
-        if not summary:
-            self.pdf.cell(0, 8, "No compliance data available", ln=True)
-            return
-
-        cols = [
-            ("Fund", 25),
-            ("GICS", 18),
-            ("80%", 18),
-            ("40 Act", 18),
-            ("IRS", 18),
-            ("IRC", 18),
-            ("Illiq", 18),
-            ("RE", 18),
-            ("Comm", 18),
-            ("12d1", 18),
-            ("12d2", 18),
-            ("12d3", 18),
-        ]
-
-        self.pdf.set_font("Arial", "B", 8)
-        self.pdf.set_fill_color(240, 240, 240)
-        for label, width in cols:
-            self.pdf.cell(width, 7, label, border=1, fill=True, align="C")
-        self.pdf.ln()
-        self.pdf.set_font("Arial", size=8)
-
-        test_keys = ["GICS", "80%", "40 Act", "IRS", "IRC", "Illiquid", "RE", "Comm", "12d1", "12d2", "12d3"]
-        for fund_name in sorted(summary):
-            fund_summary = summary[fund_name]
-            x, y = self.pdf.get_x(), self.pdf.get_y()
-            self.pdf.set_font("Arial", "BU", 8)
-            self.pdf.set_text_color(0, 0, 200)
-            self.pdf.cell(cols[0][1], 6, fund_name, border=1, align="C")
-            if fund_name in self.fund_links:
-                self.pdf.link(x, y, cols[0][1], 6, self.fund_links[fund_name])
-            self.pdf.set_font("Arial", size=8)
-            self.pdf.set_text_color(0, 0, 0)
-
-            for key, (_, width) in zip(test_keys, cols[1:], strict=False):
-                result = fund_summary.get(key, "N/A")
-                if result == "PASS":
-                    self.pdf.set_fill_color(200, 255, 200)
-                    self.pdf.set_text_color(0, 100, 0)
-                elif result == "FAIL":
-                    self.pdf.set_fill_color(255, 200, 200)
-                    self.pdf.set_text_color(139, 0, 0)
-                else:
-                    self.pdf.set_fill_color(245, 245, 245)
-                    self.pdf.set_text_color(100, 100, 100)
-                self.pdf.cell(width, 6, result, border=1, fill=True, align="C")
-                self.pdf.set_text_color(0, 0, 0)
-            self.pdf.ln()
-
-        self.pdf.ln(5)
-        self.pdf.set_font("Arial", "I", 8)
-        self.pdf.cell(0, 5, "Legend: Green = PASS | Red = FAIL | Gray = N/A (Not Applicable)", ln=True)
 
     def _add_gl_components_page(self) -> None:
         self.pdf.add_page()
@@ -930,8 +850,6 @@ def build_combined_reconciliation_pdf(
     holdings_summary: Mapping[str, Iterable[Mapping[str, Any]]],
     date: str,
     output_path: str | Path,
-    *,
-    compliance_results: Mapping[str, Any] | None = None,
 ) -> CombinedReconciliationReport:
     """Entry point used by higher level orchestrators."""
     return CombinedReconciliationReport(
@@ -941,5 +859,4 @@ def build_combined_reconciliation_pdf(
         holdings_recon_summary=holdings_summary,
         date=date,
         output_path=output_path,
-        compliance_results=compliance_results,
     )
