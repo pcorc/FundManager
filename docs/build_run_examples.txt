@@ -3,7 +3,7 @@ build_run() — Configuration Examples
 ================================================================================
 
 Every run of FundManager starts with build_run(...). It returns one or more
-cfg dicts that main.execute_run(cfg) consumes. Below is a catalogue of common
+RunRequests that processing.api.execute_run(cfg) consumes. Below is a catalogue of common
 invocation patterns and what each one produces.
 
 
@@ -84,7 +84,7 @@ board-deck-style "compliance over time" views.
     )
 
 Passing a list of modes makes build_run return a list of cfgs (one per
-mode). main.execute_run iterates them sequentially: compliance first, then
+mode). execute_run iterates them sequentially: compliance first, then
 reconciliation, then NAV. Each gets its own output_tag derived from the
 base:
 

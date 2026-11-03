@@ -1,6 +1,5 @@
 # config/operation_config.py
 from dataclasses import dataclass
-from typing import List
 from enum import Enum
 
 
@@ -13,40 +12,10 @@ class OperationMode(Enum):
 
 @dataclass
 class OperationConfig:
+    """Which pipeline produced an email (selects recipients, subject and body)."""
+
     mode: OperationMode
-    analysis_type: str  # 'eod', 'ex_ante', 'ex_post'
-    run_compliance: bool
-    run_reconciliation: bool
-    run_nav_reconciliation: bool
-    test_functions: List[str]
 
     @classmethod
-    def create(cls, mode: OperationMode, analysis_type: str = None) -> 'OperationConfig':
-        """Factory method for different operation modes"""
-        configs = {
-            OperationMode.EOD: OperationConfig(
-                mode=OperationMode.EOD,
-                analysis_type='eod',
-                run_compliance=True,
-                run_reconciliation=True,
-                run_nav_reconciliation=True,
-                test_functions=[...]  # Your full test list
-            ),
-            OperationMode.TRADING_COMPLIANCE: OperationConfig(
-                mode=OperationMode.TRADING_COMPLIANCE,
-                analysis_type=None,  # Will use both ex_ante and ex_post
-                run_compliance=True,
-                run_reconciliation=False,
-                run_nav_reconciliation=False,
-                test_functions=[...]  # Compliance tests only
-            ),
-            OperationMode.COMPLIANCE_ONLY: OperationConfig(
-                mode=OperationMode.COMPLIANCE_ONLY,
-                analysis_type='eod',
-                run_compliance=True,
-                run_reconciliation=False,
-                run_nav_reconciliation=False,
-                test_functions=[...]
-            )
-        }
-        return configs[mode]
+    def create(cls, mode: OperationMode) -> "OperationConfig":
+        return cls(mode=mode)

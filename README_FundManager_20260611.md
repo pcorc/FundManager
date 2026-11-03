@@ -10,8 +10,8 @@ in-memory snapshots.
 ## What runs
 
 Five operational **modes**, all built on the same loader + fund-object
-foundation. Each mode is parameterised through `config/run_configurations.py`
-and dispatched by `processing/run_modes.py`.
+foundation. Each mode is a preset in `config/run_configurations.py`, turned
+into a `RunRequest` and executed by `processing/api.py`.
 
 | Mode | What it does | When it runs |
 |---|---|---|
@@ -48,11 +48,11 @@ Pass cohorts (or explicit fund tickers) to `build_run(...)` to scope a run.
 ## Architecture
 
 ```
-config.run_configurations
-        │ build_run(mode, cohorts/funds, dates, …) → cfg
+processing.api
+        │ build_run(mode, cohorts/funds, dates, …) → RunRequest   (or build one directly, e.g. from a UI)
+        │ run(request) → RunResult  (per-day loop, or one stacked range run)
         ▼
-main.py
-        │ cfg → params (via utilities/cli_options.apply_overrides + resolve_*)
+processing.run_modes  (run_eod_mode / run_trading_mode / run_eod_range_mode)
         ▼
 processing.bulk_data_loader.BulkDataLoader
         │ one pass against reconciliation.* SQL views per date
@@ -83,9 +83,11 @@ notifications.email_manager.EmailManager (Outlook draft / SMTP send)
 - **`processing/fund_manager.py`** — executes the requested operations
   (compliance / reconciliation / nav_reconciliation) per fund and packs the
   outputs into `ProcessingResults`.
-- **`config/run_configurations.py`** — `MODES` dict + `build_run(...)`
-  factory. **This is the single entry point** for kicking off any run
-  (script, scheduler, or UI).
+- **`processing/api.py`** — `RunRequest` / `RunResult`, `build_run(...)`
+  presets, `run(...)`, and `catalog()` (cohorts, funds, operations and
+  compliance rules a UI can offer). **This is the single entry point** for
+  kicking off any run (script, scheduler, or UI).
+- **`config/run_configurations.py`** — `MODES` presets, `COHORTS`, rule suites.
 - **`processing/run_modes.py`** — orchestration. `run_eod_mode`,
   `run_trading_mode`, `run_eod_range_mode` — each loads data, runs
   operations, builds reports, and fires email notifications.
@@ -146,7 +148,7 @@ Suppress per-run with `build_run(..., send_email=False)`.
 Everything goes through `build_run(...)`:
 
 ```python
-from config.run_configurations import build_run
+from processing.api import build_run, execute_run
 from config.fund_definitions import ETF_FUNDS
 
 # EOD for the ETF cohort
@@ -176,7 +178,12 @@ cfg = build_run(
 )
 ```
 
-`cfg` is then handed to `main.execute_run(cfg)`. See
+`cfg` is then handed to `execute_run(cfg)`. From the command line:
+`python main.py eod --cohort ETF_FUNDS --start 2026-05-22 --tag etfs`. A UI can
+build `processing.api.RunRequest(...)` directly — e.g. any subset of
+`operations`, `compliance_tests=("diversification_40act_check",)` for a single
+rule, `cohorts=("ETF_FUNDS",)`, and `date_mode="per_day"` or `"stacked"` over
+`start_date`..`end_date` — and call `run(request)`. See
 `docs/build_run_examples.txt` for a fuller catalogue of invocation patterns.
 
 ---

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 import logging
 
 from notifications.email_manager import EmailManager, EmailPayload
 
-from typing import Dict, Mapping, MutableMapping, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 from processing.bulk_data_loader import BulkDataLoader, BulkDataStore
 from processing.fund_manager import FundManager, ProcessingResults
@@ -23,6 +23,7 @@ from reporting.compliance_reporter import (
 from reporting.compliance_reporting import GeneratedComplianceReport
 from config.operation_config import OperationConfig, OperationMode
 from reporting.nav_recon_reporter import build_nav_reconciliation_reports
+from utilities.workdays import business_day_offset, iter_business_days
 from reporting.trade_compliance_reporter import (
     build_trading_compliance_reports,
     combine_trading_and_compliance_reports,
@@ -34,14 +35,31 @@ def _subdir(base: Path, name: str) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     return out
 
-@dataclass(frozen=True)
-class DataLoadRequest:
-    """Describe a unique combination of target/previous dates to fetch."""
+@dataclass
+class EODRunParameters:
+    """Resolved configuration for an EOD analysis run."""
 
-    label: str
-    target_date: date
-    previous_date: Optional[date] = None
-    analysis_type: Optional[str] = None
+    trade_date: date
+    previous_trade_date: date
+    operations: List[str]
+    compliance_tests: List[str]
+    output_tag: str | None
+    create_pdf: bool
+    send_email: bool = True
+
+
+@dataclass
+class TradingComplianceParameters:
+    """Resolved configuration for the trading compliance comparison."""
+
+    ex_ante_date: date
+    ex_post_date: date
+    vest_previous_date: date
+    custodian_date: date
+    custodian_previous_date: date
+    compliance_tests: List[str]
+    create_pdf: bool
+    output_tag: str | None
 
 
 @dataclass(frozen=True)
@@ -52,61 +70,6 @@ class RangeRunResults:
     daily_artefacts: "OrderedDict[str, Mapping[str, object]]"
     stacked_compliance: Optional["GeneratedComplianceReport"]
 
-
-def plan_eod_requests(params) -> Sequence[DataLoadRequest]:
-    """Return the data requests needed for an EOD run."""
-
-    return [
-        DataLoadRequest(
-            label="eod",
-            target_date=params.trade_date,
-            previous_date=params.previous_trade_date,
-            analysis_type="eod",
-        )
-    ]
-
-
-def plan_trading_requests(params) -> Sequence[DataLoadRequest]:
-    """Return the data requests needed for trading compliance."""
-
-    return [
-        DataLoadRequest(
-            label="ex_ante",
-            target_date=params.ex_ante_date,
-            previous_date=params.vest_previous_date,
-            analysis_type="ex_ante",
-        ),
-        DataLoadRequest(
-            label="ex_post",
-            target_date=params.ex_post_date,
-            previous_date=params.custodian_previous_date,
-            analysis_type="ex_post",
-        ),
-    ]
-
-
-def fetch_data_stores(
-    session,
-    registry: FundRegistry,
-    requests: Sequence[DataLoadRequest],
-) -> Dict[str, BulkDataStore]:
-    """Load all required data stores using minimal database calls."""
-
-    loader = BulkDataLoader(session, registry)
-    cache: Dict[Tuple[date, Optional[date], Optional[str]], BulkDataStore] = {}
-    stores: Dict[str, BulkDataStore] = {}
-
-    for request in requests:
-        key = (request.target_date, request.previous_date, request.analysis_type)
-        if key not in cache:
-            cache[key] = loader.load_all_data_for_date(
-                request.target_date,
-                previous_date=request.previous_date,
-                analysis_type=request.analysis_type,
-            )
-        stores[request.label] = cache[key]
-
-    return stores
 
 def run_eod_mode(
     registry: FundRegistry,
@@ -282,7 +245,6 @@ def run_trading_mode(
 
 def run_eod_range_mode(
     session,
-    base_cls,
     registry: FundRegistry,
     *,
     start_date: date,
@@ -309,8 +271,8 @@ def run_eod_range_mode(
     def _build_prefix(base: str) -> str:
         return f"{base}_{output_tag}" if output_tag else base
 
-    for trade_date in _iter_business_days(start_date, end_date):
-        previous_date = _previous_business_day(trade_date)
+    for trade_date in iter_business_days(start_date, end_date):
+        previous_date = business_day_offset(trade_date, -1)
         data_store = loader.load_all_data_for_date(
             trade_date,
             previous_date=previous_date,
@@ -453,23 +415,6 @@ def _run_operations(
     return manager.run_daily_operations(
         list(operations), compliance_tests=list(compliance_tests)
     )
-
-
-def _iter_business_days(start: date, end: date):
-    """Iterate over business days (Monday-Friday) in date range."""
-    current = start
-    while current <= end:
-        if current.weekday() < 5:
-            yield current
-        current += timedelta(days=1)
-
-
-def _previous_business_day(anchor: date) -> date:
-    """Return the previous business day before anchor date."""
-    current = anchor - timedelta(days=1)
-    while current.weekday() >= 5:
-        current -= timedelta(days=1)
-    return current
 
 
 def _extract_payload(results: ProcessingResults, attribute: str) -> Dict[str, Mapping[str, object]]:
@@ -629,15 +574,3 @@ def _build_trading_email_payload(
     )
 
 
-__all__ = [
-    "DataLoadRequest",
-    "RangeRunResults",
-    "plan_eod_requests",
-    "plan_trading_requests",
-    "fetch_data_stores",
-    "run_eod_mode",
-    "run_eod_range_mode",
-    "run_trading_mode",
-    "flatten_eod_paths",
-    "flatten_trading_paths",
-]

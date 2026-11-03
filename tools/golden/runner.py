@@ -114,6 +114,14 @@ def install_email_capture(emails: list):
     EmailManager._send_email = capture
 
 
+def _redirect(cfg, out_dir: Path):
+    """Point a run config (legacy dict or RunRequest) at the scenario's output dir."""
+    if isinstance(cfg, dict):
+        return {**cfg, "output_dir": str(out_dir)}
+    from dataclasses import replace
+    return replace(cfg, output_dir=str(out_dir))
+
+
 def main(argv):
     scenario, mode, data_dir, run_root = argv[1], argv[2], Path(argv[3]), Path(argv[4])
     sys.argv = sys.argv[:1]  # main.main() parses sys.argv via argparse
@@ -148,8 +156,10 @@ def main(argv):
         mode_arg = spec.pop("mode")
         spec["cohorts"] = [getattr(fd, name) for name in spec.get("cohorts", [])] or None
         cfg = app.build_run(mode_arg, **spec)
-        for c in (cfg if isinstance(cfg, list) else [cfg]):
-            c["output_dir"] = str(out_dir)
+        if isinstance(cfg, list):
+            cfg = [_redirect(c, out_dir) for c in cfg]
+        else:
+            cfg = _redirect(cfg, out_dir)
         status["exit_code"] = app.execute_run(cfg)
     except BaseException as exc:  # record, don't hide: an exception is part of the output
         status["error"] = f"{type(exc).__name__}: {exc}"
