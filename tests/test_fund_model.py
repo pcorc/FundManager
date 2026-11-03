@@ -190,5 +190,26 @@ class IndexFlexOverlapTests(unittest.TestCase):
         self.assertEqual(list(merged["net_market_value"]), [100.0 - 1.0 + 300_000.0, 100.0 - 2.0, 100.0 + 240_000.0])
 
 
+class OptionPriceBreakWeightTests(unittest.TestCase):
+    def test_closed_end_top5_ranks_short_call_book_by_gross_exposure(self):
+        from processing.fund import FundData, FundHoldings, FundSnapshot
+        from services.reconciliator import Reconciliator
+
+        fund = build_fund_registry()["HE3B1"]
+        fund.config["eod_report_strategy"] = "CEF"  # closed-end: listed option price breaks keep the top 5
+        tickers = [f"T{i} US 10/30/26 C100" for i in range(7)]
+        contracts = [-1, -70, -2, -50, -30, -3, -40]  # all short calls: the net option MV is negative
+        vest = pd.DataFrame({"optticker": tickers, "nav_shares": contracts, "price": [1.0] * 7})
+        cust = pd.DataFrame({"optticker": tickers, "quantity": contracts, "price": [1.5] * 7})
+        fund.data = FundData(current=FundSnapshot(vest=FundHoldings(options=vest),
+                                                  custodian=FundHoldings(options=cust)))
+
+        recon = Reconciliator(fund)
+        recon.reconcile_custodian_option()
+        breaks = recon.results["custodian_option"].price_discrepancies_T
+        self.assertEqual(sorted(breaks["optticker"]), sorted(tickers[i] for i in (1, 3, 4, 6, 5)))
+        self.assertAlmostEqual(breaks["option_weight"].max(), 70 / 196)
+
+
 if __name__ == "__main__":
     unittest.main()

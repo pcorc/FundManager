@@ -201,10 +201,11 @@ class Reconciliator:
 
         if not flex and not df_oms.empty and 'price' in df_oms.columns and 'quantity' in df_oms.columns:
             df_oms['market_value'] = df_oms['quantity'].fillna(0) * df_oms['price'].fillna(0) * 100
-            total_mv = df_oms['market_value'].sum()
+            # Weight by gross exposure: short-call books have a negative net MV
+            gross_mv = df_oms['market_value'].abs().sum()
             df_oms['option_weight'] = 0.0
-            if total_mv > 0:
-                df_oms['option_weight'] = df_oms['market_value'] / total_mv
+            if gross_mv > 0:
+                df_oms['option_weight'] = df_oms['market_value'].abs() / gross_mv
 
         if flex:
             # FLEX opttickers don't match between sides — OMS emits
