@@ -86,6 +86,30 @@ def safe_name(text: Optional[str], default: str = "run", max_len: int = 40) -> s
     return cleaned or default
 
 
+_EXTENDED = "\\\\?\\"  # the Windows extended-length path prefix
+_MAX_PATH = 259  # Windows MAX_PATH (260) less the terminating NUL, when long paths are not enabled
+REPORT_NAME_RESERVE = 100  # longest "<sub-folder>/<report file>" the backend writes under output_dir
+
+
+def long_path(path: Path, reserve: int = REPORT_NAME_RESERVE) -> str:
+    """``path`` as text; on Windows in extended-length form when ``path`` + ``reserve`` chars would pass MAX_PATH.
+
+    A deep output root (or a long user/tag) otherwise makes the backend's report writes fail with
+    FileNotFoundError on hosts without LongPathsEnabled. ``path`` must be absolute.
+    """
+    text = str(path)
+    if os.name != "nt" or text.startswith(_EXTENDED) or len(text) + reserve <= _MAX_PATH:
+        return text
+    return _EXTENDED + "UNC\\" + text[2:] if text.startswith("\\\\") else _EXTENDED + text
+
+
+def plain_path(text: str) -> str:
+    """Undo :func:`long_path` (for comparing and displaying paths)."""
+    if text.startswith(_EXTENDED + "UNC\\"):
+        return "\\\\" + text[len(_EXTENDED) + 4:]
+    return text[len(_EXTENDED):] if text.startswith(_EXTENDED) else text
+
+
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -268,7 +292,7 @@ def start_run(request: RunRequest, *, user: str, root: Optional[Path] = None,
     _acquire_lock(root, run_dir, user)
     try:
         (run_dir / REPORTS).mkdir(parents=True)
-        request = replace(request, output_dir=str(run_dir / REPORTS))
+        request = replace(request, output_dir=long_path(run_dir / REPORTS))
         (run_dir / REQUEST).write_text(request_to_json(request), encoding="utf-8")
         update_meta(run_dir, user=user, started=now_iso(), finished=None, summary=summarize(request),
                     tag=request.output_tag, send_email=request.send_email, exit_code=None, cancelled=False,
@@ -481,15 +505,15 @@ def publish(run_dir: Path, dest_root: Optional[Path], *, by: str) -> Tuple[List[
         raise ValueError("Only finished runs can be published")
     copied: List[Path] = []
     skipped: List[Path] = []
-    reports = run_dir / REPORTS
+    reports, dest = Path(long_path(run_dir / REPORTS)), Path(long_path(Path(os.path.abspath(dest_root))))
     for source in sorted(p for p in reports.rglob("*") if p.is_file()):
-        target = dest_root / source.relative_to(reports)
+        target = dest / source.relative_to(reports)
         if target.exists():
-            skipped.append(target)
+            skipped.append(Path(plain_path(str(target))))
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-        copied.append(target)
+        copied.append(Path(plain_path(str(target))))
     history = list(meta.get("published") or [])
     history.append({"to": str(dest_root), "at": now_iso(), "by": by, "copied": len(copied), "skipped": len(skipped)})
     update_meta(run_dir, published=history)

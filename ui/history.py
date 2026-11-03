@@ -116,16 +116,16 @@ def load_result(run_dir: Path) -> RunResult:
     """``result.json`` as a ``RunResult``; ``files`` keeps only existing files inside ``run_dir``."""
     run_dir = Path(run_dir)
     data = runner.read_json(run_dir / runner.RESULT) or {}
-    base = run_dir.resolve()
+    base = os.path.normcase(os.path.abspath(runner.plain_path(str(run_dir)))) + os.sep
     files = []
     for item in data.get("files") or []:
         try:
             report = ReportFile(day=str(item["day"]), label=str(item["label"]), path=str(item["path"]),
                                 kind=str(item.get("kind") or "excel"))
-            path = Path(report.path).resolve()
+            inside = os.path.normcase(os.path.abspath(runner.plain_path(report.path))).startswith(base)
         except (KeyError, TypeError, OSError, ValueError):
             continue
-        if path.is_file() and path.is_relative_to(base):
+        if inside and os.path.isfile(report.path):  # report.path may be in extended-length form (long paths)
             files.append(report)
     exit_code = data.get("exit_code")
     return RunResult(

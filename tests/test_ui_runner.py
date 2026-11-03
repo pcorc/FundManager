@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,7 @@ from ui import runner  # noqa: E402
 
 FAKE_WORKER = [sys.executable, str(Path(__file__).with_name("fake_worker.py"))]
 DAY = date(2026, 10, 30)
+EXTENDED = "\\" * 2 + "?" + "\\"  # the Windows extended-length path prefix
 
 
 def req(tag: str = "ok", **kwargs) -> RunRequest:
@@ -50,6 +52,7 @@ class RunnerTestCase(unittest.TestCase):
         for run_dir, proc in list(runner._PROCESSES.items()):
             runner._terminate(proc)
             runner.wait(Path(run_dir), timeout=15)
+        shutil.rmtree(runner.long_path(Path(self._tmp.name).resolve(), reserve=1000), ignore_errors=True)  # >260 chars
         self._tmp.cleanup()
 
     def start(self, request: RunRequest, **kwargs) -> Path:
@@ -180,6 +183,38 @@ class RunLifecycleTest(RunnerTestCase):
         self.assertIsNone(runner.read_lock(self.root))
         meta = runner.read_json(next(self.root.iterdir()) / runner.META)
         self.assertIn("Could not start the worker", meta["error"])
+
+
+class LongPathTest(RunnerTestCase):
+    def test_long_path_helpers(self) -> None:
+        short = str(self.root / "x")
+        self.assertEqual(runner.long_path(short), short)
+        sep = "\\"
+        deep = "C:" + sep + "d" * 200
+        expected = deep if os.name != "nt" else EXTENDED + deep
+        self.assertEqual(runner.long_path(deep), expected)
+        self.assertEqual(runner.plain_path(runner.long_path(deep)), deep)
+        unc = sep * 2 + "srv" + sep + "share" + sep + "u" * 200
+        self.assertEqual(runner.plain_path(runner.long_path(unc)), unc)
+        if os.name == "nt":
+            self.assertTrue(runner.long_path(unc).startswith(EXTENDED + "UNC" + sep + "srv" + sep))
+
+    @unittest.skipUnless(os.name == "nt", "MAX_PATH is a Windows limit")
+    def test_deep_output_root_still_works(self) -> None:
+        from ui import history
+
+        self.root = Path(self._tmp.name) / ("deep_" + "r" * 60) / ("deeper_" + "s" * 60)
+        run_dir = self.start(req(create_pdf=True))
+        self.assertTrue(runner.wait(run_dir, timeout=30))
+        sent = request_from_json((run_dir / runner.REQUEST).read_text(encoding="utf-8"))
+        self.assertTrue(sent.output_dir.startswith(EXTENDED))
+        self.assertEqual(runner.read_json(run_dir / runner.META)["exit_code"], 0)
+        result = history.load_result(run_dir)
+        self.assertEqual(len(result.files), 2)
+        self.assertIsNotNone(history.zip_reports(run_dir))
+        copied, _ = runner.publish(run_dir, Path(self._tmp.name) / "pub", by="tester")
+        self.assertEqual(len(copied), 2)
+        self.assertFalse(str(copied[0]).startswith(EXTENDED))
 
 
 class StaleLockTest(RunnerTestCase):
