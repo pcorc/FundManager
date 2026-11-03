@@ -1,5 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Dict
 import pandas as pd
 
@@ -110,24 +110,7 @@ class NAVSummary:
 
     def to_dict(self) -> Dict[str, float]:
         """Convert to dictionary for reporting."""
-        return {
-            "fund_name": self.fund_name,
-            "analysis_date": self.analysis_date,
-            "prior_date": self.prior_date,
-            "beginning_tna": self.beginning_tna,
-            "adjusted_beginning_tna": self.adjusted_beginning_tna,
-            "expected_tna": self.expected_tna,
-            "custodian_tna": self.custodian_tna,
-            "tna_difference": self.tna_difference,
-            "shares_outstanding": self.shares_outstanding,
-            "expected_nav": self.expected_nav,
-            "custodian_nav": self.custodian_nav,
-            "nav_difference": self.nav_difference,
-            "nav_good_2_decimal": self.nav_good_2_decimal,
-            "nav_good_4_decimal": self.nav_good_4_decimal,
-            "diff_pct_4_decimal": self.diff_pct_4_decimal,
-            "diff_pct_2_decimal": self.diff_pct_2_decimal,
-        }
+        return asdict(self)
 
 
 @dataclass

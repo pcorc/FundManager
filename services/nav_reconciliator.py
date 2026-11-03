@@ -1,13 +1,12 @@
 """NAV reconciliation service built on top of the Fund domain object."""
 from __future__ import annotations
-from typing import Dict, Optional
+from typing import Optional
 from datetime import date, datetime
 import logging
 
 import pandas as pd
 
 from processing.fund import Fund
-from config.fund_definitions import INDEX_FLEX_FUNDS
 from services.nav_recon_dataclasses import (
     AssetClassGainLoss,
     TickerGainLoss,
@@ -17,12 +16,25 @@ from services.nav_recon_dataclasses import (
 )
 
 
-class NAVReconciliator:
-    """
-    Calculate daily NAV reconciliation metrics for a fund.
+def _to_float(value, default=0.0):
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    return float(default) if pd.isna(num) else num
 
-    Refactored to use Fund object and return structured dataclasses.
-    """
+
+def _position(frame: pd.DataFrame, key: str, ticker: str) -> tuple[float, float]:
+    """Return (nav_shares, price) from the first row of ``frame`` matching ``ticker``."""
+    if not frame.empty and key in frame.columns:
+        rows = frame[frame[key] == ticker]
+        if not rows.empty:
+            return _to_float(rows.iloc[0].get('nav_shares', 0)), _to_float(rows.iloc[0].get('price', 0))
+    return 0.0, 0.0
+
+
+class NAVReconciliator:
+    """Calculate daily NAV reconciliation metrics for a fund."""
 
     def __init__(
             self,
@@ -30,166 +42,105 @@ class NAVReconciliator:
             analysis_date: date | str,
             prior_date: date | str,
     ) -> None:
-        """
-        Initialize NAV reconciliator with Fund object.
-
-        Args:
-            fund: Fund object with loaded current and prior snapshots
-            analysis_date: Current analysis date
-            prior_date: Prior business day date
-        """
         self.fund = fund
-        self.fund_name = fund.name
         self.analysis_date = str(analysis_date)
         self.prior_date = str(prior_date)
         self.logger = logging.getLogger(f"NAVReconciliator_{fund.name}")
-
-        # Get fund properties
         self.has_flex_option = fund.has_flex_option
-        self.flex_option_pattern = fund.flex_option_pattern
-        self.flex_option_type = fund.flex_option_type
-
-        # Legacy index flex check
-        self.uses_index_flex = (
-                fund.name in INDEX_FLEX_FUNDS or self.flex_option_type == "index"
-        )
-
-        # Results containers
-        self.results: Dict[str, object] = {}
-        self.summary: Dict[str, float] = {}
-
-        self.DETAIL_COLUMNS = [
-            "ticker",
-            "quantity_t1",
-            "quantity_t",
-            "price_t1_raw",  # Vest price at T-1
-            "price_t_raw",  # Vest price at T
-            "price_t1_adj",  # Custodian/adjusted price at T-1
-            "price_t_adj",  # Custodian/adjusted price at T
-            "gl_raw",  # Raw gain/loss
-            "gl_adjusted"  # Adjusted gain/loss
-        ]
-
-        # Detail containers
-        self.equity_details = pd.DataFrame(columns=self.DETAIL_COLUMNS)
-        self.option_details = pd.DataFrame(columns=self.DETAIL_COLUMNS)
-        self.flex_details = pd.DataFrame(columns=self.DETAIL_COLUMNS)
-        self.treasury_details = pd.DataFrame(columns=self.DETAIL_COLUMNS)
 
     def run_nav_reconciliation(self) -> NAVReconciliationResults:
-        """
-        Main reconciliation orchestrator.
+        """Main reconciliation orchestrator."""
+        fund = self.fund
+        current, previous = fund.data.current, fund.data.previous
+        is_assignment_day = fund.is_option_settlement_date(self.analysis_date)
 
-        Returns:
-            Structured NAVReconciliationResults object
-        """
-        # self.logger.info("Starting NAV reconciliation for %s", self.fund.name)
-
-        # Check if this is an option settlement/assignment day
-        is_assignment_day = self.fund.is_option_settlement_date(self.analysis_date)
-
-        # Calculate G/L for each asset class
-        equity_gl = self._calculate_equity_gl()
+        equity_gl = self._asset_gl('equity', fund.gather_all_tickers('equity', include_prior=True), 'equity')
 
         if is_assignment_day:
             assignment_gl = self._process_assignments()
-            option_gl = self._calculate_rolled_option_gl()
+            # Options were closed/rolled, so G/L is just the current value
+            option_value = current.total_option_value
+            option_gl = AssetClassGainLoss(asset_class='options', raw_gl=option_value, adjusted_gl=option_value)
         else:
-            option_gl = self._calculate_option_gl()
+            option_tickers = fund.gather_option_tickers(include_flex=False, include_prior=True)
+            option_gl = self._asset_gl('options', option_tickers, 'option')
             assignment_gl = 0.0
 
-        flex_gl = self._calculate_flex_option_gl()
-        treasury_gl = self._calculate_treasury_gl()
+        flex_gl = self._asset_gl(
+            'flex_options',
+            fund.gather_option_tickers(include_flex=True, include_prior=True),
+            'option',
+            trades_t1=previous.flex_option_trades,
+            use_trade_prices=is_assignment_day,
+        )
+        treasury_value = current.total_treasury_value - previous.total_treasury_value
+        treasury_gl = AssetClassGainLoss(asset_class='treasury', raw_gl=treasury_value, adjusted_gl=treasury_value)
 
-        # Calculate other components
-        dividends = self._calculate_dividends()
-        expenses = self._calculate_expenses()
-        flows_adjustment = self._calculate_flows_adjustment()
-        distributions = self._calculate_distributions()
-        other = self._calculate_other()
-
-        # Build components
         components = NAVComponents(
             equity=equity_gl,
             options=option_gl,
             flex_options=flex_gl,
             treasury=treasury_gl,
             assignment_gl=assignment_gl,
-            dividends=dividends,
-            expenses=expenses,
-            distributions=distributions,
-            flows_adjustment=flows_adjustment,
-            other=other,
+            dividends=fund.get_equity_dividends(),
+            expenses=self._calculate_expenses(),
+            flows_adjustment=self._calculate_flows_adjustment(),
+            distributions=self._calculate_distributions(),
+            other=float(fund.data.other or 0.0),
         )
 
-        # Calculate NAV summary
         summary = self._calculate_nav_summary(components)
-        price_sensitivity = self._calculate_price_sensitivity(summary)
         results = NAVReconciliationResults(
-            fund_name=self.fund.name,
+            fund_name=fund.name,
             analysis_date=self.analysis_date,
             prior_date=self.prior_date,
             components=components,
             summary=summary,
-            option_price_impact=price_sensitivity,   # carries the whole matrix dict
+            option_price_impact=self._calculate_price_sensitivity(summary),   # carries the whole matrix dict
         )
 
-        self._log_completion(results)
+        self.logger.info(
+            "Completed NAV reconciliation for %s (NAV diff: %.6f)",
+            fund.name,
+            results.summary.nav_difference,
+        )
         return results
 
     # ========================================================================
     # ASSET CLASS GAIN/LOSS CALCULATIONS
     # ========================================================================
 
-    def _calculate_equity_gl(self) -> AssetClassGainLoss:
-        """
-        Calculate equity G/L with ticker-level details.
+    def _asset_gl(
+            self,
+            asset_class: str,
+            tickers: set,
+            breaks_key: str,
+            trades_t1: Optional[pd.DataFrame] = None,
+            use_trade_prices: bool = False,
+    ) -> AssetClassGainLoss:
+        """G/L for 'equity', 'options' or 'flex_options', summed over tickers in sorted order."""
+        if not tickers:
+            return AssetClassGainLoss(asset_class=asset_class, raw_gl=0.0, adjusted_gl=0.0)
 
-        Compares:
-        - fund.data.current.vest.equity vs fund.data.previous.vest.equity
-        - Applies custodian price adjustments from price_breaks
-        """
-        # Get all unique tickers across snapshots
-        all_tickers = self.fund.gather_all_tickers('equity', include_prior=True)
+        current, previous = self.fund.data.current, self.fund.data.previous
+        frames = [
+            getattr(holdings, asset_class)
+            for holdings in (current.vest, previous.vest, current.custodian, previous.custodian)
+        ]
+        price_breaks = self.fund.get_price_breaks(breaks_key)
 
-        if not all_tickers:
-            return AssetClassGainLoss(
-                asset_class='equity',
-                raw_gl=0.0,
-                adjusted_gl=0.0,
-            )
-
-        # Get holdings DataFrames
-        vest_current = self.fund.data.current.vest.equity
-        vest_prior = self.fund.data.previous.vest.equity
-        cust_current = self.fund.data.current.custodian.equity
-        cust_prior = self.fund.data.previous.custodian.equity
-
-        # Get price breaks for adjustments
-        price_breaks = self.fund.get_price_breaks('equity')
-
-        # Calculate ticker-level details
         ticker_details = []
-        for ticker in sorted(all_tickers):
-            detail = self._calculate_equity_ticker_gl(
-                ticker,
-                vest_current,
-                vest_prior,
-                cust_current,
-                cust_prior,
-                price_breaks,
+        for ticker in sorted(tickers):
+            detail = self._ticker_gl(
+                ticker, asset_class != 'equity', *frames, price_breaks, trades_t1, use_trade_prices,
             )
-            if detail:
+            if detail is not None:
                 ticker_details.append(detail)
 
-        # Sum totals
-        total_raw = sum(t.gl_raw for t in ticker_details)
-        total_adjusted = sum(t.gl_adjusted for t in ticker_details)
-
         return AssetClassGainLoss(
-            asset_class='equity',
-            raw_gl=total_raw,
-            adjusted_gl=total_adjusted,
+            asset_class=asset_class,
+            raw_gl=sum(t.gl_raw for t in ticker_details),
+            adjusted_gl=sum(t.gl_adjusted for t in ticker_details),
             ticker_details=ticker_details,
         )
 
@@ -212,263 +163,32 @@ class NAVReconciliator:
             return default
         return default if pd.isna(value) else value
 
-
-    def _calculate_equity_ticker_gl(
+    def _ticker_gl(
             self,
             ticker: str,
+            is_option: bool,
             vest_current: pd.DataFrame,
             vest_prior: pd.DataFrame,
             cust_current: pd.DataFrame,
             cust_prior: pd.DataFrame,
             price_breaks: pd.DataFrame,
+            trades_t1: Optional[pd.DataFrame] = None,
+            use_trade_prices: bool = False,
     ) -> Optional[TickerGainLoss]:
         """
-        Calculate G/L for a single equity ticker.
+        Calculate G/L for a single equity or option ticker (options carry a 100x multiplier).
 
         Formula:
         - Raw G/L = (price_t_vest - price_t1_vest) * qty_t
         - Adjusted G/L = (price_t_custodian - price_t1_custodian) * qty_t
         """
-        def _f(value, default=0.0):
-            try:
-                num = float(value)
-            except (TypeError, ValueError):
-                return float(default)
-            return float(default) if pd.isna(num) else num
-
-        # Extract current position
-        qty_t = 0.0
-        price_t_vest = 0.0
-        if not vest_current.empty and 'eqyticker' in vest_current.columns:
-            ticker_data = vest_current[vest_current['eqyticker'] == ticker]
-            if not ticker_data.empty:
-                qty_t = _f(ticker_data.iloc[0].get('nav_shares', 0))
-                price_t_vest = _f(ticker_data.iloc[0].get('price', 0))
-
-        # Extract prior position
-        qty_t1 = 0.0
-        price_t1_vest = 0.0
-        if not vest_prior.empty and 'eqyticker' in vest_prior.columns:
-            ticker_data = vest_prior[vest_prior['eqyticker'] == ticker]
-            if not ticker_data.empty:
-                qty_t1 = _f(ticker_data.iloc[0].get('nav_shares', 0))
-                price_t1_vest = _f(ticker_data.iloc[0].get('price', 0))
-
-        # Source real custodian prices; fall back to vest where the custodian
-        # has no separate mark for this ticker.
-        cust_t = self._lookup_price(cust_current, 'eqyticker', ticker)
-        cust_t1 = self._lookup_price(cust_prior, 'eqyticker', ticker)
-        price_t_custodian = cust_t if cust_t is not None else price_t_vest
-        price_t1_custodian = cust_t1 if cust_t1 is not None else price_t1_vest
-
-        # Apply custodian price adjustments if available
-        if not price_breaks.empty and ticker in price_breaks.index:
-            adj_data = price_breaks.loc[ticker]
-
-            # Check for adjusted prices
-            if 'price_t_adj' in adj_data:
-                price_t_custodian = adj_data['price_t_adj']
-
-            # Check for custodian override price
-            if 'price_cust' in adj_data:
-                cust_override = adj_data['price_cust']
-                if cust_override is not None and pd.notna(cust_override):
-                    price_t1_custodian = cust_override
-                    price_t_custodian = cust_override
-
-        # Calculate G/L: raw uses the vest book, adjusted uses custodian marks
-        gl_raw = (price_t_vest - price_t1_vest) * qty_t
-        gl_adjusted = (price_t_custodian - price_t1_custodian) * qty_t
-
-        # Only return if position exists
-        if qty_t != 0 or qty_t1 != 0:
-            return TickerGainLoss(
-                ticker=ticker,
-                quantity_t1=qty_t1,
-                quantity_t=qty_t,
-                price_t1_vest=price_t1_vest,
-                price_t_vest=price_t_vest,
-                price_t1_custodian=price_t1_custodian,
-                price_t_custodian=price_t_custodian,
-                gl_raw=gl_raw,
-                gl_adjusted=gl_adjusted,
-            )
-        return None
-
-    def _calculate_option_gl(self) -> AssetClassGainLoss:
-        """
-        Calculate regular (non-flex) option G/L with ticker-level details.
-
-        Compares:
-        - fund.data.current.vest.options vs fund.data.previous.vest.options
-        - Excludes flex options if fund has_flex_option=True
-        - Applies 100x multiplier for option contracts
-        """
-        # Get regular option tickers (excludes flex)
-        all_tickers = self.fund.gather_option_tickers(
-            include_flex=False,
-            include_prior=True,
-        )
-
-        if not all_tickers:
-            return AssetClassGainLoss(
-                asset_class='options',
-                raw_gl=0.0,
-                adjusted_gl=0.0,
-            )
-
-        # Get holdings DataFrames
-        vest_current = self.fund.data.current.vest.options
-        vest_prior = self.fund.data.previous.vest.options
-        cust_current = self.fund.data.current.custodian.options
-        cust_prior = self.fund.data.previous.custodian.options
-
-        # Roll days should source T-1 prices from execution data
-        use_roll_trade_prices = self.fund.is_option_settlement_date(self.analysis_date)
-        trades_t1 = self.fund.data.previous.option_trades
-
-        price_breaks = self.fund.get_price_breaks('option')
-
-        ticker_details = []
-        for ticker in sorted(all_tickers):
-            detail = self._calculate_option_ticker_gl(
-                ticker,
-                vest_current,
-                vest_prior,
-                cust_current,
-                cust_prior,
-                price_breaks,
-                multiplier=100.0,  # Option contract multiplier
-                trades_t1=trades_t1,
-                use_trade_prices=use_roll_trade_prices,
-            )
-            if detail:
-                ticker_details.append(detail)
-
-        # Sum totals
-        total_raw = sum(t.gl_raw for t in ticker_details)
-        total_adjusted = sum(t.gl_adjusted for t in ticker_details)
-
-        return AssetClassGainLoss(
-            asset_class='options',
-            raw_gl=total_raw,
-            adjusted_gl=total_adjusted,
-            ticker_details=ticker_details,
-        )
-
-    def _calculate_flex_option_gl(self) -> AssetClassGainLoss:
-        """
-        Calculate flex option G/L with ticker-level details.
-
-        Only runs if fund.properties.has_flex_option is True.
-        Uses fund.properties.flex_option_pattern to identify flex options.
-        """
-        if not self.has_flex_option:
-            return AssetClassGainLoss(
-                asset_class='flex_options',
-                raw_gl=0.0,
-                adjusted_gl=0.0,
-            )
-
-        # Get flex option tickers
-        all_tickers = self.fund.gather_option_tickers(
-            include_flex=True,
-            include_prior=True,
-        )
-
-        if not all_tickers:
-            return AssetClassGainLoss(
-                asset_class='flex_options',
-                raw_gl=0.0,
-                adjusted_gl=0.0,
-            )
-
-        # Get holdings DataFrames
-        vest_current = self.fund.data.current.vest.flex_options
-        vest_prior = self.fund.data.previous.vest.flex_options
-        cust_current = self.fund.data.current.custodian.flex_options
-        cust_prior = self.fund.data.previous.custodian.flex_options
-
-        use_roll_trade_prices = self.fund.is_option_settlement_date(self.analysis_date)
-        trades_t1 = self.fund.data.previous.flex_option_trades
-
-        # Get price breaks
-        price_breaks = self.fund.get_price_breaks('option')
-
-        # Calculate ticker-level details
-        ticker_details = []
-        for ticker in sorted(all_tickers):
-            detail = self._calculate_option_ticker_gl(
-                ticker,
-                vest_current,
-                vest_prior,
-                cust_current,
-                cust_prior,
-                price_breaks,
-                multiplier=100.0,
-                trades_t1=trades_t1,
-                use_trade_prices=use_roll_trade_prices,
-            )
-            if detail:
-                ticker_details.append(detail)
-
-        # Sum totals
-        total_raw = sum(t.gl_raw for t in ticker_details)
-        total_adjusted = sum(t.gl_adjusted for t in ticker_details)
-
-        return AssetClassGainLoss(
-            asset_class='flex_options',
-            raw_gl=total_raw,
-            adjusted_gl=total_adjusted,
-            ticker_details=ticker_details,
-        )
-
-    def _calculate_option_ticker_gl(
-            self,
-            ticker: str,
-            vest_current: pd.DataFrame,
-            vest_prior: pd.DataFrame,
-            cust_current: pd.DataFrame,
-            cust_prior: pd.DataFrame,
-            price_breaks: pd.DataFrame,
-            multiplier: float = 100.0,
-            trades_t1: Optional[pd.DataFrame] = None,
-            use_trade_prices: bool = False,
-    ) -> Optional[TickerGainLoss]:
-        """
-        Calculate G/L for a single option ticker.
-
-        Similar to equity but with option-specific column names and multiplier.
-        """
-
-        def _f(value, default=0.0):
-            try:
-                num = float(value)
-            except (TypeError, ValueError):
-                return float(default)
-            return float(default) if pd.isna(num) else num
-
-        # Extract current position
-        qty_t = 0.0
-        price_t_vest = 0.0
-        if not vest_current.empty and 'optticker' in vest_current.columns:
-            ticker_data = vest_current[vest_current['optticker'] == ticker]
-            if not ticker_data.empty:
-                qty_t = _f(ticker_data.iloc[0].get('nav_shares', 0))
-                price_t_vest = _f(ticker_data.iloc[0].get('price', 0))
-
-        # Extract prior position
-        qty_t1 = 0.0
-        price_t1_vest = 0.0
-        if not vest_prior.empty and 'optticker' in vest_prior.columns:
-            ticker_data = vest_prior[vest_prior['optticker'] == ticker]
-            if not ticker_data.empty:
-                qty_t1 = _f(ticker_data.iloc[0].get('nav_shares', 0))
-                price_t1_vest = _f(ticker_data.iloc[0].get('price', 0))
+        key = 'optticker' if is_option else 'eqyticker'
+        qty_t, price_t_vest = _position(vest_current, key, ticker)
+        qty_t1, price_t1_vest = _position(vest_prior, key, ticker)
 
         # Source real custodian marks; fall back to vest where absent
-        cust_t = self._lookup_price(cust_current, 'optticker', ticker)
-        cust_t1 = self._lookup_price(cust_prior, 'optticker', ticker)
+        cust_t = self._lookup_price(cust_current, key, ticker)
+        cust_t1 = self._lookup_price(cust_prior, key, ticker)
         price_t_custodian = cust_t if cust_t is not None else price_t_vest
         price_t1_custodian = cust_t1 if cust_t1 is not None else price_t1_vest
 
@@ -476,39 +196,43 @@ class NAVReconciliator:
         if use_trade_prices:
             trade_price = self._get_trade_execution_price(trades_t1, ticker)
             if trade_price is not None:
-                price_t1_vest = _f(trade_price)
-                price_t1_custodian = _f(trade_price)
+                price_t1_vest = _to_float(trade_price)
+                price_t1_custodian = _to_float(trade_price)
 
-        # Apply custodian price adjustments
+        # Apply custodian price adjustments (coerced to float for options only)
         if not price_breaks.empty and ticker in price_breaks.index:
             adj_data = price_breaks.loc[ticker]
+            convert = _to_float if is_option else (lambda value: value)
 
             if 'price_t_adj' in adj_data:
-                price_t_custodian = _f(adj_data['price_t_adj'])
+                price_t_custodian = convert(adj_data['price_t_adj'])
 
             if 'price_cust' in adj_data:
                 cust_override = adj_data['price_cust']
                 if cust_override is not None and pd.notna(cust_override):
-                    price_t1_custodian = _f(cust_override)
-                    price_t_custodian = _f(cust_override)
+                    price_t1_custodian = convert(cust_override)
+                    price_t_custodian = convert(cust_override)
 
-        # Calculate G/L with multiplier: raw = vest book, adjusted = custodian
-        gl_raw = (price_t_vest - price_t1_vest) * qty_t * multiplier
-        gl_adjusted = (price_t_custodian - price_t1_custodian) * qty_t * multiplier
+        # Raw uses the vest book, adjusted uses custodian marks
+        gl_raw = (price_t_vest - price_t1_vest) * qty_t
+        gl_adjusted = (price_t_custodian - price_t1_custodian) * qty_t
+        if is_option:
+            gl_raw = gl_raw * 100.0
+            gl_adjusted = gl_adjusted * 100.0
 
-        if qty_t != 0 or qty_t1 != 0:
-            return TickerGainLoss(
-                ticker=ticker,
-                quantity_t1=qty_t1,
-                quantity_t=qty_t,
-                price_t1_vest=price_t1_vest,
-                price_t_vest=price_t_vest,
-                price_t1_custodian=price_t1_custodian,
-                price_t_custodian=price_t_custodian,
-                gl_raw=gl_raw,
-                gl_adjusted=gl_adjusted,
-            )
-        return None
+        if qty_t == 0 and qty_t1 == 0:
+            return None
+        return TickerGainLoss(
+            ticker=ticker,
+            quantity_t1=qty_t1,
+            quantity_t=qty_t,
+            price_t1_vest=price_t1_vest,
+            price_t_vest=price_t_vest,
+            price_t1_custodian=price_t1_custodian,
+            price_t_custodian=price_t_custodian,
+            gl_raw=gl_raw,
+            gl_adjusted=gl_adjusted,
+        )
 
     def _calculate_price_sensitivity(self, summary) -> dict:
         """Option price sensitivity: listed + flex option G/L computed with vest
@@ -612,37 +336,6 @@ class NAVReconciliator:
 
         return None
 
-    def _calculate_treasury_gl(self) -> AssetClassGainLoss:
-        """
-        Calculate treasury G/L.
-
-        Simple comparison of current vs prior treasury values.
-        Usually no ticker-level detail for treasuries.
-        """
-        current_value = self.fund.data.current.total_treasury_value
-        prior_value = self.fund.data.previous.total_treasury_value
-
-        gl = current_value - prior_value
-
-        return AssetClassGainLoss(
-            asset_class='treasury',
-            raw_gl=gl,
-            adjusted_gl=gl,
-        )
-
-    def _calculate_rolled_option_gl(self) -> AssetClassGainLoss:
-        """
-        On assignment days, option G/L is just the current value.
-        Options were closed/rolled, so we don't compare to prior.
-        """
-        current_value = self.fund.data.current.total_option_value
-
-        return AssetClassGainLoss(
-            asset_class='options',
-            raw_gl=current_value,
-            adjusted_gl=current_value,
-        )
-
     # ========================================================================
     # OTHER COMPONENT CALCULATIONS
     # ========================================================================
@@ -738,11 +431,6 @@ class NAVReconciliator:
         net_expiration_activity = assigned_pnl + expired_pnl
         return float(net_expiration_activity)
 
-
-    def _calculate_dividends(self) -> float:
-        """Calculate dividend income from equity holdings."""
-        return self.fund.get_equity_dividends()
-
     def _calculate_expenses(self) -> float:
         """
         Calculate expense accruals using fund's expense ratio.
@@ -835,10 +523,6 @@ class NAVReconciliator:
 
         return beg_tna + tna_adjustment
 
-    def _calculate_other(self) -> float:
-        """Extract 'other' impact from fund data."""
-        return float(self.fund.data.other or 0.0)
-
     # ========================================================================
     # NAV SUMMARY CALCULATION
     # ========================================================================
@@ -902,12 +586,4 @@ class NAVReconciliator:
             nav_good_4_decimal=nav_good_4,
             diff_pct_4_decimal=diff_pct_4,
             diff_pct_2_decimal=diff_pct_2,
-        )
-
-    def _log_completion(self, results: NAVReconciliationResults) -> None:
-        """Log completion with summary info."""
-        self.logger.info(
-            "Completed NAV reconciliation for %s (NAV diff: %.6f)",
-            self.fund.name,
-            results.summary.nav_difference,
         )
