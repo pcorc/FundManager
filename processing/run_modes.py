@@ -14,7 +14,13 @@ from notifications.email_manager import GL_COLUMNS, EmailManager, EmailPayload
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from processing.bulk_data_loader import BulkDataLoader, BulkDataStore
-from processing.fund_manager import FundManager, ProcessingResults
+from processing.fund_manager import (
+    FundManager,
+    ProcessingResults,
+    ProgressCallback,
+    emit_progress,
+    progress_for_day,
+)
 from processing.fund import FundRegistry
 from reporting.compliance_reporter import (
     build_compliance_reports,
@@ -135,9 +141,14 @@ def run_eod_mode(
     output_dir: Path,
     *,
     output_tag: str | None = None,
+    on_progress: Optional[ProgressCallback] = None,
+    errors: Optional[List[str]] = None,
 ) -> Tuple[ProcessingResults, Mapping[str, object]]:
-    """Execute the full EOD workflow for the provided data."""
-    results = _run_operations(registry, data_store, params.operations, "eod", params.compliance_tests)
+    """Execute the full EOD workflow for the provided data (a failed email is appended to ``errors``)."""
+    emit_progress(on_progress, "process", message="eod")
+    results = _run_operations(registry, data_store, params.operations, "eod", params.compliance_tests,
+                              on_progress=on_progress)
+    emit_progress(on_progress, "reports")
     artefacts = _build_eod_artefacts(
         results,
         params.operations,
@@ -152,13 +163,16 @@ def run_eod_mode(
 
     # Send the EOD notification email (HTML body + PDF/Excel attachments).
     if getattr(params, "send_email", True):
+        emit_progress(on_progress, "email")
         try:
             EmailManager().send(
                 _build_eod_email_payload(results, artefacts, params),
                 OperationConfig.create(OperationMode.EOD),
             )
-        except Exception:
+        except Exception as exc:
             logging.getLogger(__name__).exception("EOD email notification failed")
+            if errors is not None:
+                errors.append(f"EOD email notification failed: {exc}")
 
     return results, artefacts
 
@@ -171,10 +185,16 @@ def run_trading_mode(
     params,
     output_dir: Path,
     output_tag: str | None = None,
+    on_progress: Optional[ProgressCallback] = None,
+    errors: Optional[List[str]] = None,
 ):
-    """Execute the trading compliance comparison."""
-    results_ex_ante = _run_operations(registry, ex_ante_store, ["compliance"], "ex_ante", params.compliance_tests)
-    results_ex_post = _run_operations(registry, ex_post_store, ["compliance"], "ex_post", params.compliance_tests)
+    """Execute the trading compliance comparison (a failed email is appended to ``errors``)."""
+    emit_progress(on_progress, "process", message="ex_ante")
+    results_ex_ante = _run_operations(registry, ex_ante_store, ["compliance"], "ex_ante", params.compliance_tests,
+                                      on_progress=on_progress)
+    emit_progress(on_progress, "process", message="ex_post")
+    results_ex_post = _run_operations(registry, ex_post_store, ["compliance"], "ex_post", params.compliance_tests,
+                                      on_progress=on_progress)
 
     ante_payload = _extract_payload(results_ex_ante, "compliance_results")
     post_payload = _extract_payload(results_ex_post, "compliance_results")
@@ -189,6 +209,7 @@ def run_trading_mode(
         if "fund_object" in fund_results
     }
 
+    emit_progress(on_progress, "reports")
     trading_report = build_trading_compliance_reports(
         results_ex_ante=ante_payload,
         results_ex_post=post_payload,
@@ -226,13 +247,16 @@ def run_trading_mode(
     )
 
     # Always sent: trading runs have no send_email switch.
+    emit_progress(on_progress, "email")
     try:
         EmailManager().send(
             _build_trading_email_payload(results_ex_ante, results_ex_post, combined_artefacts, params),
             OperationConfig.create(OperationMode.TRADING_COMPLIANCE),
         )
-    except Exception:
+    except Exception as exc:
         logging.getLogger(__name__).exception("Trading-analysis email notification failed")
+        if errors is not None:
+            errors.append(f"Trading-analysis email notification failed: {exc}")
 
     return results_ex_ante, results_ex_post, combined_artefacts
 
@@ -249,6 +273,7 @@ def run_eod_range_mode(
     create_pdf: bool = True,
     generate_daily_reports: bool = True,
     output_tag: str | None = None,
+    on_progress: Optional[ProgressCallback] = None,
 ) -> RangeRunResults:
     """Execute the EOD workflow for each business day in ``[start_date, end_date]``."""
 
@@ -262,18 +287,25 @@ def run_eod_range_mode(
     latest_gics_mapping = None
     stacked_report = None
 
-    for trade_date in iter_business_days(start_date, end_date):
+    days = list(iter_business_days(start_date, end_date))
+    for index, trade_date in enumerate(days, 1):
+        day_progress = progress_for_day(on_progress, trade_date.isoformat())
+        emit_progress(day_progress, "day", index=index, total=len(days))
         previous_date = business_day_offset(trade_date, -1)
+        emit_progress(day_progress, "load", message="eod")
         data_store = loader.load_all_data_for_date(
             trade_date,
             previous_date=previous_date,
             analysis_type="eod",
         )
         latest_gics_mapping = getattr(data_store, "gics_mapping", None)
-        day_results = _run_operations(registry, data_store, operations, "eod", compliance_tests)
+        emit_progress(day_progress, "process", message="eod")
+        day_results = _run_operations(registry, data_store, operations, "eod", compliance_tests,
+                                      on_progress=day_progress)
         results_by_date[trade_date] = day_results
 
         if generate_daily_reports:
+            emit_progress(day_progress, "reports")
             daily_artefacts[trade_date.isoformat()] = _build_eod_artefacts(
                 day_results,
                 operations,
@@ -288,6 +320,7 @@ def run_eod_range_mode(
 
     # The stacked report uses the last day's GICS mapping.
     if "compliance" in operations and results_by_date:
+        emit_progress(on_progress, "reports", message="stacked")
         stacked_report = build_compliance_reports_for_range(
             results_by_date.items(),
             output_dir=str(output_dir),
@@ -337,8 +370,10 @@ def _run_operations(
     operations: Sequence[str],
     analysis_type: str,
     compliance_tests: Sequence[str],
+    *,
+    on_progress: Optional[ProgressCallback] = None,
 ) -> ProcessingResults:
-    manager = FundManager(registry, data_store, analysis_type=analysis_type)
+    manager = FundManager(registry, data_store, analysis_type=analysis_type, on_progress=on_progress)
     return manager.run_daily_operations(list(operations), compliance_tests=list(compliance_tests))
 
 

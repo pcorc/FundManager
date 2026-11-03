@@ -84,6 +84,8 @@ _RULES: Tuple[Tuple[str, str, str, str], ...] = (
     ("twelve_d2_insurance_cos", "twelve_d2_insurance_cos", "12d-2 Insurance Companies", "Error in 12d-2 check for %s: %s"),
     ("twelve_d3_sec_biz", "twelve_d3_sec_biz", "12d-3 Securities Businesses", "Error in 12d-3 check for %s: %s"),
 )
+RULE_KEYS: Tuple[str, ...] = tuple(rule[0] for rule in _RULES)  # public: valid compliance_tests values
+RULE_LABELS: Dict[str, str] = {rule[0]: rule[2] for rule in _RULES}
 
 
 class ComplianceChecker:
