@@ -158,6 +158,7 @@ def _forty_act_row(report_date, fund_name, payload, calc, r):
         max_ownership = 0.0
     if pd.isna(max_ownership):
         max_ownership = 0.0
+    occ_market_value = _num(calc, "occ_market_value")
 
     notes = ""
     if fund_name in {"FDND", "TDVI"} and payload.get("condition_40act_2a"):
@@ -190,7 +191,7 @@ def _forty_act_row(report_date, fund_name, payload, calc, r):
             ("Cumulative Weight of Remaining Securities", _num(calc, "cumulative_weight_remaining")),
             (f"Remaining Securities (Ticker, {share_label}, Vest Weight, Vest Ownership of Float)", remaining_str),
             ("Max Ownership % of Float in 75% bucket", f"{max_ownership:.5%}"),
-            ("OCC Market Value", _num(calc, "occ_market_value")),
+            ("OCC Market Value", occ_market_value),
             ("OCC Weight", _num(calc, "occ_weight")),
             ("Notes", notes),
         ]
@@ -203,11 +204,11 @@ def _irs_row(report_date, fund_name, payload, calc, r):
         lambda sec: f"({sec.get('eqyticker', '')}, {_num(sec, 'tna_wgt'):.2%})",
     )
     overlap_records = calc.get("overlap", []) or []
+    overlap_weight_total = _num(calc, "overlap_weight_sum")
     overlap_summary = _join(
         overlap_records,
         lambda item: f"{item.get('security_ticker', '')}: {_num(item, 'security_weight'):.2%}",
     )
-    overlap_weight_total = _num(calc, "overlap_weight_sum")
     if overlap_records and not overlap_weight_total:
         overlap_weight_total = sum(_num(item, "security_weight") for item in overlap_records)
     if pd.isna(overlap_weight_total):
