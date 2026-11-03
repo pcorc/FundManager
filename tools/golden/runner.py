@@ -140,7 +140,7 @@ def main(argv):
     emails: list = []
     install_email_capture(emails)
 
-    from tools.golden.scenarios import SCENARIOS
+    from tools.golden.scenarios import EQUIVALENT_REQUESTS, SCENARIOS
     import config.fund_definitions as fd
     from config.database import initialize_database
     import main as app
@@ -152,10 +152,19 @@ def main(argv):
             fd.load_cohorts_from_db(session)
         finally:
             session.close()
-        spec = dict(SCENARIOS[scenario])
-        mode_arg = spec.pop("mode")
-        spec["cohorts"] = [getattr(fd, name) for name in spec.get("cohorts", [])] or None
-        cfg = app.build_run(mode_arg, **spec)
+        if scenario in EQUIVALENT_REQUESTS:
+            from datetime import date
+            from processing.api import RunRequest
+            kwargs = dict(EQUIVALENT_REQUESTS[scenario][1])
+            for key in ("start_date", "end_date"):
+                if key in kwargs:
+                    kwargs[key] = date.fromisoformat(kwargs[key])
+            cfg = RunRequest(**kwargs)
+        else:
+            spec = dict(SCENARIOS[scenario])
+            mode_arg = spec.pop("mode")
+            spec["cohorts"] = [getattr(fd, name) for name in spec.get("cohorts", [])] or None
+            cfg = app.build_run(mode_arg, **spec)
         if isinstance(cfg, list):
             cfg = [_redirect(c, out_dir) for c in cfg]
         else:

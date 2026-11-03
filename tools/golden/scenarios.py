@@ -35,3 +35,20 @@ SCENARIOS = {
         mode=["compliance", "nav"], funds=["KNG", "RDVI"], start_date="2026-10-30", output_tag="pair",
     ),
 }
+
+# Direct RunRequest kwargs (the UI path: cohort names resolved inside run()) that
+# must reproduce an existing scenario exactly: name -> (base scenario, kwargs).
+EQUIVALENT_REQUESTS = {
+    "request_compliance_cef_40act": ("compliance_cef_40act", dict(
+        operations=("compliance",), cohorts=("CLOSED_END_FUNDS",), start_date="2026-10-30",
+        compliance_tests=("diversification_40act_check",), output_tag="compliance",
+    )),
+    "request_trading_etf": ("trading_etf", dict(
+        operations=("trading_compliance",), cohorts=("ETF_FUNDS",), start_date="2026-10-30", output_tag="etfs",
+    )),
+    "request_time_series_cef": ("time_series_cef", dict(
+        operations=("compliance",), cohorts=("CLOSED_END_FUNDS",), start_date="2026-10-26", end_date="2026-10-30",
+        compliance_tests=("diversification_40act_check", "diversification_IRS_check"), date_mode="stacked",
+        create_pdf=False, output_tag="cefs_ts",
+    )),
+}

@@ -23,7 +23,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 
 from tools.golden.differ import diff_roots  # noqa: E402
-from tools.golden.scenarios import SCENARIOS  # noqa: E402
+from tools.golden.scenarios import EQUIVALENT_REQUESTS, SCENARIOS  # noqa: E402
 
 WORK = HERE / "_work"
 PYTHON = os.getenv(
@@ -31,11 +31,16 @@ PYTHON = os.getenv(
 )
 
 
+def _base(scenario: str) -> str:
+    """Scenario whose recorded data and baseline an equivalent request reuses."""
+    return EQUIVALENT_REQUESTS[scenario][0] if scenario in EQUIVALENT_REQUESTS else scenario
+
+
 def _run(scenario: str, mode: str, run_root: Path) -> None:
     shutil.rmtree(run_root, ignore_errors=True)
     env = dict(os.environ, PYTHONHASHSEED="0", FUNDMANAGER_EMAIL_MODE="display")
     subprocess.run(
-        [PYTHON, str(HERE / "runner.py"), scenario, mode, str(WORK / "data" / scenario), str(run_root)],
+        [PYTHON, str(HERE / "runner.py"), scenario, mode, str(WORK / "data" / _base(scenario)), str(run_root)],
         env=env, check=True,
     )
 
@@ -51,7 +56,7 @@ def main(argv) -> int:
     if len(argv) < 2 or argv[1] not in ("capture", "check"):
         print(__doc__)
         return 2
-    command, names = argv[1], argv[2:] or list(SCENARIOS)
+    command, names = argv[1], argv[2:] or list(SCENARIOS) + (list(EQUIVALENT_REQUESTS) if argv[1] == "check" else [])
     ok = True
     for name in names:
         if command == "capture":
@@ -61,7 +66,7 @@ def main(argv) -> int:
             ok &= _report(f"{name} (replay fidelity)", diff_roots(WORK / "record" / name, WORK / "baseline" / name))
         else:
             _run(name, "replay", WORK / "current" / name)
-            ok &= _report(name, diff_roots(WORK / "baseline" / name, WORK / "current" / name))
+            ok &= _report(name, diff_roots(WORK / "baseline" / _base(name), WORK / "current" / name))
     return 0 if ok else 1
 
 
