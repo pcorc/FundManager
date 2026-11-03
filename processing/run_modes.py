@@ -9,9 +9,9 @@ from pathlib import Path
 from types import SimpleNamespace
 import logging
 
-from notifications.email_manager import EmailManager, EmailPayload
+from notifications.email_manager import GL_COLUMNS, EmailManager, EmailPayload
 
-from typing import Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 from processing.bulk_data_loader import BulkDataLoader, BulkDataStore
 from processing.fund_manager import FundManager, ProcessingResults
@@ -29,11 +29,27 @@ from reporting.trade_compliance_reporter import (
     combine_trading_and_compliance_reports,
 )
 
+_RECON_OPERATIONS = ("reconciliation", "nav_reconciliation")
+# (summary key prefix, reconciliation summary section) for the holdings email table.
+_HOLDINGS_EMAIL_SOURCES = (("equity", "custodian_equity"), ("option", "custodian_option"),
+                           ("flex_option", "custodian_flex_option"), ("treasury", "custodian_treasury"))
+_EOD_ATTACHMENT_KEYS = ("reconciliation_summary_pdf", "nav_reconciliation_excel", "holdings_reconciliation_excel",
+                        "compliance_pdf", "compliance_excel")
+_TRADING_ATTACHMENT_KEYS = ("trading_compliance_combined_pdf", "trading_compliance_combined_excel",
+                            "trading_compliance_pdf", "trading_compliance_excel",
+                            "trading_ex_post_compliance_pdf", "trading_ex_post_compliance_excel")
+
+
 def _subdir(base: Path, name: str) -> Path:
     """Return base / name, creating the directory if needed."""
     out = Path(base) / name
     out.mkdir(parents=True, exist_ok=True)
     return out
+
+
+def _prefix(base: str, output_tag: str | None) -> str:
+    return f"{base}_{output_tag}" if output_tag else base
+
 
 @dataclass
 class EODRunParameters:
@@ -71,6 +87,47 @@ class RangeRunResults:
     stacked_compliance: Optional["GeneratedComplianceReport"]
 
 
+def _build_eod_artefacts(
+    results: ProcessingResults,
+    operations: Sequence[str],
+    report_date: date,
+    output_dir: Path,
+    *,
+    subdirs: bool,
+    output_tag: str | None,
+    compliance_tests: Sequence[str],
+    gics_mapping,
+    create_pdf: bool,
+) -> Dict[str, object]:
+    """One day's reports: ``subdirs`` (single-day) writes tagged files into subfolders, else root with untagged recon."""
+    compliance_payload = _extract_payload(results, "compliance_results")
+    reconciliation_payload = _extract_payload(results, "reconciliation_results")
+    nav_payload = _extract_payload(results, "nav_results")
+
+    artefacts: Dict[str, object] = {}
+    if "compliance" in operations and compliance_payload:
+        artefacts["compliance"] = build_compliance_reports(
+            results,
+            report_date=report_date,
+            output_dir=str(_subdir(output_dir, "Compliance") if subdirs else output_dir),
+            file_name_prefix=_prefix("compliance_results", output_tag),
+            test_functions=compliance_tests or None,
+            gics_mapping=gics_mapping,
+            create_pdf=create_pdf,
+        )
+
+    if any(name in operations for name in _RECON_OPERATIONS):
+        artefacts["reconciliation"] = build_nav_reconciliation_reports(
+            holdings_results=reconciliation_payload if "reconciliation" in operations else None,
+            nav_results=nav_payload if "nav_reconciliation" in operations else None,
+            report_date=report_date,
+            output_dir=str(_subdir(output_dir, "Holdings and NAV Recon") if subdirs else output_dir),
+            file_name_prefix=_prefix("reconciliation_summary", output_tag if subdirs else None),
+            create_pdf=create_pdf,
+        )
+    return artefacts
+
+
 def run_eod_mode(
     registry: FundRegistry,
     data_store: BulkDataStore,
@@ -80,45 +137,18 @@ def run_eod_mode(
     output_tag: str | None = None,
 ) -> Tuple[ProcessingResults, Mapping[str, object]]:
     """Execute the full EOD workflow for the provided data."""
-
-    def _build_prefix(base: str) -> str:
-        return f"{base}_{output_tag}" if output_tag else base
-
-    results = _run_operations(
-        registry,
-        data_store,
-        operations=params.operations,
-        analysis_type="eod",
+    results = _run_operations(registry, data_store, params.operations, "eod", params.compliance_tests)
+    artefacts = _build_eod_artefacts(
+        results,
+        params.operations,
+        params.trade_date,
+        output_dir,
+        subdirs=True,
+        output_tag=output_tag,
         compliance_tests=params.compliance_tests,
+        gics_mapping=getattr(data_store, "gics_mapping", None),
+        create_pdf=params.create_pdf,
     )
-
-    compliance_payload = _extract_payload(results, "compliance_results")
-    reconciliation_payload = _extract_payload(results, "reconciliation_results")
-    nav_payload = _extract_payload(results, "nav_results")
-
-    artefacts: MutableMapping[str, object] = {}
-    gics_mapping = getattr(data_store, "gics_mapping", None)
-
-    if "compliance" in params.operations and compliance_payload:
-        artefacts["compliance"] = build_compliance_reports(
-            results,
-            report_date=params.trade_date,
-            output_dir=str(_subdir(output_dir, "Compliance")),
-            file_name_prefix=_build_prefix("compliance_results"),
-            test_functions=params.compliance_tests or None,
-            gics_mapping=gics_mapping,
-            create_pdf=params.create_pdf,
-        )
-
-    if any(name in params.operations for name in ("reconciliation", "nav_reconciliation")):
-        artefacts["reconciliation"] = build_nav_reconciliation_reports(
-            holdings_results=reconciliation_payload if "reconciliation" in params.operations else None,
-            nav_results=nav_payload if "nav_reconciliation" in params.operations else None,
-            report_date=params.trade_date,
-            output_dir=str(_subdir(output_dir, "Holdings and NAV Recon")),
-            file_name_prefix=_build_prefix("reconciliation_summary"),
-            create_pdf=params.create_pdf,
-        )
 
     # Send the EOD notification email (HTML body + PDF/Excel attachments).
     if getattr(params, "send_email", True):
@@ -132,6 +162,7 @@ def run_eod_mode(
 
     return results, artefacts
 
+
 def run_trading_mode(
     registry: FundRegistry,
     *,
@@ -142,24 +173,8 @@ def run_trading_mode(
     output_tag: str | None = None,
 ):
     """Execute the trading compliance comparison."""
-
-    def _build_prefix(base: str) -> str:
-        return f"{base}_{output_tag}" if output_tag else base
-
-    results_ex_ante = _run_operations(
-        registry,
-        ex_ante_store,
-        operations=["compliance"],
-        analysis_type="ex_ante",
-        compliance_tests=params.compliance_tests,
-    )
-    results_ex_post = _run_operations(
-        registry,
-        ex_post_store,
-        operations=["compliance"],
-        analysis_type="ex_post",
-        compliance_tests=params.compliance_tests,
-    )
+    results_ex_ante = _run_operations(registry, ex_ante_store, ["compliance"], "ex_ante", params.compliance_tests)
+    results_ex_post = _run_operations(registry, ex_post_store, ["compliance"], "ex_post", params.compliance_tests)
 
     ante_payload = _extract_payload(results_ex_ante, "compliance_results")
     post_payload = _extract_payload(results_ex_post, "compliance_results")
@@ -167,55 +182,32 @@ def run_trading_mode(
     if not ante_payload and not post_payload:
         raise RuntimeError("Trading compliance run produced no compliance results to compare")
 
-    # Extract fund registry from ex_post results for property-based reporting
-
-    # Extract traded funds information from the ex_post results
-    # This should include the holdings data with trade_rebal information
-    traded_funds_info = {}
-
-    # Method 1: Extract from the compliance results if they contain fund objects
-    for fund_name in post_payload.keys():
-        fund_info = {}
-
-        # Try to get the fund object or holdings data from results
-        if fund_name in post_payload:
-            fund_results = post_payload[fund_name]
-
-            # Look for fund object
-            if "fund_object" in fund_results:
-                fund_info["fund_object"] = fund_results["fund_object"]
-            elif "fund" in fund_results:
-                fund_info["fund"] = fund_results["fund"]
-
-            # Look for holdings data that might contain trade information
-            for asset_type in ["equity", "options", "treasury"]:
-                if asset_type in fund_results:
-                    fund_info[asset_type] = fund_results[asset_type]
-
-        if fund_info:
-            traded_funds_info[fund_name] = fund_info
+    # Compliance results hold only test-name keys plus the 'fund_object' FundManager adds.
+    traded_funds_info = {
+        fund_name: {"fund_object": fund_results["fund_object"]}
+        for fund_name, fund_results in post_payload.items()
+        if "fund_object" in fund_results
+    }
 
     trading_report = build_trading_compliance_reports(
         results_ex_ante=ante_payload,
         results_ex_post=post_payload,
         report_date=params.ex_post_date,
         output_dir=str(output_dir),
-        traded_funds_info=traded_funds_info,  # Pass the populated traded_funds_info
-        file_name_prefix=_build_prefix("trading_analysis"),
+        traded_funds_info=traded_funds_info,
+        file_name_prefix=_prefix("trading_analysis", output_tag),
         create_pdf=params.create_pdf,
     )
 
     ex_post_compliance_report = None
-    gics_mapping_ex_post = getattr(ex_post_store, "gics_mapping", None)
-
     if post_payload:
         ex_post_compliance_report = build_compliance_reports(
             results_ex_post,
             report_date=params.ex_post_date,
             output_dir=str(output_dir),
-            file_name_prefix=_build_prefix("compliance_results_expost"),
+            file_name_prefix=_prefix("compliance_results_expost", output_tag),
             test_functions=params.compliance_tests or None,
-            gics_mapping=gics_mapping_ex_post,
+            gics_mapping=getattr(ex_post_store, "gics_mapping", None),
             create_pdf=params.create_pdf,
         )
 
@@ -224,7 +216,7 @@ def run_trading_mode(
         compliance_report=ex_post_compliance_report,
         report_date=params.ex_post_date,
         output_dir=str(output_dir),
-        file_name_prefix=_build_prefix("trading_compliance_results_combined"),
+        file_name_prefix=_prefix("trading_compliance_results_combined", output_tag),
     )
 
     combined_artefacts = SimpleNamespace(
@@ -233,6 +225,7 @@ def run_trading_mode(
         combined_report=combined_report,
     )
 
+    # Always sent: trading runs have no send_email switch.
     try:
         EmailManager().send(
             _build_trading_email_payload(results_ex_ante, results_ex_post, combined_artefacts, params),
@@ -242,6 +235,7 @@ def run_trading_mode(
         logging.getLogger(__name__).exception("Trading-analysis email notification failed")
 
     return results_ex_ante, results_ex_post, combined_artefacts
+
 
 def run_eod_range_mode(
     session,
@@ -268,9 +262,6 @@ def run_eod_range_mode(
     latest_gics_mapping = None
     stacked_report = None
 
-    def _build_prefix(base: str) -> str:
-        return f"{base}_{output_tag}" if output_tag else base
-
     for trade_date in iter_business_days(start_date, end_date):
         previous_date = business_day_offset(trade_date, -1)
         data_store = loader.load_all_data_for_date(
@@ -279,50 +270,23 @@ def run_eod_range_mode(
             analysis_type="eod",
         )
         latest_gics_mapping = getattr(data_store, "gics_mapping", None)
-
-        day_results = _run_operations(
-            registry,
-            data_store,
-            operations=operations,
-            analysis_type="eod",
-            compliance_tests=compliance_tests,
-        )
-
+        day_results = _run_operations(registry, data_store, operations, "eod", compliance_tests)
         results_by_date[trade_date] = day_results
 
-        if not generate_daily_reports:
-            continue
-
-        artefacts: Dict[str, object] = {}
-
-        compliance_payload = _extract_payload(day_results, "compliance_results")
-        reconciliation_payload = _extract_payload(day_results, "reconciliation_results")
-        nav_payload = _extract_payload(day_results, "nav_results")
-
-        if "compliance" in operations and compliance_payload:
-            artefacts["compliance"] = build_compliance_reports(
+        if generate_daily_reports:
+            daily_artefacts[trade_date.isoformat()] = _build_eod_artefacts(
                 day_results,
-                report_date=trade_date,
-                output_dir=str(output_dir),
-                file_name_prefix=_build_prefix("compliance_results"),
-                test_functions=compliance_tests or None,
+                operations,
+                trade_date,
+                output_dir,
+                subdirs=False,
+                output_tag=output_tag,
+                compliance_tests=compliance_tests,
                 gics_mapping=latest_gics_mapping,
                 create_pdf=create_pdf,
             )
 
-        if any(name in operations for name in ("reconciliation", "nav_reconciliation")):
-            # Extract fund registry for property-based reconciliation reporting
-
-            artefacts["reconciliation"] = build_nav_reconciliation_reports(
-                holdings_results=reconciliation_payload if "reconciliation" in operations else None,
-                nav_results=nav_payload if "nav_reconciliation" in operations else None,
-                report_date=trade_date,
-                output_dir=str(output_dir),
-                create_pdf=create_pdf,
-            )
-
-        daily_artefacts[trade_date.isoformat()] = artefacts
-
+    # The stacked report uses the last day's GICS mapping.
     if "compliance" in operations and results_by_date:
         stacked_report = build_compliance_reports_for_range(
             results_by_date.items(),
@@ -340,93 +304,46 @@ def run_eod_range_mode(
     )
 
 
+def _add_report_paths(paths: Dict[str, str], prefix: str, report, kinds: Sequence[str] = ("excel", "pdf")) -> None:
+    for kind in kinds:
+        path = getattr(report, f"{kind}_path", None)
+        if path:
+            paths[f"{prefix}_{kind}"] = path
+
+
 def flatten_eod_paths(artefacts: Mapping[str, object]) -> Dict[str, str]:
     paths: Dict[str, str] = {}
-
-    compliance = artefacts.get("compliance")
-    if compliance is not None:
-        excel_path = getattr(compliance, "excel_path", None)
-        pdf_path = getattr(compliance, "pdf_path", None)
-        if excel_path:
-            paths["compliance_excel"] = excel_path
-        if pdf_path:
-            paths["compliance_pdf"] = pdf_path
-
+    _add_report_paths(paths, "compliance", artefacts.get("compliance"))
     reconciliation = artefacts.get("reconciliation")
-    if reconciliation is not None:
-        holdings = getattr(reconciliation, "holdings", None)
-        if holdings is not None:
-            if getattr(holdings, "excel_path", None):
-                paths["holdings_reconciliation_excel"] = holdings.excel_path  # type: ignore[attr-defined]
-
-        nav = getattr(reconciliation, "nav", None)
-        if nav is not None:
-            if getattr(nav, "excel_path", None):
-                paths["nav_reconciliation_excel"] = nav.excel_path  # type: ignore[attr-defined]
-
-        combined = getattr(reconciliation, "combined_reconciliation_pdf", None)
-        if combined:
-            paths["reconciliation_summary_pdf"] = combined
-
+    _add_report_paths(paths, "holdings_reconciliation", getattr(reconciliation, "holdings", None), ("excel",))
+    _add_report_paths(paths, "nav_reconciliation", getattr(reconciliation, "nav", None), ("excel",))
+    combined = getattr(reconciliation, "combined_reconciliation_pdf", None)
+    if combined:
+        paths["reconciliation_summary_pdf"] = combined
     return paths
 
 
 def flatten_trading_paths(artefacts) -> Dict[str, str]:  # type: ignore[no-untyped-def]
     paths: Dict[str, str] = {}
-    if artefacts is None:
-        return paths
-
-    def _extract(name: str):
-        if isinstance(artefacts, Mapping):
-            return artefacts.get(name)
-        return getattr(artefacts, name, None)
-
-    def _append(prefix: str, report) -> None:
-        if report is None:
-            return
-        excel_path = getattr(report, "excel_path", None)
-        pdf_path = getattr(report, "pdf_path", None)
-        if excel_path:
-            paths[f"{prefix}_excel"] = excel_path
-        if pdf_path:
-            paths[f"{prefix}_pdf"] = pdf_path
-
-    if hasattr(artefacts, "excel_path") or hasattr(artefacts, "pdf_path"):
-        _append("trading_compliance", artefacts)
-        return paths
-
-    _append("trading_compliance", _extract("report"))
-    _append("trading_ex_post_compliance", _extract("ex_post_compliance"))
-    _append("trading_compliance_combined", _extract("combined_report"))
-
+    _add_report_paths(paths, "trading_compliance", getattr(artefacts, "report", None))
+    _add_report_paths(paths, "trading_ex_post_compliance", getattr(artefacts, "ex_post_compliance", None))
+    _add_report_paths(paths, "trading_compliance_combined", getattr(artefacts, "combined_report", None))
     return paths
 
 
 def _run_operations(
     registry: FundRegistry,
     data_store: BulkDataStore,
-    *,
     operations: Sequence[str],
     analysis_type: str,
     compliance_tests: Sequence[str],
 ) -> ProcessingResults:
-    """Execute operations on all funds using FundManager."""
     manager = FundManager(registry, data_store, analysis_type=analysis_type)
-    return manager.run_daily_operations(
-        list(operations), compliance_tests=list(compliance_tests)
-    )
+    return manager.run_daily_operations(list(operations), compliance_tests=list(compliance_tests))
 
 
 def _extract_payload(results: ProcessingResults, attribute: str) -> Dict[str, Mapping[str, object]]:
-    """Extract a specific attribute from all fund results into a payload dictionary.
-
-    Args:
-        results: ProcessingResults containing fund_results
-        attribute: Attribute name to extract (e.g., 'compliance_results', 'reconciliation_results')
-
-    Returns:
-        Dictionary mapping fund names to their extracted attribute values
-    """
+    """``{fund: getattr(fund_result, attribute)}`` for funds where that attribute is truthy."""
     payload: Dict[str, Mapping[str, object]] = {}
     for fund_name, fund_result in results.fund_results.items():
         value = getattr(fund_result, attribute, None)
@@ -449,64 +366,40 @@ def _summary_count(summary: Mapping[str, object], *keys: str) -> int:
     return 0
 
 
+def _attachments(paths: Mapping[str, str], keys: Sequence[str]) -> List[Path]:
+    return [Path(paths[k]) for k in keys if k in paths]
+
+
 def _build_eod_email_payload(
     results: ProcessingResults,
     artefacts: Mapping[str, object],
     params,
 ) -> EmailPayload:
     """Assemble the email payload for an EOD run."""
-    nav_by_fund: Dict[str, Mapping[str, object]] = _extract_payload(results, "nav_results")
     # Convert NAVReconciliationResults objects → legacy dicts if needed.
     nav_summary: Dict[str, Mapping[str, object]] = {
         fund: (data.to_legacy_dict() if hasattr(data, "to_legacy_dict") else data)
-        for fund, data in nav_by_fund.items()
+        for fund, data in _extract_payload(results, "nav_results").items()
     }
 
     # Holdings summary table — mirrors the PDF Holdings Summary section.
-    recon_payload = _extract_payload(results, "reconciliation_results")
     holdings_summary: Dict[str, Mapping[str, object]] = {}
-    for fund, payload in recon_payload.items():
+    for fund, payload in _extract_payload(results, "reconciliation_results").items():
         summary = payload.get("summary", {}) if isinstance(payload, Mapping) else {}
-        eq    = summary.get("custodian_equity", {}) or {}
-        opt   = summary.get("custodian_option", {}) or {}
-        flex  = summary.get("custodian_flex_option", {}) or {}
-        treas = summary.get("custodian_treasury", {}) or {}
-        idx   = summary.get("index_equity", {}) or {}
-        holdings_summary[fund] = {
-            "equity_holdings":      _summary_count(eq,    "holdings_discrepancies", "final_recon"),
-            "equity_price":         _summary_count(eq,    "price_discrepancies", "price_discrepancies_T"),
-            "option_holdings":      _summary_count(opt,   "holdings_discrepancies", "final_recon"),
-            "option_price":         _summary_count(opt,   "price_discrepancies", "price_discrepancies_T"),
-            "flex_option_holdings": _summary_count(flex,  "holdings_discrepancies", "final_recon"),
-            "flex_option_price":    _summary_count(flex,  "price_discrepancies", "price_discrepancies_T"),
-            "treasury_holdings":    _summary_count(treas, "holdings_discrepancies", "final_recon"),
-            "treasury_price":       _summary_count(treas, "price_discrepancies", "price_discrepancies_T"),
-            "index_holdings":       _summary_count(idx,   "holdings_discrepancies"),
-        }
+        sections = [summary.get(key, {}) or {} for _, key in _HOLDINGS_EMAIL_SOURCES]
+        index = summary.get("index_equity", {}) or {}
+        counts: Dict[str, int] = {}
+        for (name, _), section in zip(_HOLDINGS_EMAIL_SOURCES, sections):
+            counts[f"{name}_holdings"] = _summary_count(section, "holdings_discrepancies", "final_recon")
+            counts[f"{name}_price"] = _summary_count(section, "price_discrepancies", "price_discrepancies_T")
+        counts["index_holdings"] = _summary_count(index, "holdings_discrepancies")
+        holdings_summary[fund] = counts
 
-    gl_summary = {
-        fund: {
-            "Equity G/L":      data.get("Equity G/L", 0),
-            "Option G/L":      data.get("Option G/L", 0),
-            "Flex Option G/L": data.get("Flex Option G/L", 0),
-            "Treasury G/L":    data.get("Treasury G/L", 0),
-        }
-        for fund, data in nav_summary.items()
-    }
-
-    paths = flatten_eod_paths(artefacts)
-    attachment_keys = (
-        "reconciliation_summary_pdf",
-        "nav_reconciliation_excel",
-        "holdings_reconciliation_excel",
-        "compliance_pdf",
-        "compliance_excel",
-    )
-    attachments = [Path(paths[k]) for k in attachment_keys if k in paths]
+    gl_summary = {fund: {key: data.get(key, 0) for key in GL_COLUMNS} for fund, data in nav_summary.items()}
 
     return EmailPayload(
         date=str(params.trade_date),
-        attachments=attachments,
+        attachments=_attachments(flatten_eod_paths(artefacts), _EOD_ATTACHMENT_KEYS),
         nav_summary=nav_summary,
         holdings_summary=holdings_summary,
         gl_summary=gl_summary,
@@ -534,9 +427,8 @@ def _build_trading_email_payload(
             if not isinstance(check, Mapping):
                 continue
             post_status = str(check.get("status_after", "") or "").upper()
-            # Include the row if (a) the status changed between ex-ante and
-            # ex-post, or (b) the fund is currently out of compliance on
-            # ex-post regardless of whether it changed.
+            # Include the row if the status changed between ex-ante and ex-post,
+            # or the fund is out of compliance on ex-post regardless.
             if not check.get("changed") and post_status != "FAIL":
                 continue
             changed_rows.append({
@@ -550,27 +442,13 @@ def _build_trading_email_payload(
     # Trade activity summary: fund -> {asset_class: asset_trade_summary dict}
     trade_activity_summary: Dict[str, Mapping[str, Mapping[str, object]]] = {}
     for fund_name, fund_data in funds_payload.items():
-        trade_info = (fund_data or {}).get("trade_info") or {}
-        asset_summary = trade_info.get("asset_trade_summary") or {}
+        asset_summary = ((fund_data or {}).get("trade_info") or {}).get("asset_trade_summary") or {}
         if asset_summary:
             trade_activity_summary[fund_name] = asset_summary
 
-    paths = flatten_trading_paths(artefacts)
-    attachment_keys = (
-        "trading_compliance_combined_pdf",
-        "trading_compliance_combined_excel",
-        "trading_compliance_pdf",
-        "trading_compliance_excel",
-        "trading_ex_post_compliance_pdf",
-        "trading_ex_post_compliance_excel",
-    )
-    attachments = [Path(paths[k]) for k in attachment_keys if k in paths]
-
     return EmailPayload(
         date=str(params.ex_post_date),
-        attachments=attachments,
+        attachments=_attachments(flatten_trading_paths(artefacts), _TRADING_ATTACHMENT_KEYS),
         compliance_changes=compliance_changes,
         trade_activity_summary=trade_activity_summary,
     )
-
-

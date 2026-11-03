@@ -6,13 +6,7 @@ import os
 from typing import Tuple
 import unicodedata
 
-try:  # pragma: no cover - optional dependency
-    from fpdf import FPDF
-except Exception as exc:  # pragma: no cover
-    FPDF = None
-    _IMPORT_ERROR = exc
-else:  # pragma: no cover - set to None when import succeeds
-    _IMPORT_ERROR = None
+from fpdf import FPDF
 
 
 class BaseReportPDF:
@@ -26,12 +20,6 @@ class BaseReportPDF:
         unit: str = "mm",
         format: str | Tuple[float, float] = "Letter",
     ) -> None:
-        if FPDF is None:  # pragma: no cover - dependency guard
-            raise RuntimeError(
-                "The optional dependency 'fpdf2' is required to generate PDFs. "
-                "Install it with `pip install fpdf2`."
-            ) from _IMPORT_ERROR
-
         self.output_path = output_path
         self.pdf = FPDF(orientation=orientation, unit=unit, format=format)
         self.pdf.set_auto_page_break(auto=True, margin=12)
@@ -39,9 +27,6 @@ class BaseReportPDF:
         self.pdf.add_page()
         self.pdf.set_font("Arial", size=10)
 
-    # ------------------------------------------------------------------
-    # Formatting helpers
-    # ------------------------------------------------------------------
     # ------------------------------------------------------------------
     def _sanitize_text(self, value: object) -> str:
         text = "" if value is None else str(value)

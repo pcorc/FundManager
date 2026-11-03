@@ -7,7 +7,7 @@ import smtplib
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Any, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Iterable, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from config.operation_config import OperationConfig, OperationMode
 
@@ -21,6 +21,18 @@ SMTP_USER = os.environ.get("FUNDMANAGER_SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("FUNDMANAGER_SMTP_PASSWORD", "")
 FROM_ADDRESS = os.environ.get("FUNDMANAGER_FROM_ADDRESS", SMTP_USER or "noreply@vestfin.com")
 EMAIL_MODE = os.environ.get("FUNDMANAGER_EMAIL_MODE", "display")
+
+GL_COLUMNS = ("Equity G/L", "Option G/L", "Flex Option G/L", "Treasury G/L")
+_NAV_VALUE_COLUMNS = (("Expected NAV", "expected_nav"), ("Custodian NAV", "current_nav"), ("NAV Diff ($)", "difference"))
+_NAV_GOOD_COLUMNS = (("NAV Good (2 Digit)", "nav_good_two"), ("NAV Good (4 Digit)", "nav_good_four"))
+# (summary key, break kind): equity/option/flex/treasury holdings+price, then index holdings.
+_HOLDINGS_COLUMNS = tuple(
+    (f"{asset}_{kind}", kind) for asset in ("equity", "option", "flex_option", "treasury") for kind in ("holdings", "price")
+) + (("index_holdings", "holdings"),)
+# (metric key, rendered as percent)
+_TRADE_COLUMNS = (("trade_value", False), ("pct_of_tna", True), ("pct_of_total_assets", True),
+                  ("ex_ante_market_value", False), ("ex_post_market_value", False), ("market_value_delta", False))
+_DEFAULT_RECIPIENTS = ["pcorcoran@vestfin.com"]
 
 
 @dataclass
@@ -40,67 +52,52 @@ class EmailPayload:
 class EmailManager:
     """Sends per-run notification emails with attachments and inline summaries."""
 
-    def __init__(self) -> None:
-        self.recipient_map = {
-            OperationMode.EOD: [
-                "pcorcoran@vestfin.com",
-                "sshiang@vestfin.com",
-                "dbugbee@vestfin.com",
-                "mrodriguez@vestfin.com",
-            ],
-            OperationMode.TRADING_COMPLIANCE: [
-                "pcorcoran@vestfin.com",
-            ],
-            OperationMode.COMPLIANCE_ONLY: [
-                "pcorcoran@vestfin.com",
-            ],
-        }
-
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
     def send(self, payload: EmailPayload, config: OperationConfig) -> None:
-        recipients = self.recipient_map.get(config.mode, ["pcorcoran@vestfin.com"])
-
-        if config.mode == OperationMode.EOD:
-            subject = f"EOD Reconciliation — {payload.date}"
-            body_html = self._build_eod_body(payload)
-        elif config.mode == OperationMode.TRADING_COMPLIANCE:
-            subject = f"Trading Analysis — {payload.date}"
-            body_html = self._build_trading_body(payload)
-        elif config.mode == OperationMode.COMPLIANCE_ONLY:
-            subject = f"Compliance Report — {payload.date}"
-            body_html = self._build_compliance_body(payload)
+        title, recipients, sections, attached = self._MODES.get(
+            config.mode, ("FundManager", _DEFAULT_RECIPIENTS, None, "FundManager output")
+        )
+        subject = f"{title} — {payload.date}"
+        if sections is None:
+            body = f"<p>{attached} for {payload.date} attached.</p>"
         else:
-            subject = f"FundManager — {payload.date}"
-            body_html = self._html_doc(f"<p>FundManager output for {payload.date} attached.</p>")
-
-        self._send_email(recipients, subject, body_html, payload.attachments)
+            body = (f"<h2>{subject}</h2>" + "".join(sections(self, payload))
+                    + "<p>Full PDF and Excel attachments included.</p>")
+        self._send_email(recipients, subject, self._html_doc(body), payload.attachments)
 
     # ------------------------------------------------------------------
     # Body builders
     # ------------------------------------------------------------------
-    def _build_eod_body(self, payload: EmailPayload) -> str:
-        sections = [f"<h2>EOD Reconciliation — {payload.date}</h2>"]
-        if payload.nav_summary:
-            sections.append(self._render_nav_summary(payload.nav_summary))
-        if payload.holdings_summary:
-            sections.append(self._render_holdings_summary(payload.holdings_summary))
-        if payload.gl_summary:
-            sections.append(self._render_gl_summary(payload.gl_summary))
-        sections.append("<p>Full PDF and Excel attachments included.</p>")
-        return self._html_doc("".join(sections))
+    def _eod_sections(self, payload: EmailPayload) -> List[str]:
+        return [
+            render(summary)
+            for summary, render in (
+                (payload.nav_summary, self._render_nav_summary),
+                (payload.holdings_summary, self._render_holdings_summary),
+                (payload.gl_summary, self._render_gl_summary),
+            )
+            if summary
+        ]
 
-    def _build_trading_body(self, payload: EmailPayload) -> str:
-        sections = [f"<h2>Trading Analysis — {payload.date}</h2>"]
-        sections.append(self._render_compliance_changes(payload.compliance_changes or {}))
-        sections.append(self._render_trade_activity(payload.trade_activity_summary or {}))
-        sections.append("<p>Full PDF and Excel attachments included.</p>")
-        return self._html_doc("".join(sections))
+    def _trading_sections(self, payload: EmailPayload) -> List[str]:
+        return [
+            self._render_compliance_changes(payload.compliance_changes or {}),
+            self._render_trade_activity(payload.trade_activity_summary or {}),
+        ]
 
-    def _build_compliance_body(self, payload: EmailPayload) -> str:
-        # Per spec: attachments only.
-        return self._html_doc(f"<p>Compliance report for {payload.date} attached.</p>")
+    # mode -> (title, recipients, section builder or None for attachments-only, attachments-only text)
+    _MODES = {
+        OperationMode.EOD: (
+            "EOD Reconciliation",
+            ["pcorcoran@vestfin.com", "sshiang@vestfin.com", "dbugbee@vestfin.com", "mrodriguez@vestfin.com"],
+            _eod_sections,
+            None,
+        ),
+        OperationMode.TRADING_COMPLIANCE: ("Trading Analysis", ["pcorcoran@vestfin.com"], _trading_sections, None),
+        OperationMode.COMPLIANCE_ONLY: ("Compliance Report", ["pcorcoran@vestfin.com"], None, "Compliance report"),
+    }
 
     # ------------------------------------------------------------------
     # Summary renderers
@@ -109,73 +106,37 @@ class EmailManager:
         rows = []
         for fund, data in sorted(summary.items()):
             data = data or {}
-            ok2 = bool(data.get("NAV Good (2 Digit)", data.get("nav_good_two")))
-            ok4 = bool(data.get("NAV Good (4 Digit)", data.get("nav_good_four")))
-            rows.append(
-                "<tr>"
-                f"<td>{fund}</td>"
-                f"<td class='r'>{self._num(data.get('Expected NAV', data.get('expected_nav')), 4)}</td>"
-                f"<td class='r'>{self._num(data.get('Custodian NAV', data.get('current_nav')), 4)}</td>"
-                f"<td class='r'>{self._num(data.get('NAV Diff ($)', data.get('difference')), 4)}</td>"
-                f"<td class='{'pass' if ok2 else 'fail'}'>{'PASS' if ok2 else 'FAIL'}</td>"
-                f"<td class='{'pass' if ok4 else 'fail'}'>{'PASS' if ok4 else 'FAIL'}</td>"
-                "</tr>"
-            )
-        return (
-            "<h3>NAV Reconciliation Summary</h3>"
-            "<table><tr><th>Fund</th><th>Expected NAV</th><th>Custodian NAV</th>"
-            "<th>NAV Diff</th><th>NAV Good (2-dec)</th><th>NAV Good (4-dec)</th></tr>"
-            + "".join(rows) + "</table>"
+            cells = [f"<td>{fund}</td>"]
+            cells += [self._td_r(self._num(data.get(key, data.get(alias)), 4)) for key, alias in _NAV_VALUE_COLUMNS]
+            for key, alias in _NAV_GOOD_COLUMNS:
+                ok = bool(data.get(key, data.get(alias)))
+                cells.append(f"<td class='{'pass' if ok else 'fail'}'>{'PASS' if ok else 'FAIL'}</td>")
+            rows.append(cells)
+        return self._table(
+            "NAV Reconciliation Summary",
+            ("Fund", "Expected NAV", "Custodian NAV", "NAV Diff", "NAV Good (2-dec)", "NAV Good (4-dec)"),
+            rows,
         )
 
     def _render_holdings_summary(self, summary: Mapping[str, Mapping[str, Any]]) -> str:
         rows = []
         for fund, data in sorted(summary.items()):
             data = data or {}
-            cells = [f"<td>{fund}</td>"]
-            for key, kind in (
-                ("equity_holdings", "holdings"),
-                ("equity_price", "price"),
-                ("option_holdings", "holdings"),
-                ("option_price", "price"),
-                ("flex_option_holdings", "holdings"),
-                ("flex_option_price", "price"),
-                ("treasury_holdings", "holdings"),
-                ("treasury_price", "price"),
-                ("index_holdings", "holdings"),
-            ):
-                cells.append(self._break_cell(data.get(key, 0), kind=kind))
-            rows.append("<tr>" + "".join(cells) + "</tr>")
-        return (
-            "<h3>Holdings Reconciliation Summary</h3>"
-            "<table><tr><th>Fund</th>"
-            "<th>Eq Holdings</th><th>Eq Price</th>"
-            "<th>Opt Holdings</th><th>Opt Price</th>"
-            "<th>Flex Holdings</th><th>Flex Price</th>"
-            "<th>Treasury</th><th>Treasury Price</th>"
-            "<th>Index</th></tr>"
-            + "".join(rows) + "</table>"
+            rows.append([f"<td>{fund}</td>"]
+                        + [self._break_cell(data.get(key, 0), kind=kind) for key, kind in _HOLDINGS_COLUMNS])
+        return self._table(
+            "Holdings Reconciliation Summary",
+            ("Fund", "Eq Holdings", "Eq Price", "Opt Holdings", "Opt Price", "Flex Holdings", "Flex Price",
+             "Treasury", "Treasury Price", "Index"),
+            rows,
         )
 
     def _render_gl_summary(self, summary: Mapping[str, Mapping[str, Any]]) -> str:
         rows = []
         for fund, data in sorted(summary.items()):
             data = data or {}
-            rows.append(
-                "<tr>"
-                f"<td>{fund}</td>"
-                f"<td class='r'>{self._num(data.get('Equity G/L'), 2)}</td>"
-                f"<td class='r'>{self._num(data.get('Option G/L'), 2)}</td>"
-                f"<td class='r'>{self._num(data.get('Flex Option G/L'), 2)}</td>"
-                f"<td class='r'>{self._num(data.get('Treasury G/L'), 2)}</td>"
-                "</tr>"
-            )
-        return (
-            "<h3>Gain/Loss Components</h3>"
-            "<table><tr><th>Fund</th><th>Equity G/L</th><th>Option G/L</th>"
-            "<th>Flex Option G/L</th><th>Treasury G/L</th></tr>"
-            + "".join(rows) + "</table>"
-        )
+            rows.append([f"<td>{fund}</td>"] + [self._td_r(self._num(data.get(key), 2)) for key in GL_COLUMNS])
+        return self._table("Gain/Loss Components", ("Fund",) + GL_COLUMNS, rows)
 
     def _render_compliance_changes(
         self, changes: Mapping[str, Sequence[Mapping[str, Any]]]
@@ -186,20 +147,13 @@ class EmailManager:
                 test = change.get("test", "")
                 ante = str(change.get("ante_status", "") or "")
                 post = str(change.get("post_status", "") or "")
-                rows.append(
-                    "<tr>"
-                    f"<td>{fund}</td><td>{test}</td>"
-                    f"<td class='{self._status_class(ante)}'>{ante}</td>"
-                    f"<td class='{self._status_class(post)}'>{post}</td>"
-                    "</tr>"
-                )
-        if not rows:
-            return "<h3>Compliance Status Changes</h3><p>No status changes between ex-ante and ex-post.</p>"
-        return (
-            "<h3>Compliance Status Changes</h3>"
-            "<table><tr><th>Fund</th><th>Test</th><th>Ex-Ante</th><th>Ex-Post</th></tr>"
-            + "".join(rows) + "</table>"
-        )
+                rows.append([
+                    f"<td>{fund}</td><td>{test}</td>",
+                    f"<td class='{self._status_class(ante)}'>{ante}</td>",
+                    f"<td class='{self._status_class(post)}'>{post}</td>",
+                ])
+        return self._table("Compliance Status Changes", ("Fund", "Test", "Ex-Ante", "Ex-Post"), rows,
+                           empty_msg="No status changes between ex-ante and ex-post.")
 
     def _render_trade_activity(
             self, summary: Mapping[str, Mapping[str, Mapping[str, Any]]]
@@ -208,42 +162,38 @@ class EmailManager:
         for fund, asset_data in sorted(summary.items()):
             for asset, metrics in sorted((asset_data or {}).items()):
                 metrics = metrics or {}
-                numeric_values = (
-                    metrics.get("trade_value"),
-                    metrics.get("pct_of_tna"),
-                    metrics.get("pct_of_total_assets"),
-                    metrics.get("ex_ante_market_value"),
-                    metrics.get("ex_post_market_value"),
-                    metrics.get("market_value_delta"),
-                )
                 # Skip rows where every numeric column is zero / blank (e.g. funds
                 # with no treasury activity).
-                if all(self._is_zero(v) for v in numeric_values):
+                if all(self._is_zero(metrics.get(key)) for key, _ in _TRADE_COLUMNS):
                     continue
-                rows.append(
-                    "<tr>"
-                    f"<td>{fund}</td><td>{str(asset).title()}</td>"
-                    f"<td class='r'>{self._num(metrics.get('trade_value'), 2)}</td>"
-                    f"<td class='r'>{self._pct(metrics.get('pct_of_tna'))}</td>"
-                    f"<td class='r'>{self._pct(metrics.get('pct_of_total_assets'))}</td>"
-                    f"<td class='r'>{self._num(metrics.get('ex_ante_market_value'), 2)}</td>"
-                    f"<td class='r'>{self._num(metrics.get('ex_post_market_value'), 2)}</td>"
-                    f"<td class='r'>{self._num(metrics.get('market_value_delta'), 2)}</td>"
-                    "</tr>"
-                )
-        if not rows:
-            return "<h3>Trade Activity Summary</h3><p>No trading activity detected.</p>"
-        return (
-                "<h3>Trade Activity Summary</h3>"
-                "<table><tr><th>Fund</th><th>Asset Class</th><th>Trade Value</th>"
-                "<th>% of TNA</th><th>% of Assets</th><th>Ex-Ante MV</th><th>Ex-Post MV</th>"
-                "<th>MV Delta</th></tr>"
-                + "".join(rows) + "</table>"
+                rows.append([f"<td>{fund}</td><td>{str(asset).title()}</td>"] + [
+                    self._td_r(self._pct(metrics.get(key)) if is_pct else self._num(metrics.get(key), 2))
+                    for key, is_pct in _TRADE_COLUMNS
+                ])
+        return self._table(
+            "Trade Activity Summary",
+            ("Fund", "Asset Class", "Trade Value", "% of TNA", "% of Assets", "Ex-Ante MV", "Ex-Post MV", "MV Delta"),
+            rows,
+            empty_msg="No trading activity detected.",
         )
 
     # ------------------------------------------------------------------
     # HTML helpers
     # ------------------------------------------------------------------
+    @staticmethod
+    def _table(title: str, headers: Sequence[str], rows: Sequence[Sequence[str]],
+               empty_msg: Optional[str] = None) -> str:
+        if not rows and empty_msg:
+            return f"<h3>{title}</h3><p>{empty_msg}</p>"
+        return (
+            f"<h3>{title}</h3><table><tr>" + "".join(f"<th>{h}</th>" for h in headers) + "</tr>"
+            + "".join("<tr>" + "".join(cells) + "</tr>" for cells in rows) + "</table>"
+        )
+
+    @staticmethod
+    def _td_r(text: str) -> str:
+        return f"<td class='r'>{text}</td>"
+
     @staticmethod
     def _html_doc(body: str) -> str:
         return f"""<html>
@@ -305,6 +255,15 @@ td.fail {{ background-color: #f5b8b8; text-align: center; font-weight: bold; }}
     # ------------------------------------------------------------------
     # SMTP send
     # ------------------------------------------------------------------
+    @staticmethod
+    def _present(attachments: Iterable[Path]) -> Iterator[Path]:
+        for path in attachments:
+            p = Path(path)
+            if p.exists():
+                yield p
+            else:
+                logger.warning("Skipping missing attachment %s", p)
+
     def _display_via_outlook(
             self,
             recipients: Sequence[str],
@@ -328,15 +287,12 @@ td.fail {{ background-color: #f5b8b8; text-align: center; font-weight: bold; }}
         mail.Subject = subject
         mail.HTMLBody = body_html
 
-        for path in attachments:
-            p = Path(path)
-            if not p.exists():
-                logger.warning("Skipping missing attachment %s", p)
-                continue
+        for p in self._present(attachments):
             # Outlook requires an absolute path string.
             mail.Attachments.Add(str(p.resolve()))
 
         mail.Display(True)  # opens the draft window in the foreground
+        # The count deliberately includes skipped (missing) attachments.
         logger.info("Opened Outlook draft '%s' for %s with %d attachment(s)",
                     subject, list(recipients), sum(1 for _ in attachments))
 
@@ -363,11 +319,7 @@ td.fail {{ background-color: #f5b8b8; text-align: center; font-weight: bold; }}
         msg.set_content("This email is HTML-only; please view in an HTML-capable client.")
         msg.add_alternative(body_html, subtype="html")
 
-        for path in attachments:
-            p = Path(path)
-            if not p.exists():
-                logger.warning("Skipping missing attachment %s", p)
-                continue
+        for p in self._present(attachments):
             maintype, subtype = self._mime_type(p)
             msg.add_attachment(p.read_bytes(), maintype=maintype, subtype=subtype, filename=p.name)
 
