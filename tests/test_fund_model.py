@@ -170,6 +170,25 @@ class IndexFlexOverlapTests(unittest.TestCase):
         self.assertAlmostEqual(details["overlap_weight"].iloc[1], 4_000_000.0 * 0.06 / 10_000_000.0)
         self.assertAlmostEqual(merged["net_market_value"].iloc[0], 100.0 + 300_000.0)
 
+    def test_overlap_counted_once_per_ticker_when_options_repeat_the_equity(self):
+        from processing.fund import FundData, FundHoldings, FundSnapshot
+        from services.compliance_checker import ComplianceChecker
+
+        fund = build_fund_registry()["HE3B1"]
+        flex = pd.DataFrame({"optticker": ["4SPX US 04/13/28 C6000.01"], "nav_shares": [19],
+                             "option_market_value": [4_000_000.0]})
+        fund.data = FundData(current=FundSnapshot(vest=FundHoldings(flex_options=flex)))
+        # the listed-option outer merge yields one AAPL row per AAPL option
+        holdings = pd.DataFrame({"eqyticker": ["AAPL", "AAPL", "MSFT"], "equity_market_value": [100.0] * 3,
+                                 "option_market_value": [-1.0, -2.0, 0.0]})
+        overlap = pd.DataFrame({"security_ticker": ["AAPL", "MSFT"], "security_weight": [0.075, 0.06]})
+
+        checker = ComplianceChecker(funds={fund.name: fund}, analysis_type="eod")
+        merged, details = checker._calculate_index_overlap_adjustments(fund, holdings, overlap, 10_000_000.0)
+        self.assertEqual(list(details["security_ticker"]), ["AAPL", "MSFT"])
+        self.assertAlmostEqual(merged["long_box_market_value_overlap"].sum(), 4_000_000.0 * (0.075 + 0.06))
+        self.assertEqual(list(merged["net_market_value"]), [100.0 - 1.0 + 300_000.0, 100.0 - 2.0, 100.0 + 240_000.0])
+
 
 if __name__ == "__main__":
     unittest.main()

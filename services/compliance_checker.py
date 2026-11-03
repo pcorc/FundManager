@@ -197,6 +197,8 @@ class ComplianceChecker:
             how="left",
         )
         merged["security_weight"] = _num(merged, "security_weight")
+        # The listed-option merge repeats an equity once per option on it; spread the box over each ticker once.
+        merged.loc[merged["eqyticker"].notna() & merged["eqyticker"].duplicated(), "security_weight"] = 0.0
         merged["overlap_market_value"] = total_flex_mv * merged["security_weight"]
         merged["long_box_market_value_overlap"] = (
             _num(merged, "long_box_market_value_overlap") + merged["overlap_market_value"]
