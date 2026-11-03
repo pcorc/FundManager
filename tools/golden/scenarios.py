@@ -24,6 +24,10 @@ SCENARIOS = {
     "nav_etf": dict(mode="nav", cohorts=["ETF_FUNDS"], start_date="2026-10-30"),
     "recon_etf": dict(mode="reconciliation", cohorts=["ETF_FUNDS"], start_date="2026-10-30"),
     "trading_etf": dict(mode="trading_compliance", cohorts=["ETF_FUNDS"], start_date="2026-10-30", output_tag="etfs"),
+    # send_email=False: the same reports, and no email.
+    "trading_etf_no_email": dict(
+        mode="trading_compliance", cohorts=["ETF_FUNDS"], start_date="2026-10-30", output_tag="etfs", send_email=False,
+    ),
     "time_series_cef": dict(
         mode="time_series", cohorts=["CLOSED_END_FUNDS"], start_date="2026-10-26", end_date="2026-10-30",
         compliance_tests=["diversification_40act_check", "diversification_IRS_check"], output_tag="cefs_ts",

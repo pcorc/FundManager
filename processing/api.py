@@ -483,6 +483,7 @@ def _trading_parameters(req: RunRequest, trade_date: date) -> TradingComplianceP
         compliance_tests=_tokens(req.compliance_tests),
         create_pdf=req.create_pdf,
         output_tag=req.output_tag,
+        send_email=req.send_email,
     )
 
 

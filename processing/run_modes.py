@@ -83,6 +83,7 @@ class TradingComplianceParameters:
     compliance_tests: List[str]
     create_pdf: bool
     output_tag: str | None
+    send_email: bool = True
 
 
 @dataclass(frozen=True)
@@ -249,17 +250,17 @@ def run_trading_mode(
         combined_report=combined_report,
     )
 
-    # Always sent: trading runs have no send_email switch.
-    emit_progress(on_progress, "email")
-    try:
-        EmailManager().send(
-            _build_trading_email_payload(results_ex_ante, results_ex_post, combined_artefacts, params),
-            OperationConfig.create(OperationMode.TRADING_COMPLIANCE),
-        )
-    except Exception as exc:
-        logging.getLogger(__name__).exception("Trading-analysis email notification failed")
-        if errors is not None:
-            errors.append(f"Trading-analysis email notification failed: {exc}")
+    if getattr(params, "send_email", True):
+        emit_progress(on_progress, "email")
+        try:
+            EmailManager().send(
+                _build_trading_email_payload(results_ex_ante, results_ex_post, combined_artefacts, params),
+                OperationConfig.create(OperationMode.TRADING_COMPLIANCE),
+            )
+        except Exception as exc:
+            logging.getLogger(__name__).exception("Trading-analysis email notification failed")
+            if errors is not None:
+                errors.append(f"Trading-analysis email notification failed: {exc}")
 
     return results_ex_ante, results_ex_post, combined_artefacts
 
