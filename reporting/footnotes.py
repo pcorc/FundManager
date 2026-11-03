@@ -16,12 +16,6 @@ FOOTNOTES = {
         "CCET = Cash, Cash Equivalents, and T-bills (less than 1-year maturity)."
     ],
 
-    # "40act": [
-    #     "Condition 40 Act 1: 75% of the fund must be invested in diversified assets.",
-    #     "Condition 40 Act 2a: No single issuer in the 75% can exceed 5% of total assets.",
-    #     "Condition 40 Act 2b: No single issuer in the 75% can exceed 10% of the issuer's voting securities."
-    # ],
-
     "40act": [
         "To be classified as a diversified company under the 1940 Act, at least 75% of the value of the fund's total assets must be invested in:",
         "1) cash and cash items (including receivables),",
