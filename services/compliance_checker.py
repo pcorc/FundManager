@@ -63,6 +63,19 @@ def _num(df: pd.DataFrame, column: str):
     return pd.to_numeric(df.get(column, 0.0), errors="coerce").fillna(0.0)
 
 
+def _options_per_underlying(opt_df: pd.DataFrame) -> pd.DataFrame:
+    """One row per equity_underlying_ticker (numeric columns summed), so merging options onto
+    issuer-level equity never repeats an issuer once per option on it."""
+    if opt_df.empty or "equity_underlying_ticker" not in opt_df.columns:
+        return opt_df
+    numeric_columns = opt_df.select_dtypes(include=[np.number]).columns.tolist()
+    aggregation = {column: "sum" for column in numeric_columns}
+    aggregation.update(
+        {column: "first" for column in opt_df.columns if column not in numeric_columns + ["equity_underlying_ticker"]}
+    )
+    return opt_df.groupby("equity_underlying_ticker", as_index=False, sort=False, dropna=False).agg(aggregation)
+
+
 def _ownership_pct(numerator: pd.Series, shares_out: pd.Series) -> pd.Series:
     with np.errstate(divide="ignore", invalid="ignore"):
         return np.divide(numerator, shares_out.replace(0, np.nan)).fillna(0.0)
@@ -392,7 +405,7 @@ class ComplianceChecker:
         if fund.has_listed_option:
             holdings_df = pd.merge(
                 vest_eqy_holdings,
-                vest_opt_holdings,
+                _options_per_underlying(vest_opt_holdings),
                 left_on="eqyticker",
                 right_on="equity_underlying_ticker",
                 how="outer",
@@ -420,7 +433,7 @@ class ComplianceChecker:
             df_flex_calls = vest_flex_holdings[vest_flex_holdings["option_notional_value"] > 0]
             holdings_df = pd.merge(
                 holdings_df,
-                df_flex_calls[["equity_underlying_ticker", "option_notional_value"]],
+                _options_per_underlying(df_flex_calls[["equity_underlying_ticker", "option_notional_value"]]),
                 left_on="eqyticker",
                 right_on="equity_underlying_ticker",
                 how="outer",
@@ -885,7 +898,7 @@ class ComplianceChecker:
 
         combined_holdings = pd.merge(
             sec_related_businesses,
-            vest_opt_holdings,
+            _options_per_underlying(vest_opt_holdings),
             how="left",
             left_on="eqyticker",
             right_on="equity_underlying_ticker",
