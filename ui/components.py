@@ -267,3 +267,76 @@ def stats(items: Iterable[Tuple[str, object, str]]) -> str:
     """Small ``label value`` chips; the third item is an extra class (``bad``, ``warnish`` or '')."""
     chips = "".join(f'<span class="fm-stat {esc(cls)}">{esc(label)}<b>{esc(value)}</b></span>' for label, value, cls in items)
     return f'<div class="fm-stats">{chips}</div>'
+
+
+# ---------------------------------------------------------------------------
+# Numbers for the dashboards (display only; the data stay raw floats)
+# ---------------------------------------------------------------------------
+
+def _number(value: object) -> Optional[float]:
+    try:
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return None if number != number else number  # NaN
+
+
+def money(value: object, *, signed: bool = False, compact: bool = True) -> str:
+    """Dollars for display: ``$301.9M``, ``$853.6K``, ``−$7.24M`` (true minus); ``+`` too when ``signed``; '—' if blank.
+
+    ``compact=False`` gives whole dollars (``$7,240,345``).
+    """
+    number = _number(value)
+    if number is None:
+        return "—"
+    size = abs(number)
+    if not compact:
+        body = f"{size:,.0f}"
+    elif size >= 1e9:
+        body = f"{size / 1e9:.2f}B"
+    elif size >= 1e6:
+        body = f"{size / 1e6:.1f}M" if size >= 1e8 else f"{size / 1e6:.2f}M"
+    elif size >= 1e3:
+        body = f"{size / 1e3:.1f}K"
+    else:
+        body = f"{size:,.0f}"
+    if body.strip("0.,KMB") == "":  # rounds to zero
+        return "$0"
+    sign = MINUS if number < 0 else "+" if signed and number > 0 else ""
+    return f"{sign}${body}"
+
+
+def pct(value: object, *, signed: bool = False, digits: int = 2) -> str:
+    """A fraction as a percentage: ``0.0522`` -> ``5.22%``; tiny non-zero values read ``<0.01%``; '—' if blank."""
+    number = _number(value)
+    if number is None:
+        return "—"
+    shown = abs(number) * 100
+    floor = 10 ** -digits
+    if 0 < shown < floor:
+        body = f"<{floor:.{digits}f}%"
+    else:
+        body = f"{shown:.{digits}f}%"
+    if shown == 0 or body.strip("0.%<") == "":
+        return f"{0:.{digits}f}%"
+    sign = MINUS if number < 0 else "+" if signed else ""
+    return sign + body
+
+
+def quantity(value: object, digits: int = 0) -> str:
+    """``49208.0`` -> ``49,208``; '—' if blank."""
+    number = _number(value)
+    if number is None:
+        return "—"
+    text = f"{abs(number):,.{digits}f}"
+    return (MINUS + text) if number < 0 and text.strip("0.,") else text
+
+
+def show_svg(markup: str) -> None:
+    """Render HTML that holds inline SVG (charts).
+
+    ``st.html`` sanitises with DOMPurify's HTML-only profile, which strips ``<svg>``; Markdown with
+    ``unsafe_allow_html`` passes a raw HTML block through as is. Every builder escapes its text, and the
+    markup is kept on one line so Markdown never sees a blank line (which would end the HTML block).
+    """
+    st.markdown(markup.replace("\n", " "), unsafe_allow_html=True)
