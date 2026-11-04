@@ -250,8 +250,8 @@ the output / publish folders and **Reload fund groups** (re-reads the cohorts fr
 - **New run:** a settings panel on the left and a live *Configuration Preview* on the right.
   - Settings: *Single day* or *Date range* (start / end; per day or one stacked
     compliance workbook); **Select Fund** with one chip per fund group that ticks its
-    funds, a ticker filter and a grid of fund tiles; End of day (Compliance checks /
-    Holdings reconciliation / NAV reconciliation) or Trading compliance; **Compliance
+    funds, a ticker filter and a grid of fund tiles; the end-of-day operations (Compliance
+    checks / Holdings reconciliation / NAV reconciliation); **Compliance
     Checks** with *Select All* and one tile per rule; PDF, email and output tag (blank =
     the CLI's tag for that run type, e.g. `eod`, `compliance`, `time_series`, so the report
     file names match the CLI's). **RUN** (its label follows the operations) and **RESET**.
@@ -270,10 +270,26 @@ the output / publish folders and **Reload fund groups** (re-reads the cohorts fr
   - Afterwards the results show on the page, read from the run's `views.json`: an overview
     of funds × checks (PASS / FAIL / N/A, plus NAV and holdings recon), then for a chosen
     fund each rule's table as in the PDF (with its details and footnotes), the NAV and
-    holdings reconciliation and, for trading, the before / after checks and the trade
-    activity. Then one download per report, **Download all (zip)** and **Publish**.
+    holdings reconciliation. Then one download per report, **Download all (zip)** and
+    **Publish**.
+- **Trading Compliance:** checks the proposed (staged, not yet executed) trades of a
+  trade date: **ex-ante** is the holdings before the trades, **ex-post** the holdings
+  assuming the staged trades execute. Same settings panel as New run, with a trade date,
+  a *Staged trades* chip (and a dot on those funds' tiles) from a read-only DB lookup, the
+  checks and the options (email off by default, confirmation required). After the run, a
+  dashboard: KPIs (funds trading, buys / sells / net, estimated post-trade cash; funds
+  staying compliant, going out of compliance, coming into compliance, still failing); a
+  funds × rules matrix of before → after transitions (BREAKS, CURES, STILL FAILS) with an
+  "only rules that change or fail" toggle; the rules at risk; a trading summary table per
+  fund with totals (equity, options premium and treasury buys / sells / net, % of TNA,
+  current cash at the T-1 close, estimated post-trade cash; definitions in its footnote);
+  three charts (net trades by asset class, cash before → after, % of TNA traded); and a
+  fund drill-down (cash waterfall, each rule before / after side by side with the changed
+  values highlighted, the trade blotter). Post-trade cash is an estimate: current cash −
+  buys + sells, options at premium, treasuries at price per 100 face.
 - **Run history:** every past run (who, when, what, status, files); open any run to see
-  the same results view, or **Re-run** it (loads the request back into the form, email off).
+  the same results view (the dashboard for a trading run), or **Re-run** it (loads the
+  request back into its form, New run or Trading Compliance, email off).
 - **Reports:** finished runs' reports by report date (each day a run wrote reports
   for; a stacked workbook is listed under its range). The results shown are those of the
   picked report date, so they always match its downloads.
