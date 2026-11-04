@@ -94,6 +94,14 @@ class ExAnteHoldingsTests(unittest.TestCase):
         summary = _analyze(self.post, self.ante)["trade_info"]["asset_trade_summary"]["equity"]
         self.assertEqual(summary["trade_value"], 550.0)
 
+    def test_tna_and_total_assets_come_from_the_ex_ante_t1_snapshot(self):
+        # Ex-post previous is the custodian previous date (T-2); the ex-ante previous is T-1.
+        self.post.data = _fund_data(equity=_equity(price=11.0, iiv_shares=150.0), tna=2_000.0)
+        self.ante.data = _fund_data(equity=_equity(price=10.0), tna=1_100.0)
+        trade_info = _analyze(self.post, self.ante)["trade_info"]
+        self.assertEqual((trade_info["total_net_assets"], trade_info["total_assets"]), (1_100.0, 1_100.0))
+        self.assertEqual(trade_info["asset_trade_summary"]["equity"]["pct_of_tna"], 0.5)
+
     def test_treasury_prices_are_per_100_face(self):
         bills = pd.DataFrame({"cusip": ["912797TM9"], "nav_shares": [0.0], "iiv_shares": [200_000.0],
                               "trade_rebal": [200_000.0], "price": [99.5]})

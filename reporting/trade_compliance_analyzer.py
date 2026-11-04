@@ -154,9 +154,12 @@ class TradingComplianceAnalyzer:
         # so fund.data.current.{tna,ta} would be zero. Use the previous (T-1) snapshot
         # the bulk loader populated with the prior-day custodian numbers, falling back
         # to current only if T-1 is missing (e.g., a Monday after a holiday).
+        # The ex-ante pass loads previous = T-1; the ex-post pass loads previous = the custodian
+        # previous date (T-2), so its snapshot is only a fallback.
         data = getattr(fund, "data", None)
         previous_snapshot = getattr(data, "previous", None)
         current_snapshot = getattr(data, "current", None)
+        ante_previous_snapshot = getattr(getattr(ante_fund, "data", None), "previous", None)
 
         def _from_snapshot(snapshot: Any, attr: str) -> float:
             try:
@@ -164,8 +167,12 @@ class TradingComplianceAnalyzer:
             except (TypeError, ValueError):
                 return 0.0
 
-        total_net_assets = _from_snapshot(previous_snapshot, "tna") or _from_snapshot(current_snapshot, "tna")
-        total_assets = _from_snapshot(previous_snapshot, "ta") or _from_snapshot(current_snapshot, "ta")
+        total_net_assets, total_assets = (
+            _from_snapshot(ante_previous_snapshot, attr)
+            or _from_snapshot(previous_snapshot, attr)
+            or _from_snapshot(current_snapshot, attr)
+            for attr in ("tna", "ta")
+        )
 
         net_trades: Dict[str, Dict[str, float]] = {}
         trade_activity: Dict[str, Dict[str, Any]] = {}
