@@ -35,9 +35,9 @@ def _equity(price, nav_shares=100.0, iiv_shares=100.0, trade_rebal=0.0):
                          "trade_rebal": [trade_rebal], "price": [price]})
 
 
-def _options(ticker, quantity, price, trade_rebal):
-    return pd.DataFrame({"optticker": [ticker], "nav_shares": [quantity], "iiv_shares": [quantity],
-                         "trade_rebal": [trade_rebal], "price": [price]})
+def _options(ticker, quantity, price, trade_rebal, maturity):
+    return pd.DataFrame({"optticker": [ticker], "maturity": [maturity], "nav_shares": [quantity],
+                         "iiv_shares": [quantity], "trade_rebal": [trade_rebal], "price": [price]})
 
 
 def _analyze(post_fund, ante_fund=None, ante=None, post=None):
@@ -55,10 +55,10 @@ class ExAnteHoldingsTests(unittest.TestCase):
     def setUp(self):
         self.post = Fund("KNG", {})
         self.post.data = _fund_data(equity=_equity(price=11.0),
-                                    options=_options("NEW 11/06/26 C10", -2.0, 0.5, -2.0))
+                                    options=_options("NEW 11/06/26 C10", -2.0, 0.5, -2.0, date(2026, 11, 6)))
         self.ante = Fund("KNG", {})
         self.ante.data = _fund_data(equity=_equity(price=10.0),
-                                    options=_options("OLD 10/30/26 C10", -3.0, 0.25, None))
+                                    options=_options("OLD 11/20/26 C10", -3.0, 0.25, None, date(2026, 11, 20)))
 
     def test_ex_ante_market_value_comes_from_the_ex_ante_fund(self):
         summary = _analyze(self.post, self.ante)["trade_info"]["asset_trade_summary"]["equity"]
@@ -70,8 +70,15 @@ class ExAnteHoldingsTests(unittest.TestCase):
     def test_closed_ex_ante_option_shows_as_a_closing_trade(self):
         activity = _analyze(self.post, self.ante)["trade_info"]["trade_activity"]["options"]
         self.assertEqual([(t["ticker"], t["quantity"], t["market_value"]) for t in activity["buys"]],
-                         [("OLD 10/30/26 C10", 3.0, 75.0)])
+                         [("OLD 11/20/26 C10", 3.0, 75.0)])
         self.assertEqual([t["ticker"] for t in activity["sells"]], ["NEW 11/06/26 C10"])
+
+    def test_ex_ante_option_expiring_on_the_analysis_date_is_not_a_trade(self):
+        self.ante.data = _fund_data(equity=_equity(price=10.0),
+                                    options=_options("OLD 10/30/26 C10", -3.0, 0.25, None, DAY))
+        trade_info = _analyze(self.post, self.ante)["trade_info"]
+        self.assertEqual(trade_info["trade_activity"]["options"]["buys"], [])
+        self.assertEqual(trade_info["asset_trade_summary"]["options"]["trade_value"], 100.0)
 
     def test_without_an_ex_ante_copy_both_sides_read_the_ex_post_fund(self):
         summary = _analyze(self.post)["trade_info"]["asset_trade_summary"]["equity"]

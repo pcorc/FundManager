@@ -204,6 +204,8 @@ class TradingComplianceAnalyzer:
             if key == "options" and non_empty(ante_df) and "optticker" in ante_df.columns:
                 post_tickers = post_df["optticker"] if "optticker" in post_df.columns else []
                 ante_only = ante_df[~ante_df["optticker"].isin(post_tickers)].copy()
+                # Options expiring on or before the analysis date drop out by expiry, not by a trade.
+                ante_only = ante_only.loc[~self._expires_by(ante_only, self.date)]
                 if not ante_only.empty:
                     ante_only["iiv_shares"] = 0.0
                     ante_only["trade_rebal"] = -pd.to_numeric(
@@ -270,6 +272,16 @@ class TradingComplianceAnalyzer:
                 if isinstance(candidate, Fund):
                     return candidate
         return None
+
+    @staticmethod
+    def _expires_by(df: pd.DataFrame, as_of: Any) -> pd.Series:
+        """True for rows whose maturity (vest ``maturity`` / custodian ``maturity_date``) is on or before ``as_of``;
+        rows without a parsable maturity are False."""
+        cutoff = pd.to_datetime(as_of, errors="coerce")
+        for column in ("maturity", "maturity_date"):
+            if column in df.columns and not pd.isna(cutoff):
+                return (pd.to_datetime(df[column], errors="coerce") <= cutoff).fillna(False)
+        return pd.Series(False, index=df.index, dtype=bool)
 
     @staticmethod
     def _extract_trade_series(df: pd.DataFrame) -> pd.Series:
