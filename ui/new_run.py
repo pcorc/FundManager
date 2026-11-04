@@ -1,23 +1,30 @@
-"""The New run page: pick funds, operations, rules and dates, validate inline, launch, watch, download.
+"""The New run page: settings on the left; on the right a live run's progress, the Configuration Preview, then results.
 
-Widgets are plain (not an ``st.form``) so the fund-count badge and the
-validation message update as you pick. :func:`build_request` turns the picks
-into a ``RunRequest`` and ``processing.api.validate`` checks it in-process
-before the Run button is enabled. Only one run happens per output root, so
-while any run is active the controls are disabled and its progress panel is
-shown (a refreshed browser reattaches through the lock file).
+The settings panel (:mod:`ui.settings_panel`) holds plain widgets (not an
+``st.form``) so the counts and the validation update as you pick.
+:func:`build_request` turns the picks into a ``RunRequest`` and
+``processing.api.validate`` checks it in-process before the Run button is
+enabled; problems show inline in the preview (:mod:`ui.preview`). Only one run
+happens per output root, so while any run is active the controls are disabled
+and its progress panel is shown (a refreshed browser reattaches through the
+lock file).
+
+The picked funds and compliance checks live in session state as lists
+(``nr_funds``, ``nr_rules``); their checkbox tiles are synced from those lists
+on every run, so the group chips, *Select All*, the ticker filter, RESET and
+Re-run can change them.
 
 Email: a run (End of day or Trading compliance) sends nothing unless *Send
 email* and its confirmation are ticked, and both are cleared once a run starts.
 
 Dates are snapped to business days here (weekends only; there is no holiday
-calendar), so the request, the caption, history and the Reports page all name
+calendar), so the request, the preview, history and the Reports page all name
 the days that actually run.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -25,7 +32,7 @@ import streamlit as st
 
 from config.run_configurations import FULL_COMPLIANCE_TESTS
 from processing.api import InvalidRequest, RunRequest, select_funds, validate
-from ui import history, panels, runner
+from ui import history, panels, preview, runner, settings_panel
 from utilities.workdays import business_day_offset, ensure_business_day, iter_business_days
 
 EOD_OPS = {"compliance": "Compliance", "reconciliation": "Holdings recon", "nav_reconciliation": "NAV recon"}
@@ -40,7 +47,11 @@ _CLI_TAGS = {("compliance",): "compliance", ("reconciliation",): "reconciliation
 
 @dataclass
 class Choices:
-    """What the form holds, independent of Streamlit (so it can be unit-tested and pre-filled)."""
+    """What the form holds, independent of Streamlit (so it can be unit-tested and pre-filled).
+
+    Empty ``funds`` and ``cohorts`` mean every fund (the API's rule); the page itself always sends the
+    ticked tickers and refuses an empty pick.
+    """
 
     cohorts: List[str] = field(default_factory=list)
     funds: List[str] = field(default_factory=list)
@@ -78,6 +89,12 @@ def selected_funds(catalog: dict, choices: Choices) -> List[str]:
     return select_funds(funds=choices.funds or catalog["funds"], exclude=choices.exclude)
 
 
+def check_rules(catalog: dict) -> List[Tuple[str, str]]:
+    """``(key, label)`` of the compliance checks offered as tiles: the tests of 'All rules' less the summary sheet."""
+    return [(r["key"], r["label"]) for r in catalog["rule_catalog"]
+            if r["key"] in FULL_COMPLIANCE_TESTS and r["key"] != "summary_metrics"]
+
+
 def default_tag(operations: Sequence[str], stacked: bool) -> str:
     """The output tag the CLI preset for these operations uses (``eod``, ``compliance``, ``time_series`` …)."""
     if "trading_compliance" in operations:
@@ -92,13 +109,18 @@ def operations_for(choices: Choices) -> Tuple[str, ...]:
         op for op in EOD_OPS if op in choices.eod_ops)
 
 
+def uses_rules(choices: Choices) -> bool:
+    """Whether the compliance checks apply (Trading, or End of day with Compliance ticked)."""
+    return choices.kind == KIND_TRADING or "compliance" in choices.eod_ops
+
+
 def run_dates(choices: Choices) -> Tuple[date, date, bool]:
     """(start, end, stacked) snapped to business days; raises ``InvalidRequest`` for an empty or reversed range.
 
     An as-of weekend day runs the Friday before; a range starts on its first and ends on its last business day.
     """
     if choices.date_kind == RANGE:
-        if len(choices.date_range) != 2:
+        if len(choices.date_range) != 2 or None in choices.date_range:
             raise InvalidRequest("Pick both a start and an end date for the range.")
         picked_start, picked_end = choices.date_range
         if picked_end < picked_start:
@@ -130,7 +152,7 @@ def build_request(catalog: dict, choices: Choices) -> RunRequest:
     tests: Sequence[str] = tuple(FULL_COMPLIANCE_TESTS)  # "All rules" = the RunRequest default
     if (trading or "compliance" in operations) and choices.rules_mode == CHOOSE_RULES:
         if not choices.rules:
-            raise InvalidRequest("Pick at least one compliance rule, or choose 'All rules'.")
+            raise InvalidRequest("Pick at least one compliance check, or use Select All.")
         tests = tuple(choices.rules)
     if choices.send_email and not choices.email_confirmed:
         raise InvalidRequest("Tick the confirmation to send notification emails, or switch email off.")
@@ -174,17 +196,46 @@ def choices_from_request(catalog: dict, request: RunRequest) -> Choices:
     )
 
 
+def rules_choice(catalog: dict, picked: Sequence[str]) -> Tuple[str, List[str]]:
+    """(rules_mode, rules) for the ticked checks: exactly every tile ticked is 'All rules'."""
+    if set(picked) == {key for key, _ in check_rules(catalog)}:
+        return ALL_RULES, []
+    order = {r["key"]: i for i, r in enumerate(catalog["rule_catalog"])}
+    return CHOOSE_RULES, sorted(dict.fromkeys(picked), key=lambda k: order.get(k, len(order)))
+
+
+def evaluate(catalog: dict, choices: Choices) -> Tuple[Optional[RunRequest], Optional[str]]:
+    """(request, None) when the picks make a valid run, else (None, the reason)."""
+    if not choices.funds and not choices.cohorts:
+        return None, "Pick at least one fund: tick its tile, or use a group chip."
+    try:
+        return build_request(catalog, choices), None
+    except (InvalidRequest, ValueError) as exc:
+        return None, str(exc)
+
+
+def date_notes(choices: Choices, request: RunRequest) -> List[str]:
+    """Say when a picked date is not the day that runs (weekends)."""
+    picked = [choices.as_of] if choices.date_kind == AS_OF else list(choices.date_range)
+    actual = [request.start_date] if choices.date_kind == AS_OF else [request.start_date, request.end_date]
+    return [f"{p:%A} {p} is not a business day: the run uses {a}." for p, a in zip(picked, actual)
+            if p is not None and p != a]
+
+
 # ---------------------------------------------------------------------------
-# Page
+# Session state
 # ---------------------------------------------------------------------------
 
-_KEYS = {"cohorts": "nr_cohorts", "funds": "nr_funds", "exclude": "nr_exclude", "kind": "nr_kind",
-         "rules_mode": "nr_rules_mode", "rules": "nr_rules", "date_kind": "nr_date_kind", "as_of": "nr_as_of",
-         "date_range": "nr_range", "date_mode": "nr_date_mode", "daily_reports": "nr_daily",
-         "create_pdf": "nr_pdf", "send_email": "nr_email", "email_confirmed": "nr_email_ok", "tag": "nr_tag"}
-_OP_KEYS = tuple(f"nr_op_{op}" for op in EOD_OPS)
-_CONFIRM_KEYS = ("nr_email_ok",)  # never kept: a confirmation lasts only while it is on screen
-_KEPT_KEYS = tuple(k for k in _KEYS.values() if k not in _CONFIRM_KEYS) + _OP_KEYS
+# Plain widget keys, by Choices field. The fund and rule picks are the lists FUNDS_KEY / RULES_KEY.
+KEYS = {"kind": "nr_kind", "date_kind": "nr_date_kind", "as_of": "nr_as_of", "date_mode": "nr_date_mode",
+        "daily_reports": "nr_daily", "create_pdf": "nr_pdf", "send_email": "nr_email",
+        "email_confirmed": "nr_email_ok", "tag": "nr_tag"}
+FUNDS_KEY, RULES_KEY, START_KEY, END_KEY, FILTER_KEY = "nr_funds", "nr_rules", "nr_start", "nr_end", "nr_fund_filter"
+OP_KEYS = tuple(f"nr_op_{op}" for op in EOD_OPS)
+CONFIRM_KEYS = ("nr_email_ok",)  # never kept: a confirmation lasts only while it is on screen
+KEPT_KEYS = (tuple(k for k in KEYS.values() if k not in CONFIRM_KEYS) + OP_KEYS
+             + (FUNDS_KEY, RULES_KEY, START_KEY, END_KEY, FILTER_KEY))
+PANE_KEY, RESULTS, GUIDE = "nr_pane", "Results", "Check guide"
 
 
 def keep_form_state() -> None:
@@ -193,7 +244,7 @@ def keep_form_state() -> None:
     Streamlit drops the state of a keyed widget that is not rendered in a run; re-assigning the key makes
     it plain session state for that run, so it survives. Confirmation ticks are deliberately not kept.
     """
-    for key in _KEPT_KEYS:
+    for key in KEPT_KEYS:
         if key in st.session_state:
             st.session_state[key] = st.session_state[key]
 
@@ -204,6 +255,37 @@ def request_rerun(run_dir: Path) -> None:
     st.session_state["page"] = "New run"
 
 
+def defaults(catalog: dict, today: Optional[date] = None) -> Dict[str, object]:
+    """A fresh form: no fund ticked, every check ticked, Compliance, the previous business day, email off."""
+    as_of = default_as_of(today or date.today())
+    base = Choices()
+    values: Dict[str, object] = {key: getattr(base, name) for name, key in KEYS.items()}
+    values.update({KEYS["as_of"]: as_of, START_KEY: business_day_offset(as_of, -4), END_KEY: as_of,
+                   FUNDS_KEY: [], RULES_KEY: [key for key, _ in check_rules(catalog)], FILTER_KEY: ""})
+    values.update({f"nr_op_{op}": op == "compliance" for op in EOD_OPS})
+    return values
+
+
+def set_defaults(catalog: dict) -> None:
+    """Seed the state of widgets not set yet, so widgets never get both a ``value=`` and a Session State value."""
+    for key, value in defaults(catalog).items():
+        st.session_state.setdefault(key, value)
+
+
+def reset_form(catalog: dict) -> None:
+    """RESET button callback: every pick back to its default (email off)."""
+    for key, value in defaults(catalog).items():
+        st.session_state[key] = value
+    clear_email()
+
+
+def clear_email() -> None:
+    """Untick Send email and its confirmation (before their widgets are rendered in this run)."""
+    st.session_state[KEYS["send_email"]] = False
+    for key in CONFIRM_KEYS:
+        st.session_state[key] = False
+
+
 def _apply_prefill(catalog: dict) -> None:
     run_dir = st.session_state.pop("nr_prefill", None)
     if not run_dir:
@@ -211,132 +293,41 @@ def _apply_prefill(catalog: dict) -> None:
     try:
         choices = choices_from_request(catalog, history.load_request(Path(run_dir)))
     except (OSError, ValueError, TypeError) as exc:
-        st.error(f"Could not load the request of {Path(run_dir).name}: {exc}")
+        st.session_state["nr_notice_error"] = f"Could not load the request of {Path(run_dir).name}: {exc}"
         return
-    for name, key in _KEYS.items():
-        value = getattr(choices, name)
-        if name == "date_range" and not value:
-            continue
-        st.session_state[key] = value
+    for name, key in KEYS.items():
+        st.session_state[key] = getattr(choices, name)
+    if choices.date_range:
+        st.session_state[START_KEY], st.session_state[END_KEY] = choices.date_range
     for op in EOD_OPS:
         st.session_state[f"nr_op_{op}"] = op in choices.eod_ops
-    _clear_email()
-    st.info(f"Loaded the request of {Path(run_dir).name}. Email is off; check the picks and press Run.")
+    st.session_state[FUNDS_KEY] = selected_funds(catalog, choices)  # groups and exclusions become ticks
+    st.session_state[RULES_KEY] = ([key for key, _ in check_rules(catalog)] if choices.rules_mode == ALL_RULES
+                                   else list(choices.rules))
+    st.session_state[FILTER_KEY] = ""
+    clear_email()
+    st.session_state["nr_notice"] = (f"Loaded the settings of {Path(run_dir).name}. "
+                                     "Email is off; check the picks and press Run.")
 
 
-def _clear_email() -> None:
-    """Untick Send email and both confirmations (before their widgets are rendered in this run)."""
-    st.session_state["nr_email"] = False
-    for key in _CONFIRM_KEYS:
-        st.session_state[key] = False
+# ---------------------------------------------------------------------------
+# Page
+# ---------------------------------------------------------------------------
 
-
-def _prune(key: str, options: Sequence[str]) -> None:
-    """Drop picks that are no longer offered (Streamlit rejects a value outside the options)."""
-    if key in st.session_state:
-        st.session_state[key] = [v for v in st.session_state[key] if v in options]
-
-
-def _set_defaults(today: date) -> None:
-    """Seed the state of widgets not set yet, so widgets never get both a ``value=`` and a Session State value.
-
-    Keys survive while their widget is hidden because :func:`keep_form_state` re-assigns them every run.
-    """
-    as_of = default_as_of(today)
-    defaults = {**{key: getattr(Choices(), name) for name, key in _KEYS.items()},
-                _KEYS["as_of"]: as_of, _KEYS["date_range"]: (as_of - timedelta(days=7), as_of)}
-    defaults.update({f"nr_op_{op}": op == "compliance" for op in EOD_OPS})
-    for key, value in defaults.items():
-        st.session_state.setdefault(key, value)
-
-
-def _stacked_turns_pdf_off() -> None:
-    """``on_change`` of the Output radio: like the CLI's time_series preset, a stacked run defaults to no PDF."""
-    if st.session_state.get(_KEYS["date_mode"]) == STACKED:
-        st.session_state[_KEYS["create_pdf"]] = False
-
-
-def _form(catalog: dict, locked: bool) -> Choices:
-    """Render the controls (disabled while a run is active) and return what they hold."""
-    c = Choices()
-    today = date.today()
-    _set_defaults(today)
-    cohorts: Dict[str, List[str]] = catalog["cohorts"]
-    st.subheader("Funds")
-    c.cohorts = st.multiselect("Fund groups", sorted(cohorts), key=_KEYS["cohorts"], disabled=locked,
-                               format_func=lambda n: f"{n} ({len(cohorts[n])})")
-    pool = sorted(set().union(*(cohorts[n] for n in c.cohorts))) if c.cohorts else list(catalog["funds"])
-    _prune(_KEYS["funds"], pool)
-    _prune(_KEYS["exclude"], pool)
-    c.funds = st.multiselect("Funds" + (" (narrowed by the groups)" if c.cohorts else ""), pool,
-                             key=_KEYS["funds"], disabled=locked,
-                             placeholder="All funds in the groups" if c.cohorts else "All funds")
-    c.exclude = st.multiselect("Exclude", pool, key=_KEYS["exclude"], disabled=locked)
-    count = len(selected_funds(catalog, c))
-    st.badge(f"{count} fund{'s' if count != 1 else ''} selected", color="blue" if count else "red")
-
-    st.subheader("Operations")
-    c.kind = st.radio("Run type", [KIND_EOD, KIND_TRADING], key=_KEYS["kind"], horizontal=True, disabled=locked,
-                      help="Trading compliance cannot be combined with the end-of-day operations.")
-    trading = c.kind == KIND_TRADING
-    if not trading:
-        cols = st.columns(len(EOD_OPS))
-        c.eod_ops = [op for col, (op, label) in zip(cols, EOD_OPS.items())
-                     if col.checkbox(label, key=f"nr_op_{op}", disabled=locked)]
-    if trading or "compliance" in c.eod_ops:
-        c.rules_mode = st.radio("Compliance rules", [ALL_RULES, CHOOSE_RULES], key=_KEYS["rules_mode"],
-                                horizontal=True, disabled=locked)
-        if c.rules_mode == CHOOSE_RULES:
-            labels = {r["key"]: r["label"] for r in catalog["rule_catalog"]}
-            c.rules = st.multiselect("Rules", list(labels), key=_KEYS["rules"], format_func=labels.get,
-                                     disabled=locked)
-
-    st.subheader("Dates")
-    c.date_kind = st.radio("Dates", [AS_OF, RANGE], key=_KEYS["date_kind"], horizontal=True, disabled=locked,
-                           label_visibility="collapsed")
-    weekdays_help = "Weekends snap to business days. There is no holiday calendar: a market holiday still runs."
-    if c.date_kind == AS_OF:
-        c.as_of = st.date_input("As of", max_value=today, key=_KEYS["as_of"], disabled=locked, help=weekdays_help)
-    else:
-        c.date_range = tuple(st.date_input("Range (start – end)", max_value=today, key=_KEYS["date_range"],
-                                           disabled=locked, help=weekdays_help))
-        if trading:  # stacked is EOD compliance only: show what will run
-            st.session_state[_KEYS["date_mode"]] = PER_DAY
-        c.date_mode = st.radio("Output", [PER_DAY, STACKED], key=_KEYS["date_mode"], horizontal=True,
-                               disabled=locked or trading, on_change=_stacked_turns_pdf_off,
-                               help="Stacked writes one compliance workbook over the whole range (EOD only).")
-        if c.date_mode == STACKED and not trading:
-            c.daily_reports = st.checkbox("Also write daily reports", key=_KEYS["daily_reports"], disabled=locked)
-
-    st.subheader("Options")
-    cols = st.columns(3)
-    c.create_pdf = cols[0].checkbox("Create PDF", key=_KEYS["create_pdf"], disabled=locked)
-    c.send_email = cols[1].checkbox("Send email", key=_KEYS["send_email"], disabled=locked)
+def _start(request: RunRequest, user: str, root: Path) -> None:
     try:
-        start, end, stacked = run_dates(c)
-        tag_hint = f"blank = {default_tag(operations_for(c), stacked)}"
-    except InvalidRequest:
-        tag_hint = "optional, e.g. backdated"
-    c.tag = cols[2].text_input("Output tag", key=_KEYS["tag"], disabled=locked, max_chars=40, placeholder=tag_hint,
-                               help="Goes into the report file names (blank = the CLI's name for this run type).")
-    if c.send_email:
-        st.warning("This run will send the notification emails to their usual recipients "
-                   "(or open Outlook drafts on the server, depending on FUNDMANAGER_EMAIL_MODE).")
-        c.email_confirmed = st.checkbox("Yes, send the emails for this run", key=_KEYS["email_confirmed"],
-                                        disabled=locked)
-    return c
-
-
-def _date_notes(choices: Choices, request: RunRequest) -> List[str]:
-    """Say when a picked date is not the day that runs (weekends)."""
-    picked = [choices.as_of] if choices.date_kind == AS_OF else list(choices.date_range)
-    actual = [request.start_date] if choices.date_kind == AS_OF else [request.start_date, request.end_date]
-    return [f"{p:%A} {p} is not a business day: the run uses {a}." for p, a in zip(picked, actual)
-            if p is not None and p != a]
+        st.session_state["nr_watch"] = str(runner.start_run(request, user=user, root=root))
+    except runner.RunLocked as exc:
+        st.session_state["nr_notice_error"] = str(exc)
+    except OSError as exc:
+        st.session_state["nr_notice_error"] = f"Could not start the run: {exc}"
+    else:
+        st.session_state["nr_started"] = True
+    st.rerun()
 
 
 def render(catalog: dict, user: str) -> None:
-    """The whole page: form, validation, Run, then the active run's progress or the last run's results."""
+    """The whole page: settings | preview, validation, Run, then the active run's progress or the last results."""
     st.title("New run")
     root = runner.output_root()
     active = runner.active_run(root)
@@ -344,39 +335,35 @@ def render(catalog: dict, user: str) -> None:
     if running:
         st.session_state["nr_watch"] = str(active)  # reattach after a refresh, or show another user's run
     if st.session_state.pop("nr_started", False):
-        _clear_email()  # each emailing run needs its own confirmation
+        clear_email()  # each emailing run needs its own confirmation
+        st.session_state[PANE_KEY] = RESULTS
+    set_defaults(catalog)
     _apply_prefill(catalog)
-    choices = _form(catalog, locked=running)
 
-    request, problem = None, None
-    try:
-        request = build_request(catalog, choices)
-    except (InvalidRequest, ValueError) as exc:
-        problem = str(exc)
-    if problem and not running:
-        st.error(problem)
-    elif request is not None:
-        for note in _date_notes(choices, request):
-            st.info(note)
-        days = business_days(request.start_date, request.end_date or request.start_date)
-        runs = ", ".join(map(str, days)) if len(days) <= 5 else f"{days[0]} … {days[-1]}"
-        st.caption(f"{runner.summarize(request)} · {len(days)} business day(s): {runs} · "
-                   f"tag {request.output_tag}")
-    if st.button("Run", type="primary", disabled=running or request is None, key="nr_run"):
-        try:
-            st.session_state["nr_watch"] = str(runner.start_run(request, user=user, root=root))
-        except runner.RunLocked as exc:
-            st.error(str(exc))
-        except OSError as exc:
-            st.error(f"Could not start the run: {exc}")
-        else:
-            st.session_state["nr_started"] = True
-            st.rerun()
-
-    watch = st.session_state.get("nr_watch")
-    if watch and Path(watch).is_dir():
-        st.divider()
-        if panels.is_finished(Path(watch)):
-            panels.results_panel(Path(watch), user, key="nr")
-        else:
+    left, right = st.columns([0.36, 0.64], gap="large")
+    with left:
+        with st.container(key="nr_settings"):
+            choices = settings_panel.form(catalog, locked=running)
+            request, problem = evaluate(catalog, choices)
+            if settings_panel.buttons(catalog, choices, can_run=not running and request is not None, locked=running):
+                _start(request, user, root)
+    with right:
+        for key, kind in (("nr_notice", "info"), ("nr_notice_error", "error")):
+            if key in st.session_state:
+                preview.notice(kind, st.session_state.pop(key))
+        watch = st.session_state.get("nr_watch")
+        live = bool(watch) and Path(watch).is_dir() and not panels.is_finished(Path(watch))
+        if live:  # first in the pane, so it is in view the moment RUN is pressed
             panels.progress_panel(watch, user)
+        preview.render(catalog, choices, request, None if running else problem,
+                       date_notes(choices, request) if request is not None else [])
+        if not live and watch and Path(watch).is_dir():
+            st.session_state.setdefault(PANE_KEY, RESULTS)
+            pane = st.segmented_control("Show", [RESULTS, GUIDE], key=PANE_KEY, required=True,
+                                        label_visibility="collapsed")
+            if pane == GUIDE:
+                preview.rule_guide(catalog, choices)
+            else:
+                panels.results_panel(Path(watch), user, key="nr")
+        elif not live:
+            preview.rule_guide(catalog, choices)

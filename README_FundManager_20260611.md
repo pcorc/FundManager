@@ -213,11 +213,18 @@ rule, `cohorts=("ETF_FUNDS",)`, and `date_mode="per_day"` or `"stacked"` over
   `RunResult.errors` collects the failures that are otherwise only logged
   (including a failed notification email, which leaves the exit code 0).
   `bundle(result, "reports.zip")` zips each distinct file once.
-- `python -m processing.worker request.json [--result result.json]` runs one
+  `RunResult.views` holds each day's results as display tables
+  (`reporting/result_views.py`: per fund and rule the PDF's own labels,
+  numbers and PASS/FAIL, plus NAV, holdings and trading views); a view that
+  cannot be built is listed in `errors` and never fails the run.
+  `result_views.rule_descriptions()` describes every rule without the DB.
+- `python -m processing.worker request.json [--result result.json] [--views views.json]` runs one
   request (`request_to_json` / `request_from_json` format) in a fresh
   process, prints each `ProgressEvent` as a JSON line on stdout (logs go to
   stderr) and writes the exit code, summaries, paths, files and errors to
-  `result.json` (default `<request>.result.json`). Exit code 2 means the
+  `result.json` (default `<request>.result.json`) and the views to a separate
+  `views.json` beside it (`{"schema_version": 1, "days": {date: DayView}}`,
+  schema in `reporting/result_views.py`). Exit code 2 means the
   request was invalid (`InvalidRequest`).
 - Tests: `python -m unittest discover tests -v` (no DB access).
 
@@ -236,37 +243,52 @@ python -m streamlit run ui/app.py --server.address 127.0.0.1 --server.port 8501 
 python -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
 ```
 
-- **New run:** fund groups (cohorts from the DB, cached; *Reload fund groups* in the
-  sidebar re-reads them), funds and exclusions with a live fund count; End of day
-  (Compliance / Holdings recon / NAV recon) or Trading compliance; all rules or any
-  subset; one as-of date or a range, per day or one stacked compliance workbook;
-  PDF, email, output tag (blank = the CLI's tag for that run type, e.g. `eod`,
-  `compliance`, `time_series`, so the report file names match the CLI's). Weekend
-  dates snap to business days (an as-of Saturday runs Friday, a range runs its
-  first to last business day) and the caption lists the days that will run; there
-  is no holiday calendar. The request is checked with `processing.api.validate`
-  before **Run** is enabled. A stacked run with recon operations needs *Also write
-  daily reports* (the stacked workbook holds compliance only). Picks are kept while
-  you visit other pages. While a run is active the form is locked and a panel
-  shows the progress bar (fund *index/total*), the stage, the log tail and **Cancel**;
-  a refreshed or second browser reattaches to it. Afterwards: one download per
-  report, **Download all (zip)**, the summary per day and any errors.
-- **Run history:** every past run (who, when, what, status, files) with its results
-  and **Re-run** (loads the request back into the form, email off).
+The app has a soft dark theme (`.streamlit/config.toml` plus `ui/theme.py`), so start it
+from the repo folder. A top bar switches between the pages; the menu under your name shows
+the output / publish folders and **Reload fund groups** (re-reads the cohorts from the DB).
+
+- **New run:** a settings panel on the left and a live *Configuration Preview* on the right.
+  - Settings: *Single day* or *Date range* (start / end; per day or one stacked
+    compliance workbook); **Select Fund** with one chip per fund group that ticks its
+    funds, a ticker filter and a grid of fund tiles; End of day (Compliance checks /
+    Holdings reconciliation / NAV reconciliation) or Trading compliance; **Compliance
+    Checks** with *Select All* and one tile per rule; PDF, email and output tag (blank =
+    the CLI's tag for that run type, e.g. `eod`, `compliance`, `time_series`, so the report
+    file names match the CLI's). **RUN** (its label follows the operations) and **RESET**.
+  - Preview: days (business days), funds, checks and operations, the total ("3 funds ×
+    1 day × 13 checks = 39 total operations") and an estimated completion time from past
+    runs. Problems show there and keep **RUN** disabled. Below it, cards describe each
+    picked check (what it tests, its thresholds, which funds it applies to).
+  - Weekend dates snap to business days (an as-of Saturday runs Friday, a range runs its
+    first to last business day); there is no holiday calendar. The request is checked with
+    `processing.api.validate` before **RUN** is enabled. A stacked run with recon
+    operations needs *Also write daily reports* (the stacked workbook holds compliance
+    only). Picks are kept while you visit other pages.
+  - While a run is active the form is locked and the preview shows the progress bar, the
+    stage, the current fund, the log tail and **Cancel**; a refreshed or second browser
+    reattaches to it.
+  - Afterwards the results show on the page, read from the run's `views.json`: an overview
+    of funds × checks (PASS / FAIL / N/A, plus NAV and holdings recon), then for a chosen
+    fund each rule's table as in the PDF (with its details and footnotes), the NAV and
+    holdings reconciliation and, for trading, the before / after checks and the trade
+    activity. Then one download per report, **Download all (zip)** and **Publish**.
+- **Run history:** every past run (who, when, what, status, files); open any run to see
+  the same results view, or **Re-run** it (loads the request back into the form, email off).
 - **Reports:** finished runs' reports by report date (each day a run wrote reports
-  for; a stacked workbook is listed under its range).
+  for; a stacked workbook is listed under its range). The results shown are those of the
+  picked report date, so they always match its downloads.
 
 Each run is one `python -m processing.worker` process (cwd = the run folder,
 `PYTHONPATH` = the repo) in `<FUNDMANAGER_UI_OUTPUT_ROOT>/<YYYYMMDD-HHMMSS>-<user>-<tag>/`,
 which holds `request.json`, `progress.jsonl` (the worker's JSON-lines stdout),
-`run.log` (its stderr), `result.json`, `meta.json` (user, start/finish, request
+`run.log` (its stderr), `result.json`, `views.json` (the in-app result tables), `meta.json` (user, start/finish, request
 summary, exit code, cancelled / timed-out flags, publish history), `logs/` and
 `reports/`. Only one run happens per output root at a time (`.run.lock` holds the
 worker PID and its process creation time; a lock whose process is gone, or whose PID
 now belongs to another process, is cleared, and Cancel never kills a process whose
 creation time does not match). A run keeps going if Streamlit restarts; the page
 reattaches, enforces the timeout and records the result when the worker ends.
-Keep the output root short (e.g. `C:\FundManager\ui_runs`; the sidebar warns when it
+Keep the output root short (e.g. `C:\FundManager\ui_runs`; the page warns when it
 is too long): report paths over 260 characters are handled with the `\\?\` path
 form, but Explorer and Excel may not open them from the run folder.
 
@@ -303,7 +325,7 @@ Safety:
   verbatim, so they can still name the DB host.
 - Streamlit installs pyarrow, and recent pyarrow requires NumPy 2 while the
   project pins NumPy 1.26, so the UI avoids `st.dataframe` and renders tables as
-  Markdown.
+  escaped HTML.
 
 Tests: `python -m unittest discover tests -v` also runs `tests/test_ui_runner.py`,
 `tests/test_ui_history.py` and `tests/test_ui_app.py` (Streamlit `AppTest`, a fake

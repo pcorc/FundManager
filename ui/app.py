@@ -38,7 +38,8 @@ import streamlit as st  # noqa: E402
 
 from config import fund_definitions  # noqa: E402
 from processing import api  # noqa: E402
-from ui import history_page, new_run, runner  # noqa: E402
+from ui import components as ui  # noqa: E402
+from ui import history_page, new_run, runner, theme  # noqa: E402
 
 _log = logging.getLogger("fundmanager.ui")
 CATALOG_RETRY_SECONDS = 60  # how long a failed catalog load is cached before the DB is tried again
@@ -75,7 +76,7 @@ def get_catalog() -> dict:
         catalog = load_catalog()
     if "_error" in catalog:
         st.error(f"Could not load the fund groups from the database ({catalog['_error']}); see the server log. "
-                 "You can still pick funds by ticker. Use 'Reload fund groups' to retry.")
+                 "You can still pick funds by ticker. Use 'Reload fund groups' (under your name, top right) to retry.")
     return catalog
 
 
@@ -122,8 +123,33 @@ def current_user() -> Optional[str]:
     return getpass.getuser()
 
 
+def top_bar(user: str) -> str:
+    """Brand, page navigation (a segmented control on ``page``, so Re-run can switch page from a callback) and
+    a popover with the user, the output / publish folders and *Reload fund groups*; returns the page."""
+    brand, nav, account = st.columns([1.3, 2.4, 1.3], vertical_alignment="center")
+    brand.html('<div class="fm-brand"><span class="fm-brand-mark">FM</span><span class="fm-brand-name">FundManager'
+               '</span><span class="fm-brand-sub">compliance &amp; reconciliation</span></div>')
+    with nav.container(key="fm_nav", horizontal=True, horizontal_alignment="center"):
+        page = st.segmented_control("Page", list(PAGES), key="page", required=True, label_visibility="collapsed")
+    with account.container(horizontal=True, horizontal_alignment="right"):
+        with st.popover(user, icon=":material/account_circle:"):
+            st.caption(f"Signed in as **{user}**")
+            st.caption(f"Output: `{runner.output_root()}`")
+            publish = runner.publish_root()
+            st.caption(f"Publish: `{publish}`" if publish else "Publish: off")
+            if st.button("Reload fund groups", key="fm_reload", help="Re-read the fund groups (cohorts) from the database",
+                         icon=":material/refresh:"):
+                load_catalog.clear()
+    if runner.root_too_deep(runner.output_root()):
+        ui.show(ui.callout("warn", "The output folder path is long: some report paths will pass 260 characters, "
+                                   "which Explorer and Excel may not open. Set FUNDMANAGER_UI_OUTPUT_ROOT to a short "
+                                   "folder."))
+    return page or "New run"
+
+
 def main() -> None:
     st.set_page_config(page_title="FundManager", page_icon=":material/fact_check:", layout="wide")
+    theme.inject()
     if not password_gate():
         return
     user = current_user()
@@ -132,19 +158,7 @@ def main() -> None:
         return
     st.session_state.setdefault("page", "New run")
     new_run.keep_form_state()  # the New run picks survive visits to the other pages
-    with st.sidebar:
-        st.markdown("### FundManager")
-        page = st.radio("Page", list(PAGES), key="page", label_visibility="collapsed")
-        st.caption(f"Signed in as **{user}**")
-        st.caption(f"Output: `{runner.output_root()}`")
-        if runner.root_too_deep(runner.output_root()):
-            st.warning("The output folder path is long: some report paths will pass 260 characters, which "
-                       "Explorer and Excel may not open. Set FUNDMANAGER_UI_OUTPUT_ROOT to a short folder.")
-        publish = runner.publish_root()
-        st.caption(f"Publish: `{publish}`" if publish else "Publish: off")
-        if st.button("Reload fund groups", help="Re-read the fund groups (cohorts) from the database"):
-            load_catalog.clear()
+    page = top_bar(user)
     PAGES[page](user)
-
 
 main()

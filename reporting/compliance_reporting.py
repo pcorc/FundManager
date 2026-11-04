@@ -80,6 +80,20 @@ _GICS_CAN_EXCEED = {"KNG", "FDND", "KNGIX"}
 _GICS_EXCEPTIONS = {"TDVI": "Information Technology Sector"}
 
 
+# GICS_Compliance sheet columns; the values after Date and Fund are the overall status and _gics_flags.
+GICS_SUMMARY_COLUMNS = (
+    "Date",
+    "Fund",
+    "Overall GICS Compliance",
+    "Industry Exceeds 25%",
+    "Industry Group Exceeds 25%",
+    "Index Industry Exceeds 25%?",
+    "Index Industry Group Exceeds 25%?",
+    "Can Fund exceed 25% if Index does?",
+    "Exceptions to Conc Policy",
+)
+
+
 def _gics_flags(fund_key: str, gics: Mapping[str, Any]) -> tuple:
     """(industry, group, index industry, index group) flags, can-exceed and exceptions text."""
     exceeding_index = gics.get("exceeding_index_gics", {}) or {}
@@ -433,6 +447,15 @@ _RULE_SHEETS = (
 )
 
 
+def is_percent_header(header: object) -> bool:
+    """True for workbook columns formatted as percentages (0.00%); the others use #,##0.00."""
+    header_text = str(header or "").lower()
+    return any(
+        keyword in header_text
+        for keyword in ("percent", "pct", "weight", "ownership")
+    ) or header_text in {"formula", "formula (mv)"}
+
+
 @dataclass
 class GeneratedComplianceReport:
     excel_path: Optional[str]
@@ -603,17 +626,7 @@ class ComplianceReport:
                     table.setdefault(key, str(sector).strip() or "N/A")
                 sector_lookup[gics_class] = table
 
-        summary_columns = [
-            "Date",
-            "Fund",
-            "Overall GICS Compliance",
-            "Industry Exceeds 25%",
-            "Industry Group Exceeds 25%",
-            "Index Industry Exceeds 25%?",
-            "Index Industry Group Exceeds 25%?",
-            "Can Fund exceed 25% if Index does?",
-            "Exceptions to Conc Policy",
-        ]
+        summary_columns = list(GICS_SUMMARY_COLUMNS)
         detail_value_columns = [
             "Date", "Fund", "GICS_Class", "GICS_Class Value", "GICS_SECTOR_NAME",
             "Fund_Weight_Value", "Index_Weight_Value", "Exceeding_Fund_25%?", "Exceeding_Index_25%?",
@@ -725,11 +738,7 @@ class ComplianceReport:
                 for column_cells in ws.columns:
                     max_length = 0
                     column_letter = column_cells[0].column_letter
-                    header_text = str(headers.get(column_letter, "")).lower()
-                    is_percent = any(
-                        keyword in header_text
-                        for keyword in ("percent", "pct", "weight", "ownership")
-                    ) or header_text in {"formula", "formula (mv)"}
+                    is_percent = is_percent_header(headers.get(column_letter, ""))
                     for cell in column_cells:
                         try:
                             value = cell.value
@@ -849,87 +858,10 @@ _PDF_SECTIONS = (
 )
 
 
-class ComplianceReportPDF(BaseReportPDF):
-    """Render compliance results to a PDF document."""
-
-    def __init__(
-        self,
-        results: Mapping[str, Mapping[str, object]],
-        output_path: str,
-        *,
-        allowed_tests: Optional[Iterable[str]] = None,
-    ) -> None:
-        super().__init__(output_path, orientation="L")
-        self.results = flatten_compliance_results(results)
-        self.allowed_tests = _selected_tests(allowed_tests)
-        self.generate_pdf()
-        self.save_pdf()
-
-    def save_pdf(self) -> None:
-        try:
-            self.output()
-        except Exception as e:
-            logger.error(f"Failed to save PDF to {self.output_path}: {e}")
-            raise
-
-    # ------------------------------------------------------------------
-    def generate_pdf(self) -> None:
-        # BaseReportPDF.__init__ has already added the first page.
-        self.pdf.set_y(self.pdf.t_margin)
-        grouped_results = self._group_results_by_fund()
-        if not grouped_results:
-            self._add_header("Compliance Overview")
-            self.pdf.set_font("Arial", "", 9)
-            self.pdf.cell(0, 6, "No compliance results available.", ln=True)
-            self.output()  # written again by save_pdf (kept as-is)
-            return
-
-        self.grouped_results = grouped_results
-        self.fund_order = sorted(grouped_results)
-
-        for idx, (title, test_key, footnote, skip_labels, metrics) in enumerate(_PDF_SECTIONS):
-            if self._is_test_selected(test_key):
-                self._render_metric_section(title, test_key, metrics, footnote, skip_labels)
-
-            # GICS overview goes right after the Summary Metrics slot, whether or not Summary is selected.
-            if idx == 0 and self._is_test_selected("gics_compliance"):
-                has_gics_data = any(
-                    isinstance(payload, dict) and "gics_compliance" in payload
-                    for payload in self.results.values()
-                )
-                if has_gics_data:
-                    self.pdf.ln(4)
-                    self._print_test_header("GICS Diversification")
-                    self._render_gics_compliance_overview()
-                    self.pdf.ln(8)
-
-    # ------------------------------------------------------------------
-    def _group_results_by_fund(self) -> Dict[str, Dict[str, Any]]:
-        """Payload of each fund's last date."""
-        grouped: Dict[str, Dict[str, Any]] = {}
-        for (fund_name, date_str), payload in sorted(
-            self.results.items(), key=lambda item: (item[0][0], item[0][1])
-        ):
-            grouped[fund_name] = payload
-        return grouped
-
-    def _render_metric_section(self, title, test_key, metrics, footnote_key, skip_fail_labels) -> None:
-        rows: list[list[str]] = []
-        for label, fmt, source, field in metrics:
-            row: list[str] = [self._sanitize_text(label)]
-            for fund in self.fund_order:
-                fund_payload = self.grouped_results.get(fund, {})
-                row.append(self._sanitize_text(self._cell_text(fund_payload, test_key, fmt, source, field)))
-            rows.append(row)
-
-        estimated_height = 5.0 + (4.2 * len(rows)) + 6
-        if self.pdf.get_y() + estimated_height > self.pdf.h - self.pdf.b_margin:
-            self.pdf.add_page()
-
-        self._print_test_header(title)
-        self._draw_metric_table(["Metric", *self.fund_order], rows, skip_fail_labels)
-        self._draw_footnotes_section(footnote_key)
-        self.pdf.ln(2)
+class MetricCells:
+    """The PDF metric-table cell text for one fund and rule, without any PDF (shared with
+    ``reporting.result_views``): ``_cell_text(fund_data, test_key, fmt, source, field)`` for each
+    ``_PDF_SECTIONS`` metric."""
 
     def _cell_text(self, fund_data, test_key, fmt, source, field) -> str:
         # The checker runs IRC only for VIT funds; another fund in the run has no IRC result,
@@ -977,71 +909,6 @@ class ComplianceReportPDF(BaseReportPDF):
         }
         return formatters[fmt](value)
 
-    # ------------------------------------------------------------------
-    def _add_header(self, title: str) -> None:
-        self.pdf.set_font("Arial", "B", 14)
-        self.pdf.cell(0, 10, self._sanitize_text(title), ln=True, align="C")
-        self.pdf.ln(4)
-
-    def _print_test_header(self, title: str) -> None:
-        self.pdf.set_font("Arial", "B", 10)
-        self.pdf.cell(0, 6, self._sanitize_text(title), ln=True)
-        self.pdf.set_font("Arial", "", 9)
-
-    def _header_row(self, widths, headers, height: float, font_size: int) -> None:
-        headers = [self._sanitize_text(header) for header in headers]
-        draw_header_row(self.pdf, widths, headers, height, font_size, (230, 230, 230), height)
-
-    def _value_cell(self, width: float, height: float, text: str, align: str, highlight_fail: bool) -> None:
-        if highlight_fail:
-            self.pdf.set_fill_color(255, 200, 200)
-            self.pdf.set_text_color(139, 0, 0)
-            self.pdf.cell(width, height, text, border=1, align="C", fill=True)
-            self.pdf.set_text_color(0, 0, 0)
-        else:
-            self.pdf.set_fill_color(255, 255, 255)
-            self.pdf.cell(width, height, text, border=1, align=align)
-
-    def _draw_metric_table(self, headers: list[str], rows: list[list[str]], skip_fail_labels) -> None:
-        skip_fail = {self._sanitize_text(label).lower() for label in skip_fail_labels}
-
-        usable_width = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
-        metric_width = min(45.0, usable_width * 0.3)
-        value_width = (usable_width - metric_width) / max(len(headers) - 1, 1)
-        widths = [metric_width] + [value_width] * (len(headers) - 1)
-
-        self._header_row(widths, headers, 5.0, 7)
-        self.pdf.set_font("Arial", "", 6)
-        for row in rows:
-            row_label = self._sanitize_text(row[0]).lower()
-            for idx, value in enumerate(row):
-                text = self._sanitize_text(value).replace("\n", " /")
-                align = "R" if idx != 0 and self._looks_like_number(text) else "L"
-                fail = text.upper() == "FAIL" and row_label not in skip_fail
-                self._value_cell(widths[idx], 4.2, text, align, fail)
-            self.pdf.ln(4.2)
-
-    def _draw_table(self, headers: list[str], rows: list[list[str]], col_widths: list[float], row_height: int) -> None:
-        self._header_row(col_widths, headers, row_height, 9)
-        self.pdf.set_font("Arial", "", 8)
-        for row in rows:
-            for width, value in zip(col_widths, row):
-                text = self._sanitize_text(value)
-                self._value_cell(width, row_height, text, "C", text.upper() == "FAIL")
-            self.pdf.ln(row_height)
-
-    @staticmethod
-    def _looks_like_number(value: str) -> bool:
-        stripped = value.replace(",", "").replace("%", "").strip()
-        if not stripped:
-            return False
-        try:
-            float(stripped)
-            return True
-        except ValueError:
-            return False
-
-    # ------------------------------------------------------------------
     def _get_summary_value(self, fund_data: Mapping[str, Any], key: str) -> object:
         if not isinstance(fund_data, Mapping):
             return 0.0
@@ -1049,16 +916,6 @@ class ComplianceReportPDF(BaseReportPDF):
         if not isinstance(summary_result, Mapping):
             return 0.0
         return summary_result.get(key, 0.0)
-
-    def _is_test_selected(self, test_name: str) -> bool:
-        # The IRC section only appears when the run has a VIT fund (self.results is keyed by (fund, date)).
-        if test_name == "diversification_IRC_check":
-            has_vit_wrapper = any(_vehicle_wrapper(fund_name) == "vit" for fund_name, _ in self.results)
-            if not has_vit_wrapper:
-                return False
-        if not self.allowed_tests:
-            return True
-        return test_name in self.allowed_tests
 
     def _is_test_skipped(self, fund_data: Mapping[str, Any], key: str) -> bool:
         # The checker's details are flattened into the payload (report_utils); a nested
@@ -1157,6 +1014,164 @@ class ComplianceReportPDF(BaseReportPDF):
     @staticmethod
     def _first_not_none(*values: object) -> object:
         return next((value for value in values if value is not None), None)
+
+
+class ComplianceReportPDF(MetricCells, BaseReportPDF):
+    """Render compliance results to a PDF document."""
+
+    def __init__(
+        self,
+        results: Mapping[str, Mapping[str, object]],
+        output_path: str,
+        *,
+        allowed_tests: Optional[Iterable[str]] = None,
+    ) -> None:
+        super().__init__(output_path, orientation="L")
+        self.results = flatten_compliance_results(results)
+        self.allowed_tests = _selected_tests(allowed_tests)
+        self.generate_pdf()
+        self.save_pdf()
+
+    def save_pdf(self) -> None:
+        try:
+            self.output()
+        except Exception as e:
+            logger.error(f"Failed to save PDF to {self.output_path}: {e}")
+            raise
+
+    # ------------------------------------------------------------------
+    def generate_pdf(self) -> None:
+        # BaseReportPDF.__init__ has already added the first page.
+        self.pdf.set_y(self.pdf.t_margin)
+        grouped_results = self._group_results_by_fund()
+        if not grouped_results:
+            self._add_header("Compliance Overview")
+            self.pdf.set_font("Arial", "", 9)
+            self.pdf.cell(0, 6, "No compliance results available.", ln=True)
+            self.output()  # written again by save_pdf (kept as-is)
+            return
+
+        self.grouped_results = grouped_results
+        self.fund_order = sorted(grouped_results)
+
+        for idx, (title, test_key, footnote, skip_labels, metrics) in enumerate(_PDF_SECTIONS):
+            if self._is_test_selected(test_key):
+                self._render_metric_section(title, test_key, metrics, footnote, skip_labels)
+
+            # GICS overview goes right after the Summary Metrics slot, whether or not Summary is selected.
+            if idx == 0 and self._is_test_selected("gics_compliance"):
+                has_gics_data = any(
+                    isinstance(payload, dict) and "gics_compliance" in payload
+                    for payload in self.results.values()
+                )
+                if has_gics_data:
+                    self.pdf.ln(4)
+                    self._print_test_header("GICS Diversification")
+                    self._render_gics_compliance_overview()
+                    self.pdf.ln(8)
+
+    # ------------------------------------------------------------------
+    def _group_results_by_fund(self) -> Dict[str, Dict[str, Any]]:
+        """Payload of each fund's last date."""
+        grouped: Dict[str, Dict[str, Any]] = {}
+        for (fund_name, date_str), payload in sorted(
+            self.results.items(), key=lambda item: (item[0][0], item[0][1])
+        ):
+            grouped[fund_name] = payload
+        return grouped
+
+    def _render_metric_section(self, title, test_key, metrics, footnote_key, skip_fail_labels) -> None:
+        rows: list[list[str]] = []
+        for label, fmt, source, field in metrics:
+            row: list[str] = [self._sanitize_text(label)]
+            for fund in self.fund_order:
+                fund_payload = self.grouped_results.get(fund, {})
+                row.append(self._sanitize_text(self._cell_text(fund_payload, test_key, fmt, source, field)))
+            rows.append(row)
+
+        estimated_height = 5.0 + (4.2 * len(rows)) + 6
+        if self.pdf.get_y() + estimated_height > self.pdf.h - self.pdf.b_margin:
+            self.pdf.add_page()
+
+        self._print_test_header(title)
+        self._draw_metric_table(["Metric", *self.fund_order], rows, skip_fail_labels)
+        self._draw_footnotes_section(footnote_key)
+        self.pdf.ln(2)
+
+    # ------------------------------------------------------------------
+    def _add_header(self, title: str) -> None:
+        self.pdf.set_font("Arial", "B", 14)
+        self.pdf.cell(0, 10, self._sanitize_text(title), ln=True, align="C")
+        self.pdf.ln(4)
+
+    def _print_test_header(self, title: str) -> None:
+        self.pdf.set_font("Arial", "B", 10)
+        self.pdf.cell(0, 6, self._sanitize_text(title), ln=True)
+        self.pdf.set_font("Arial", "", 9)
+
+    def _header_row(self, widths, headers, height: float, font_size: int) -> None:
+        headers = [self._sanitize_text(header) for header in headers]
+        draw_header_row(self.pdf, widths, headers, height, font_size, (230, 230, 230), height)
+
+    def _value_cell(self, width: float, height: float, text: str, align: str, highlight_fail: bool) -> None:
+        if highlight_fail:
+            self.pdf.set_fill_color(255, 200, 200)
+            self.pdf.set_text_color(139, 0, 0)
+            self.pdf.cell(width, height, text, border=1, align="C", fill=True)
+            self.pdf.set_text_color(0, 0, 0)
+        else:
+            self.pdf.set_fill_color(255, 255, 255)
+            self.pdf.cell(width, height, text, border=1, align=align)
+
+    def _draw_metric_table(self, headers: list[str], rows: list[list[str]], skip_fail_labels) -> None:
+        skip_fail = {self._sanitize_text(label).lower() for label in skip_fail_labels}
+
+        usable_width = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
+        metric_width = min(45.0, usable_width * 0.3)
+        value_width = (usable_width - metric_width) / max(len(headers) - 1, 1)
+        widths = [metric_width] + [value_width] * (len(headers) - 1)
+
+        self._header_row(widths, headers, 5.0, 7)
+        self.pdf.set_font("Arial", "", 6)
+        for row in rows:
+            row_label = self._sanitize_text(row[0]).lower()
+            for idx, value in enumerate(row):
+                text = self._sanitize_text(value).replace("\n", " /")
+                align = "R" if idx != 0 and self._looks_like_number(text) else "L"
+                fail = text.upper() == "FAIL" and row_label not in skip_fail
+                self._value_cell(widths[idx], 4.2, text, align, fail)
+            self.pdf.ln(4.2)
+
+    def _draw_table(self, headers: list[str], rows: list[list[str]], col_widths: list[float], row_height: int) -> None:
+        self._header_row(col_widths, headers, row_height, 9)
+        self.pdf.set_font("Arial", "", 8)
+        for row in rows:
+            for width, value in zip(col_widths, row):
+                text = self._sanitize_text(value)
+                self._value_cell(width, row_height, text, "C", text.upper() == "FAIL")
+            self.pdf.ln(row_height)
+
+    @staticmethod
+    def _looks_like_number(value: str) -> bool:
+        stripped = value.replace(",", "").replace("%", "").strip()
+        if not stripped:
+            return False
+        try:
+            float(stripped)
+            return True
+        except ValueError:
+            return False
+
+    # ------------------------------------------------------------------
+    def _is_test_selected(self, test_name: str) -> bool:
+        # The IRC section only appears when the run has a VIT fund (self.results is keyed by (fund, date)).
+        if test_name == "diversification_IRC_check":
+            has_vit_wrapper = any(_vehicle_wrapper(fund_name) == "vit" for fund_name, _ in self.results)
+            if not has_vit_wrapper:
+                return False
+        if not self.allowed_tests:
+            return True
+        return test_name in self.allowed_tests
 
     # ------------------------------------------------------------------
     def _draw_footnotes_section(self, key: Optional[str]) -> None:

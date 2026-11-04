@@ -11,6 +11,75 @@ import numpy as np
 import pandas as pd
 
 
+DISCREPANCY_ROW_LIMIT = 10  # rows a discrepancy table shows; the rest is summarised as "... and N more rows"
+
+
+def discrepancy_table(
+    df: Any, title: str, limit: int = DISCREPANCY_ROW_LIMIT
+) -> tuple[list[str], list[list[str]], set[str]] | None:
+    """A discrepancy table's (column names, first ``limit`` rows as text, right-aligned columns), or None
+    when it has no rows or no ticker column. A ``title`` containing "Price" makes a price-break table
+    (ticker + the two prices); otherwise the full holdings-discrepancy column set."""
+    if not non_empty(df):
+        return None
+
+    ticker_col = next(
+        (
+            col
+            for col in ["equity_ticker", "eqyticker", "optticker", "occ_symbol", "norm_ticker", "ticker", "cusip"]
+            if col in df.columns
+        ),
+        None,
+    )
+
+    # Price-break tables (caller passes a title containing "Price") only need
+    # ticker + the two price columns. Holdings-discrepancy tables keep the
+    # full column set.
+    is_price_table = "Price" in title
+
+    if is_price_table:
+        column_sources = {
+            "eqy_ticker": [ticker_col] if ticker_col else [],
+            "price_vest": ["price_vest", "fund_price", "vest_price"],
+            "price_cust": ["price_cust", "cust_price", "price_custodian"],
+        }
+        right_aligned = {"price_vest", "price_cust"}
+    else:
+        column_sources = {
+            "eqy_ticker": [ticker_col] if ticker_col else [],
+            "discrepancy_type": ["discrepancy_type", "type"],
+            "shares_cust": ["shares_cust", "cust_shares", "custodian_shares"],
+            "shares_vest": ["shares_vest", "nav_shares", "quantity", "shares_oms", "vest_shares"],
+            "price_vest": ["price_vest", "fund_price", "vest_price"],
+            "price_cust": ["price_cust", "cust_price", "price_custodian"],
+        }
+        right_aligned = {"shares_cust", "shares_vest", "price_vest", "price_cust"}
+
+    resolved_columns = {}
+    for display_name, candidates in column_sources.items():
+        resolved_columns[display_name] = next((col for col in candidates if col in df.columns), None)
+
+    if not resolved_columns.get("eqy_ticker"):
+        return None
+
+    display_cols = list(column_sources.keys())
+    rows: list[list[str]] = []
+    for _, row in df.head(limit).iterrows():
+        texts = []
+        for col in display_cols:
+            source = resolved_columns.get(col)
+            val = row.get(source) if source else ""
+            if isinstance(val, bool):
+                text = "YES" if val else "NO"
+            elif isinstance(val, (int, float, np.number)):
+                text = f"{val:,.2f}"
+            else:
+                text = str(val)
+            texts.append(text)
+        rows.append(texts)
+    return display_cols, rows, right_aligned
+
+
 class HoldingsReconciliationRenderer:
     """Mixin that provides reusable holdings reconciliation PDF sections."""
 
@@ -150,72 +219,26 @@ class HoldingsReconciliationRenderer:
             self._print_discrepancy_table(final_df, title)
 
     def _print_discrepancy_table(self, df: pd.DataFrame, title: str) -> None:
-        if df.empty:
+        table = discrepancy_table(df, title)
+        if table is None:
             return
+        display_cols, rows, right_aligned = table
 
-        ticker_col = next(
-            (
-                col
-                for col in ["equity_ticker", "eqyticker", "optticker", "occ_symbol", "norm_ticker", "ticker", "cusip"]
-                if col in df.columns
-            ),
-            None,
-        )
-
-        # Price-break tables (caller passes a title containing "Price") only need
-        # ticker + the two price columns. Holdings-discrepancy tables keep the
-        # full column set.
-        is_price_table = "Price" in title
-
-        if is_price_table:
-            column_sources = {
-                "eqy_ticker": [ticker_col] if ticker_col else [],
-                "price_vest": ["price_vest", "fund_price", "vest_price"],
-                "price_cust": ["price_cust", "cust_price", "price_custodian"],
-            }
-            right_aligned = {"price_vest", "price_cust"}
-        else:
-            column_sources = {
-                "eqy_ticker": [ticker_col] if ticker_col else [],
-                "discrepancy_type": ["discrepancy_type", "type"],
-                "shares_cust": ["shares_cust", "cust_shares", "custodian_shares"],
-                "shares_vest": ["shares_vest", "nav_shares", "quantity", "shares_oms", "vest_shares"],
-                "price_vest": ["price_vest", "fund_price", "vest_price"],
-                "price_cust": ["price_cust", "cust_price", "price_custodian"],
-            }
-            right_aligned = {"shares_cust", "shares_vest", "price_vest", "price_cust"}
-
-        resolved_columns = {}
-        for display_name, candidates in column_sources.items():
-            resolved_columns[display_name] = next((col for col in candidates if col in df.columns), None)
-
-        if not resolved_columns.get("eqy_ticker"):
-            return
-
-        display_cols = list(column_sources.keys())
         usable_width = self.pdf.w - self.pdf.l_margin - self.pdf.r_margin
         col_width = usable_width / len(display_cols)
 
         draw_header_row(self.pdf, [col_width] * len(display_cols), display_cols, 6, 8, (200, 200, 200))
 
         self.pdf.set_font("Arial", size=8)
-        for _, row in df.head(10).iterrows():
-            for col in display_cols:
-                source = resolved_columns.get(col)
-                val = row.get(source) if source else ""
-                if isinstance(val, bool):
-                    text = "YES" if val else "NO"
-                elif isinstance(val, (int, float, np.number)):
-                    text = f"{val:,.2f}"
-                else:
-                    text = str(val)
+        for texts in rows:
+            for col, text in zip(display_cols, texts):
                 align = "R" if col in right_aligned else "L"
                 self.pdf.cell(col_width, 5, text[:20], border=1, align=align)
             self.pdf.ln()
 
-        if len(df) > 10:
+        if len(df) > DISCREPANCY_ROW_LIMIT:
             self.pdf.set_font("Arial", "I", 8)
-            self.pdf.cell(0, 5, f"... and {len(df) - 10} more rows", ln=1)
+            self.pdf.cell(0, 5, f"... and {len(df) - DISCREPANCY_ROW_LIMIT} more rows", ln=1)
 
     # ------------------------------------------------------------------
     def _print_holdings_block(
