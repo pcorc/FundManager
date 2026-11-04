@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 import zipfile
 from dataclasses import dataclass, field, fields, replace
 from datetime import date
@@ -28,6 +29,7 @@ from config.run_configurations import COHORTS, FULL_COMPLIANCE_TESTS, MODES
 from processing.bulk_data_loader import BulkDataLoader
 from processing.fund import FundRegistry, build_fund_registry
 from processing.fund_manager import ProgressCallback, ProgressEvent, emit_progress, progress_for_day
+from processing.staged_trades import staged_trade_counts
 from processing.run_modes import (
     EODRunParameters,
     TradingComplianceParameters,
@@ -44,7 +46,7 @@ from utilities.workdays import business_date_range, business_day_offset
 __all__ = ["COMPLIANCE_TEST_KEYS", "DATE_MODES", "InvalidRequest", "OPERATIONS", "ProgressEvent", "ReportFile",
            "RunRequest", "RunResult", "build_run", "bundle", "catalog", "execute_run", "filter_registry",
            "load_cohorts", "request_from_json", "request_to_json", "rule_catalog", "run", "select_funds",
-           "validate"]
+           "staged_trades", "validate"]
 
 EOD_OPERATIONS = ("compliance", "reconciliation", "nav_reconciliation")
 TRADING_COMPLIANCE = "trading_compliance"
@@ -188,6 +190,32 @@ def catalog() -> Dict[str, object]:
 def rule_catalog() -> List[Dict[str, str]]:
     """Every key ``compliance_tests`` accepts, with its display label, in run order."""
     return [{"key": key, "label": _STEP_LABELS.get(key) or RULE_LABELS[key]} for key in COMPLIANCE_TEST_KEYS]
+
+
+STAGED_TRADES_TTL = 300  # seconds a staged_trades() answer is reused
+_staged_cache: Dict[Tuple[date, bool], Tuple[float, Dict[str, Dict[str, int]]]] = {}
+
+
+def staged_trades(day: date, *, registry_only: bool = True, refresh: bool = False) -> Dict[str, Dict[str, int]]:
+    """Funds with staged (proposed, unexecuted) trades on ``day``: ``{fund: {"equity", "options", "treasury",
+    "total": rows}}`` (``processing.staged_trades``), cached for :data:`STAGED_TRADES_TTL` seconds.
+
+    Read-only, a few grouped queries (about a second). ``registry_only`` keeps the funds a run can select.
+    Errors (e.g. the DB is down) propagate; failures are not cached.
+    """
+    key = (day, registry_only)
+    cached = _staged_cache.get(key)
+    if cached and not refresh and time.monotonic() - cached[0] < STAGED_TRADES_TTL:
+        return {fund: dict(counts) for fund, counts in cached[1].items()}
+    session, _ = initialize_database()
+    try:
+        counts = staged_trade_counts(session, day)
+    finally:
+        session.close()
+    if registry_only:
+        counts = {fund: entry for fund, entry in counts.items() if fund in fund_definitions.FUND_DEFINITIONS}
+    _staged_cache[key] = (time.monotonic(), counts)
+    return {fund: dict(entry) for fund, entry in counts.items()}
 
 
 def load_cohorts() -> None:
@@ -401,6 +429,10 @@ def _run_day(req: RunRequest, trade_date: date, result: RunResult,
         _add_view(result, day, logger, lambda: build_trading_view(
             results_ex_ante, results_ex_post, getattr(getattr(artefacts, "report", None), "comparison_data", None),
             day=trade_date, compliance_tests=params.compliance_tests))
+        dashboard_error = (result.views.get(day) or {}).get("dashboard_error")
+        if dashboard_error:
+            logger.warning("Trading dashboard for %s could not be built: %s", day, dashboard_error)
+            result.errors.append(f"{day}: Trading dashboard could not be built: {dashboard_error}")
     else:
         logger.info("EOD dates — trade date: %s, previous business date: %s",
                     params.trade_date, params.previous_trade_date)

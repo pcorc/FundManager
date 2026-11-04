@@ -52,11 +52,16 @@ class AppTestCase(unittest.TestCase):
         env = {"FUNDMANAGER_UI_OUTPUT_ROOT": str(self.root), "FUNDMANAGER_UI_PUBLISH_ROOT": "",
                "FUNDMANAGER_UI_PASSWORD": "", "FUNDMANAGER_UI_USER_HEADER": ""}
         for patcher in (mock.patch.dict(os.environ, env), mock.patch.object(api, "catalog", return_value=CATALOG),
+                        mock.patch.object(api, "staged_trades", return_value=self.staged()),
                         mock.patch.object(runner, "WORKER_COMMAND", FAKE_WORKER)):
             patcher.start()
             self.addCleanup(patcher.stop)
         st.cache_data.clear()
         self.addCleanup(self._stop_workers)
+
+    def staged(self) -> dict:
+        """What the read-only staged-trades lookup returns in these tests (no DB)."""
+        return {}
 
     def _stop_workers(self) -> None:
         for run_dir, proc in list(runner._PROCESSES.items()):
@@ -217,7 +222,7 @@ class NewRunPageTest(AppTestCase):
         self.assertNotIn("fm-callout error", self.shown(at))
         self.assertFalse(at.button(key="nr_run").disabled)
 
-    def test_range_and_trading_rules(self) -> None:
+    def test_range_and_no_trading_on_new_run(self) -> None:
         at = self.pick(self.app(), "KNG")
         self.ok(at.button_group(key="nr_date_kind").set_value(new_run.RANGE).run())
         self.ok(at.date_input(key="nr_start").set_value(SATURDAY).run())
@@ -226,12 +231,11 @@ class NewRunPageTest(AppTestCase):
         self.ok(at.button_group(key="nr_date_mode").set_value(new_run.STACKED).run())
         self.assertIn("no business days", self.shown(at))
         self.assertFalse(at.checkbox(key="nr_pdf").value)  # stacked defaults to no PDF, like time_series
-        self.ok(at.button_group(key="nr_kind").set_value(new_run.KIND_TRADING).run())
-        self.assertTrue(at.button_group(key="nr_date_mode").proto.disabled)  # stacked is EOD only
-        self.assertEqual(at.button_group(key="nr_date_mode").value, new_run.PER_DAY)  # and shows what will run
-        self.assertIn("RUN TRADING COMPLIANCE", self.run_label(at))
-        self.assertFalse([c for c in at.checkbox if c.key.startswith("nr_op_")])  # trading runs on its own
-        self.assertTrue(at.checkbox(key="nrr_gics_compliance").value)  # ... with the checks
+        # New run is end of day only: no run-type switch, a hint to the Trading Compliance page instead
+        self.assertNotIn("nr_kind", [b.key for b in at.button_group])
+        self.assertTrue([c for c in at.checkbox if c.key.startswith("nr_op_")])
+        self.assertIn("has its own page: Trading Compliance", self.shown(at))
+        self.assertNotIn("TRADING", self.run_label(at))
 
     def test_stacked_recon_without_daily_reports_is_refused(self) -> None:
         at = self.pick(self.app(), "KNG")
@@ -254,15 +258,7 @@ class NewRunPageTest(AppTestCase):
         self.assertIn("compliance  ·  KNG  ·  2026-10-30  ·  all rules", page)
         self.assertIn('title="2026-10-30">2026-10-30</div>', page)  # the Days Selected card names the day run
 
-    def test_trading_email_is_off_by_default_and_needs_the_confirmation(self) -> None:
-        at = self.pick(self.app(), "KNG")
-        self.ok(at.button_group(key="nr_kind").set_value(new_run.KIND_TRADING).run())
-        self.assertFalse(at.checkbox(key="nr_email").value)
-        self.assertFalse(at.checkbox(key="nr_email").disabled)
-        self.assertNotIn("fm-callout error", self.shown(at))
-        self.assertFalse(at.button(key="nr_run").disabled)
-        self.ok(at.checkbox(key="nr_email").check().run())
-        self.assertTrue(at.button(key="nr_run").disabled)  # emailing needs the second tick
+    def test_trading_request_email_needs_the_confirmation(self) -> None:
         choices = new_run.Choices(kind=new_run.KIND_TRADING, as_of=FRIDAY)
         request = new_run.build_request(CATALOG, choices)
         self.assertEqual((request.send_email, request.output_tag), (False, "trading_compliance"))
@@ -315,8 +311,8 @@ class NewRunPageTest(AppTestCase):
         self.ok(at.checkbox(key="nrr_gics_compliance").check().run())
         self.go(at, "Run history")
         self.go(at, "New run")
-        self.ok(at.button_group(key="nr_kind").set_value(new_run.KIND_TRADING).run())
-        self.ok(at.button_group(key="nr_kind").set_value(new_run.KIND_EOD).run())
+        self.go(at, "Trading Compliance")
+        self.go(at, "New run")
         self.ok(at.button_group(key="nr_date_kind").set_value(new_run.AS_OF).run())
         self.ok(at.checkbox(key="nr_op_compliance").uncheck().run())  # hides the checks
         self.ok(at.button_group(key="nr_date_kind").set_value(new_run.RANGE).run())

@@ -113,9 +113,10 @@ def format_duration(seconds: float) -> str:
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _history_rates(root: str) -> List[float]:
-    """Seconds per fund-day of the recent successful runs under ``root`` (cached briefly: it reads every folder)."""
-    return history.fund_day_seconds(history.list_runs(Path(root), limit=HISTORY_RUNS))
+def _history_rates(root: str, trading: bool = False) -> List[float]:
+    """Seconds per fund-day of the recent successful end-of-day (or ``trading``) runs under ``root``
+    (cached briefly: it reads every folder)."""
+    return history.fund_day_seconds(history.list_runs(Path(root), limit=HISTORY_RUNS), trading=trading)
 
 
 def _plural(n: int, word: str) -> str:
@@ -125,8 +126,9 @@ def _plural(n: int, word: str) -> str:
 def sentence(c: Counts, estimate: Optional[Tuple[float, bool, int]]) -> str:
     """The 'Your checks will run for: …' HTML."""
     if c.days is None or not c.funds or not c.per_fund_day:
-        return ('<div class="fm-sentence">Pick the dates, at least one fund and what to run; '
-                "the preview updates as you go.</div>")
+        what = ("the trade date, at least one fund and the checks" if c.trading
+                else "the dates, at least one fund and what to run")
+        return f'<div class="fm-sentence">Pick {what}; the preview updates as you go.</div>'
     checks = _plural(c.per_fund_day, "check")
     if c.checks and c.recons:  # the card counts the rules; say where the other checks come from
         checks += f" ({_plural(c.checks, 'rule')} + {_plural(c.recons, 'recon')})"

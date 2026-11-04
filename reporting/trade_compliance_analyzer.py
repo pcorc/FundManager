@@ -376,10 +376,14 @@ class TradingComplianceAnalyzer:
                     ticker = str(ticker_value).upper().strip()
 
             market_value = self._estimate_trade_market_value(row, quantity, asset_type)
+            price, multiplier = self._trade_price(row, asset_type)
+            # price / multiplier feed the in-app trade blotter; the reports read ticker, quantity, market_value.
             trade_payload = {
                 "ticker": ticker,
                 "quantity": abs(quantity),
                 "market_value": abs(market_value),
+                "price": price,
+                "multiplier": multiplier,
             }
 
             if quantity > 0:
@@ -403,12 +407,15 @@ class TradingComplianceAnalyzer:
         }
 
     @staticmethod
-    def _estimate_trade_market_value(row: pd.Series, quantity: float, asset_type: str) -> float:
-        """Market value of one trade: price x quantity x multiplier (treasury prices per 100 face), or
-        abs(qty x multiplier) without a price."""
+    def _trade_price(row: pd.Series, asset_type: str) -> Tuple[Optional[float], float]:
+        """(quoted price, multiplier) of one trade row; the price is None unless it is positive.
+
+        Options default to a multiplier of 100 (the first positive multiplier column wins); treasury
+        prices are quoted per 100 face.
+        """
         multiplier = 1.0
         if asset_type == "options":
-            multiplier = 100.0  # Default for options; first positive multiplier column wins.
+            multiplier = 100.0
             for column in ("contract_multiplier", "multiplier"):
                 value = row.get(column)
                 if pd.notna(value):
@@ -426,8 +433,14 @@ class TradingComplianceAnalyzer:
                 price_value = float(row.get("price"))
             except (TypeError, ValueError):
                 price_value = 0.0
+        return (price_value if price_value > 0 else None), multiplier
 
-        if price_value > 0:
+    @classmethod
+    def _estimate_trade_market_value(cls, row: pd.Series, quantity: float, asset_type: str) -> float:
+        """Market value of one trade: price x quantity x multiplier (treasury prices per 100 face), or
+        abs(qty x multiplier) without a price."""
+        price_value, multiplier = cls._trade_price(row, asset_type)
+        if price_value is not None:
             if asset_type == "treasury":
                 price_value /= 100.0  # quoted per 100 face
             return abs(price_value * quantity * multiplier)

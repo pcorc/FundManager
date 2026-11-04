@@ -537,6 +537,34 @@ class RunTests(CohortPatch):
         self.assertEqual((result.exit_code, result.errors),
                          (0, ["2026-10-30: Trading-analysis email notification failed: smtp down"]))
 
+    def test_trading_dashboard_error_is_recorded_without_failing_the_run(self):
+        artefacts = SimpleNamespace(report=None, ex_post_compliance=None, combined_report=None)
+        view = {"kind": "trading", "dashboard": None, "dashboard_error": "KeyError: 'trade_info'"}
+        with mock.patch.object(api, "run_trading_mode", return_value=(SimpleNamespace(summary={}),
+                                                                      SimpleNamespace(summary={}), artefacts)),                 mock.patch.object(api, "build_trading_view", return_value=view),                 self.assertLogs("fund_manager.main", "WARNING"):
+            result = api.run(req(operations=("trading_compliance",), funds=("KNG",), output_dir=str(self.tmp)))
+        self.assertEqual(result.views, {"2026-10-30": view})
+        self.assertEqual((result.exit_code, result.errors),
+                         (0, ["2026-10-30: Trading dashboard could not be built: KeyError: 'trade_info'"]))
+
+    def test_staged_trades_is_cached_and_limited_to_the_registry(self):
+        counts = {"KNG": {"equity": 2, "options": 0, "treasury": 0, "total": 2},
+                  "XVMS": {"equity": 2, "options": 0, "treasury": 0, "total": 2}}
+        session = mock.Mock()
+        api._staged_cache.clear()
+        try:
+            with mock.patch.object(api, "initialize_database", return_value=(session, None)) as connect,                     mock.patch.object(api, "staged_trade_counts", return_value=counts) as query:
+                self.assertEqual(list(api.staged_trades(DAY)), ["KNG"])
+                api.staged_trades(DAY)["KNG"]["total"] = 99  # callers get copies
+                self.assertEqual(api.staged_trades(DAY)["KNG"]["total"], 2)
+                self.assertEqual((connect.call_count, query.call_count), (1, 1))
+                self.assertEqual(list(api.staged_trades(DAY, registry_only=False)), ["KNG", "XVMS"])
+                api.staged_trades(DAY, refresh=True)
+                self.assertEqual(query.call_count, 3)
+            session.close.assert_called()
+        finally:
+            api._staged_cache.clear()
+
     def test_email_error_is_recorded_without_failing_the_run(self):
         self.email_errors = ["EOD email notification failed: smtp down"]
         with mock.patch.object(api, "run_eod_mode", side_effect=self.eod_mode):
