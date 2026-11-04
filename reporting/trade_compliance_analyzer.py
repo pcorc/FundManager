@@ -179,7 +179,21 @@ class TradingComplianceAnalyzer:
             post_quantities = self._resolve_quantity_series(post_df, preferred="iiv_shares")
             ante_quantities = self._resolve_quantity_series(ante_df, preferred="nav_shares")
 
-            trade_rebal_series = self._extract_trade_series(post_df)
+            # Splice closed positions back in so sell-to-close shows up (in trades only, not in market values).
+            traded_df = post_df
+            if key == "options" and non_empty(ante_df) and "optticker" in ante_df.columns:
+                post_tickers = post_df["optticker"] if "optticker" in post_df.columns else []
+                ante_only = ante_df[~ante_df["optticker"].isin(post_tickers)].copy()
+                # Options expiring on or before the analysis date drop out by expiry, not by a trade.
+                ante_only = ante_only.loc[~self._expires_by(ante_only, self.date)]
+                if not ante_only.empty:
+                    ante_only["iiv_shares"] = 0.0
+                    ante_only["trade_rebal"] = -pd.to_numeric(
+                        ante_only.get("nav_shares", 0.0), errors="coerce"
+                    ).fillna(0.0)
+                    traded_df = pd.concat([post_df, ante_only], ignore_index=True)
+
+            trade_rebal_series = self._extract_trade_series(traded_df)
             quantity_delta = float(trade_rebal_series.sum())
             if quantity_delta == 0.0:
                 quantity_delta = float(post_quantities.sum()) - float(ante_quantities.sum())
@@ -200,20 +214,7 @@ class TradingComplianceAnalyzer:
                 post_df, self._resolve_quantity_series(post_df, preferred="nav_shares"), asset_type=key
             )
 
-            # Splice closed positions back in so sell-to-close shows up.
-            if key == "options" and non_empty(ante_df) and "optticker" in ante_df.columns:
-                post_tickers = post_df["optticker"] if "optticker" in post_df.columns else []
-                ante_only = ante_df[~ante_df["optticker"].isin(post_tickers)].copy()
-                # Options expiring on or before the analysis date drop out by expiry, not by a trade.
-                ante_only = ante_only.loc[~self._expires_by(ante_only, self.date)]
-                if not ante_only.empty:
-                    ante_only["iiv_shares"] = 0.0
-                    ante_only["trade_rebal"] = -pd.to_numeric(
-                        ante_only.get("nav_shares", 0.0), errors="coerce"
-                    ).fillna(0.0)
-                    post_df = pd.concat([post_df, ante_only], ignore_index=True)
-
-            activity_details = self._calculate_trade_activity(post_df, asset_type=key)
+            activity_details = self._calculate_trade_activity(traded_df, asset_type=key)
             if activity_details["buys"] or activity_details["sells"]:
                 trade_activity[key] = activity_details
 

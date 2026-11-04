@@ -73,6 +73,11 @@ class ExAnteHoldingsTests(unittest.TestCase):
                          [("OLD 11/20/26 C10", 3.0, 75.0)])
         self.assertEqual([t["ticker"] for t in activity["sells"]], ["NEW 11/06/26 C10"])
 
+    def test_closing_trade_counts_in_net_trade_quantities(self):
+        net = _analyze(self.post, self.ante)["trade_info"]["net_trades"]["options"]
+        self.assertEqual((net["buy_quantity"], net["sell_quantity"], net["net_quantity"]), (3.0, 2.0, 1.0))
+        self.assertEqual((net["buy_value"], net["sell_value"]), (75.0, 100.0))
+
     def test_ex_ante_option_expiring_on_the_analysis_date_is_not_a_trade(self):
         self.ante.data = _fund_data(equity=_equity(price=10.0),
                                     options=_options("OLD 10/30/26 C10", -3.0, 0.25, None, DAY))
