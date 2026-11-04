@@ -158,23 +158,23 @@ class NewRunPageTest(AppTestCase):
         self.assertIn("1 business day(s): 2026-10-30", caption)
         self.assertNotIn("2026-10-31", caption)
 
-    def test_trading_always_needs_the_email_confirmation(self) -> None:
+    def test_trading_email_is_off_by_default_and_needs_the_confirmation(self) -> None:
         at = self.app()
         self.ok(at.radio(key="nr_kind").set_value(new_run.KIND_TRADING).run())
-        self.assertTrue(at.checkbox(key="nr_email_trading").value)  # shown ticked and locked
-        self.assertTrue(at.checkbox(key="nr_email_trading").disabled)
-        self.assertIn("always sends the trading-analysis email", self.texts(at.warning))
-        self.assertIn("always sends the trading-analysis email", self.texts(at.error))
-        self.assertTrue(at.button(key="nr_run").disabled)
-        self.ok(at.checkbox(key="nr_trading_ok").check().run())
+        self.assertFalse(at.checkbox(key="nr_email").value)
+        self.assertFalse(at.checkbox(key="nr_email").disabled)
         self.assertFalse(at.error)
-        self.assertFalse(at.button(key="nr_run").disabled)  # not pressed: a trading run would email
+        self.assertFalse(at.button(key="nr_run").disabled)
+        self.ok(at.checkbox(key="nr_email").check().run())
+        self.assertTrue(at.button(key="nr_run").disabled)  # emailing needs the second tick
         choices = new_run.Choices(kind=new_run.KIND_TRADING, as_of=FRIDAY)
+        request = new_run.build_request(CATALOG, choices)
+        self.assertEqual((request.send_email, request.output_tag), (False, "trading_compliance"))
+        choices.send_email = True
         with self.assertRaises(api.InvalidRequest):
             new_run.build_request(CATALOG, choices)
         choices.email_confirmed = True
-        request = new_run.build_request(CATALOG, choices)
-        self.assertEqual((request.send_email, request.output_tag), (True, "trading_compliance"))
+        self.assertTrue(new_run.build_request(CATALOG, choices).send_email)
 
     def test_email_confirmation_is_cleared_after_a_run(self) -> None:
         at = self.app()

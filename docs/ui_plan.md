@@ -39,7 +39,7 @@ Pages are picked in the sidebar (a radio, so Re-run can switch page from a butto
    - **Compliance rules:** "All rules" (default, sends `FULL_COMPLIANCE_TESTS`), or a multiselect over `rule_catalog()` labels, so you can run any single rule.
    - **Dates:** "As of" with one date picker (default: previous business day), or "Range" with a start/end picker and a choice of *One report per day* or *One stacked workbook* (EOD only, so it is reset to per day and greyed out for Trading; choosing stacked turns *Create PDF* off like the CLI's `time_series` preset; optional *Also write daily reports*). Weekend dates are snapped in the UI (as-of: back to Friday; range: first to last business day), so the request, history and Reports name the days that run; a note says so, and the caption lists the days. There is no holiday calendar.
    - **Options:** create PDF (on), send email (**off** by default, and a second "Yes, send the emails" tick is required; both are cleared after each run start), output tag (blank = the CLI preset's tag: `eod`, `compliance`, `reconciliation`, `nav`, `time_series` or `trading_compliance`, so file names match CLI runs).
-   - **Trading compliance and email:** the backend always sends the trading-analysis email (no `send_email` switch on the trading path, see "API gaps"), so for trading the *Send email* box is shown ticked and locked, a warning explains it, and "Yes, send the trading email" must be ticked before **Run**. The request then carries `send_email=True`, which is what happens.
+   - **Trading compliance and email:** the same *Send email* box and confirmation apply (the trading path honours `send_email` since fix D16).
    - **Run** button. The widgets are plain (not an `st.form`) so the badge and validation update live. Picks survive page switches and hidden widgets (`new_run.keep_form_state()` re-assigns their keys each run; confirmation ticks are deliberately not kept). While any run is active the form is disabled and the progress panel shows; a refreshed or second browser reattaches through the lock file.
 2. **Run history**
    - A table of past runs from each run folder (`meta.json` + `result.json`): who, when, status, dates, request summary, files, exit code, publish count.
@@ -91,7 +91,6 @@ publish handle both forms.
 5. Deployment notes and a README section.
 
 ## API gaps (worked around in `ui/`)
-- **Trading email cannot be turned off:** `run_trading_mode` always calls `EmailManager().send(...)`; `TradingComplianceParameters` has no `send_email` and `api._trading_parameters` ignores `req.send_email`. The UI forces the confirmation for trading (see New run). Backend fix: add the switch and honour `req.send_email`.
 - **Weekend handling differs by mode** (`business_date_range` snaps a weekend start back to Friday, `iter_business_days` skips it); the UI snaps dates itself so both modes run the days shown.
 
 ## Out of scope for v1

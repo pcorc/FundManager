@@ -163,8 +163,7 @@ cfg = build_run(
     output_tag="etfs",
 )
 
-# Trading analysis on two funds. Note: send_email is currently ignored for trading;
-# the trading-analysis email is always sent (the trading path has no switch yet).
+# Trading analysis on two funds (send_email=False skips the trading-analysis email).
 cfg = build_run(
     "trading_compliance",
     funds=["P2726", "RDVI"],
@@ -288,14 +287,10 @@ Safety:
   request's `output_dir` with the run folder. **Publish** copies a finished run's
   `reports/` into `FUNDMANAGER_UI_PUBLISH_ROOT` (same sub-folders, existing files
   skipped, recorded in `meta.json`) only after a confirmation tick.
-- **Send email** is off by default for End-of-day runs (also on Re-run) and needs a
+- **Send email** is off by default for every run type (also on Re-run) and needs a
   second confirmation tick; both are cleared once a run starts, so every emailing
   run is confirmed again. With `FUNDMANAGER_EMAIL_MODE=display` (the default)
   emails open as Outlook drafts on the host running the UI.
-- **Trading compliance always sends** (or drafts) the trading-analysis email: the
-  backend's trading path has no `send_email` switch yet (`processing/run_modes.py`
-  `run_trading_mode`). The UI therefore shows *Send email* ticked and locked for
-  trading, warns, and requires the confirmation tick before **Run**.
 - Host it on the internal network only, behind the SSO proxy or with the shared
   password. With `FUNDMANAGER_UI_USER_HEADER` set the app trusts that header as
   the user's identity, so Streamlit must only be reachable through the proxy

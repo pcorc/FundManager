@@ -7,11 +7,8 @@ before the Run button is enabled. Only one run happens per output root, so
 while any run is active the controls are disabled and its progress panel is
 shown (a refreshed browser reattaches through the lock file).
 
-Email: End-of-day runs send nothing unless *Send email* and its confirmation
-are ticked, and both are cleared once a run starts. Trading compliance always
-sends (or drafts) the trading-analysis email, because the backend's trading
-path has no switch for it, so the page says so and requires the confirmation
-before a trading run.
+Email: a run (End of day or Trading compliance) sends nothing unless *Send
+email* and its confirmation are ticked, and both are cleared once a run starts.
 
 Dates are snapped to business days here (weekends only; there is no holiday
 calendar), so the request, the caption, history and the Reports page all name
@@ -58,8 +55,8 @@ class Choices:
     date_mode: str = PER_DAY
     daily_reports: bool = False
     create_pdf: bool = True
-    send_email: bool = False  # End of day only: trading always sends
-    email_confirmed: bool = False  # the "Yes, send" tick (EOD email, or the trading email)
+    send_email: bool = False
+    email_confirmed: bool = False  # the "Yes, send" tick
     tag: str = ""
 
 
@@ -135,17 +132,14 @@ def build_request(catalog: dict, choices: Choices) -> RunRequest:
         if not choices.rules:
             raise InvalidRequest("Pick at least one compliance rule, or choose 'All rules'.")
         tests = tuple(choices.rules)
-    if trading and not choices.email_confirmed:
-        raise InvalidRequest("Trading compliance always sends the trading-analysis email (the backend has no "
-                             "switch to turn it off): tick the confirmation to run it.")
-    if not trading and choices.send_email and not choices.email_confirmed:
+    if choices.send_email and not choices.email_confirmed:
         raise InvalidRequest("Tick the confirmation to send notification emails, or switch email off.")
     request = RunRequest(
         operations=operations, start_date=start, end_date=end,
         cohorts=tuple(choices.cohorts), funds=tuple(choices.funds), exclude=tuple(choices.exclude),
         compliance_tests=tuple(tests), date_mode="stacked" if stacked else "per_day",
         generate_daily_reports=bool(stacked and choices.daily_reports), create_pdf=choices.create_pdf,
-        send_email=trading or bool(choices.send_email and choices.email_confirmed),  # trading: what really happens
+        send_email=bool(choices.send_email and choices.email_confirmed),
         output_tag=runner.safe_name(choices.tag, default="") or default_tag(operations, stacked),
     )
     return validate(request)
@@ -189,7 +183,7 @@ _KEYS = {"cohorts": "nr_cohorts", "funds": "nr_funds", "exclude": "nr_exclude", 
          "date_range": "nr_range", "date_mode": "nr_date_mode", "daily_reports": "nr_daily",
          "create_pdf": "nr_pdf", "send_email": "nr_email", "email_confirmed": "nr_email_ok", "tag": "nr_tag"}
 _OP_KEYS = tuple(f"nr_op_{op}" for op in EOD_OPS)
-_CONFIRM_KEYS = ("nr_email_ok", "nr_trading_ok")  # never kept: a confirmation lasts only while it is on screen
+_CONFIRM_KEYS = ("nr_email_ok",)  # never kept: a confirmation lasts only while it is on screen
 _KEPT_KEYS = tuple(k for k in _KEYS.values() if k not in _CONFIRM_KEYS) + _OP_KEYS
 
 
@@ -317,11 +311,7 @@ def _form(catalog: dict, locked: bool) -> Choices:
     st.subheader("Options")
     cols = st.columns(3)
     c.create_pdf = cols[0].checkbox("Create PDF", key=_KEYS["create_pdf"], disabled=locked)
-    if trading:
-        c.send_email = cols[1].checkbox("Send email", value=True, key="nr_email_trading", disabled=True,
-                                        help="Trading compliance always sends the trading-analysis email.")
-    else:
-        c.send_email = cols[1].checkbox("Send email", key=_KEYS["send_email"], disabled=locked)
+    c.send_email = cols[1].checkbox("Send email", key=_KEYS["send_email"], disabled=locked)
     try:
         start, end, stacked = run_dates(c)
         tag_hint = f"blank = {default_tag(operations_for(c), stacked)}"
@@ -329,13 +319,7 @@ def _form(catalog: dict, locked: bool) -> Choices:
         tag_hint = "optional, e.g. backdated"
     c.tag = cols[2].text_input("Output tag", key=_KEYS["tag"], disabled=locked, max_chars=40, placeholder=tag_hint,
                                help="Goes into the report file names (blank = the CLI's name for this run type).")
-    if trading:
-        st.warning("Trading compliance always sends the trading-analysis email to its usual recipients (or opens "
-                   "an Outlook draft on the server, depending on FUNDMANAGER_EMAIL_MODE): the backend has no "
-                   "switch to turn it off.")
-        c.email_confirmed = st.checkbox("Yes, send the trading email for this run", key="nr_trading_ok",
-                                        disabled=locked)
-    elif c.send_email:
+    if c.send_email:
         st.warning("This run will send the notification emails to their usual recipients "
                    "(or open Outlook drafts on the server, depending on FUNDMANAGER_EMAIL_MODE).")
         c.email_confirmed = st.checkbox("Yes, send the emails for this run", key=_KEYS["email_confirmed"],
