@@ -194,7 +194,7 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(label(), "Run compliance checks")
         self.assertEqual(label(eod_ops=["compliance", "nav_reconciliation"]), "Run checks & recons")
         self.assertEqual(label(eod_ops=["reconciliation"]), "Run reconciliation")
-        self.assertEqual(label(kind=new_run.KIND_TRADING), "Run trading compliance")
+        self.assertEqual(label(kind=new_run.KIND_TRADING), "Run trading check")
         self.assertEqual(label(eod_ops=[]), "Run")
 
     def test_empty_pick_is_refused_by_the_page(self) -> None:

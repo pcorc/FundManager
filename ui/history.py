@@ -117,6 +117,12 @@ def _try_request(run_dir: Path) -> Optional[RunRequest]:
         return None
 
 
+def is_trading(run_dir: Optional[Path]) -> bool:
+    """Whether the run folder holds a trading compliance request (False when it is unreadable)."""
+    request = _try_request(Path(run_dir)) if run_dir else None
+    return bool(request and "trading_compliance" in request.operations)
+
+
 def load_request(run_dir: Path) -> RunRequest:
     """The request a run was started with (for Re-run). Raises ``OSError``/``ValueError`` if unreadable."""
     return request_from_json((Path(run_dir) / runner.REQUEST).read_text(encoding="utf-8"))
@@ -231,7 +237,8 @@ def load_views(run_dir: Path) -> Optional[dict]:
 
 
 def _redact_day(day: dict) -> dict:
-    """The day's free texts that can carry exception messages, redacted in place (``fund_errors``, reasons, notes).
+    """The day's free texts that can carry exception messages, redacted in place (``fund_errors``, reasons, notes,
+    the trading dashboard's error, warnings and unavailable funds).
 
     A fund's error is the text of whatever exception stopped it (a DB error quotes its URL), and a rule's
     ERROR reason is its exception text.
@@ -245,7 +252,21 @@ def _redact_day(day: dict) -> dict:
             for view in (rules or {}).values() if isinstance(rules, dict) else ():
                 if isinstance(view, dict):
                     _redact_view(view)
+    if day.get("dashboard_error"):
+        day["dashboard_error"] = runner.redact(day["dashboard_error"])
+    if isinstance(day.get("dashboard"), dict):
+        _redact_dashboard(day["dashboard"])
     return day
+
+
+def _redact_dashboard(dashboard: dict) -> None:
+    """The trading dashboard's texts that can quote an exception: unavailable funds' errors, fund warnings."""
+    for entry in dashboard.get("unavailable_funds") or []:
+        if isinstance(entry, dict) and isinstance(entry.get("errors"), list):
+            entry["errors"] = [runner.redact(m) for m in entry["errors"]]
+    for fund in dashboard.get("funds") or []:
+        if isinstance(fund, dict) and isinstance(fund.get("warnings"), list):
+            fund["warnings"] = [runner.redact(w) for w in fund["warnings"]]
 
 
 def _redact_view(view: dict) -> None:

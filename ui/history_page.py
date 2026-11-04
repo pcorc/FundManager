@@ -51,10 +51,12 @@ def render_history(user: str) -> None:
                           format_func=lambda n: f"{n}  ·  {by_name[n].status}  ·  {ui.summary_text(by_name[n].summary)}")
     record = by_name[name]
     rerun.button("Re-run with these settings", key="hist_rerun", on_click=new_run.request_rerun,
-                 args=(record.run_dir,), help="Loads this request into the New run form (email off).",
+                 args=(record.run_dir,), help="Loads this request into its form: New run, or Trading Compliance "
+                                              "for a trading run (email off).",
                  icon=":material/replay:", width="stretch")
     if record.status == "running":
-        ui.show(ui.callout("info", "This run is still in progress; follow it on the New run page."))
+        page = "Trading Compliance" if history.is_trading(record.run_dir) else "New run"
+        ui.show(ui.callout("info", f"This run is still in progress; follow it on the {page} page."))
     else:
         panels.results_panel(record.run_dir, user, key="hist")
 

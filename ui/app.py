@@ -1,4 +1,4 @@
-"""FundManager web UI (Streamlit): New run, Run history and Reports.
+"""FundManager web UI (Streamlit): New run, Trading Compliance, Run history and Reports.
 
     python -m streamlit run ui/app.py [--server.address 0.0.0.0 --server.port 8501]
 
@@ -39,7 +39,7 @@ import streamlit as st  # noqa: E402
 from config import fund_definitions  # noqa: E402
 from processing import api  # noqa: E402
 from ui import components as ui  # noqa: E402
-from ui import history_page, new_run, runner, theme  # noqa: E402
+from ui import history_page, new_run, runner, theme, trading_page  # noqa: E402
 
 _log = logging.getLogger("fundmanager.ui")
 CATALOG_RETRY_SECONDS = 60  # how long a failed catalog load is cached before the DB is tried again
@@ -82,6 +82,7 @@ def get_catalog() -> dict:
 
 PAGES: Dict[str, Callable[[str], None]] = {
     "New run": lambda user: new_run.render(get_catalog(), user),
+    trading_page.PAGE: lambda user: trading_page.render(get_catalog(), user),
     "Run history": history_page.render_history,
     "Reports": history_page.render_reports,
 }
@@ -157,7 +158,8 @@ def main() -> None:
         st.error("Not signed in: the sign-in header is missing. Open the app through the company SSO link.")
         return
     st.session_state.setdefault("page", "New run")
-    new_run.keep_form_state()  # the New run picks survive visits to the other pages
+    new_run.keep_form_state()  # the New run and Trading picks survive visits to the other pages
+    trading_page.keep_form_state()
     page = top_bar(user)
     PAGES[page](user)
 

@@ -242,6 +242,14 @@ def render_views(views: Mapping, *, key: str, run: str, day: Optional[str] = Non
         picked = _pick("Report date", names[::-1], f"{key}-day-{run}", pills=len(names) <= 10, show_label=True)
     view = days[picked]
     trading = view.get("kind") == "trading"
+    if trading and view.get("dashboard"):
+        from ui import trading_results  # noqa: PLC0415 (trading_results imports this module)
+
+        trading_results.render_dashboard(view, key=key, run=run, requested=requested)
+        return True
+    if trading and view.get("dashboard_error"):
+        ui.show(ui.callout("warn", f"The trading dashboard could not be built ({view['dashboard_error']}); "
+                                   "the report's overview is shown instead."))
     funds = list(view.get("funds") or [])
     ui.show(ui.heading("Results", f"{picked} · {len(funds)} fund{'s' if len(funds) != 1 else ''}"
                        + (" · trading day" if trading else "")))

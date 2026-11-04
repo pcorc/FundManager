@@ -1,4 +1,8 @@
-"""The New run page: settings on the left; on the right a live run's progress, the Configuration Preview, then results.
+"""The New run page (end of day): settings on the left; on the right a live run's progress, the preview, then results.
+
+Trading compliance has its own page (:mod:`ui.trading_page`), which reuses
+:class:`Choices` and :func:`build_request` with ``kind=KIND_TRADING``; Re-run of a
+trading run is routed there.
 
 The settings panel (:mod:`ui.settings_panel`) holds plain widgets (not an
 ``st.form``) so the counts and the validation update as you pick.
@@ -14,8 +18,8 @@ The picked funds and compliance checks live in session state as lists
 on every run, so the group chips, *Select All*, the ticker filter, RESET and
 Re-run can change them.
 
-Email: a run (End of day or Trading compliance) sends nothing unless *Send
-email* and its confirmation are ticked, and both are cleared once a run starts.
+Email: a run sends nothing unless *Send email* and its confirmation are
+ticked, and both are cleared once a run starts.
 
 Dates are snapped to business days here (weekends only; there is no holiday
 calendar), so the request, the preview, history and the Reports page all name
@@ -250,7 +254,12 @@ def keep_form_state() -> None:
 
 
 def request_rerun(run_dir: Path) -> None:
-    """Button callback for Re-run: load that run's request into the form and switch to this page."""
+    """Button callback for Re-run: load that run's request into its form (a trading run's on the Trading page)."""
+    if history.is_trading(Path(run_dir)):
+        from ui import trading_page  # noqa: PLC0415 (trading_page imports this module)
+
+        trading_page.request_rerun(Path(run_dir))
+        return
     st.session_state["nr_prefill"] = str(run_dir)
     st.session_state["page"] = "New run"
 
@@ -332,7 +341,8 @@ def render(catalog: dict, user: str) -> None:
     root = runner.output_root()
     active = runner.active_run(root)
     running = active is not None and not panels.is_finished(active)
-    if running:
+    foreign = running and history.is_trading(active)  # a trading run (Trading Compliance page) holds the lock
+    if running and not foreign:
         st.session_state["nr_watch"] = str(active)  # reattach after a refresh, or show another user's run
     if st.session_state.pop("nr_started", False):
         clear_email()  # each emailing run needs its own confirmation
@@ -351,6 +361,10 @@ def render(catalog: dict, user: str) -> None:
         for key, kind in (("nr_notice", "info"), ("nr_notice_error", "error")):
             if key in st.session_state:
                 preview.notice(kind, st.session_state.pop(key))
+        if foreign:
+            preview.notice("info", "A trading compliance run is in progress (Trading Compliance page); the form is "
+                                   "locked until it finishes.")
+            panels.progress_panel(str(active), user)
         watch = st.session_state.get("nr_watch")
         live = bool(watch) and Path(watch).is_dir() and not panels.is_finished(Path(watch))
         if live:  # first in the pane, so it is in view the moment RUN is pressed
