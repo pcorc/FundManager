@@ -67,10 +67,12 @@ class ComponentsTest(unittest.TestCase):
 
     def test_cells_numbers_blanks_and_headers(self) -> None:
         kv = ui.kv_table([{"label": "Option MV", "value": "-846,720"}, {"label": "Reg", "value": "Non-Diversified"},
-                          {"label": "Exceptions", "value": ""}, {"label": "Cash", "value": "$-19,333,331.89"}])
+                          {"label": "Exceptions", "value": ""}, {"label": "Cash", "value": "$-19,333,331.89"},
+                          {"label": "Distributions", "value": "$-0.00"}])
         self.assertIn('<td class="num nw">−846,720</td>', kv)  # tabular figures and a true minus
         self.assertIn('<td class="nw">Non-Diversified</td>', kv)  # text keeps its hyphen, no tabular figures
-        self.assertIn("$−19,333,331.89", kv)
+        self.assertIn("−$19,333,331.89", kv)  # the sign before the currency symbol
+        self.assertIn(">$0.00</td>", kv)  # a value that rounds to zero has no sign
         self.assertIn('<td class="nw"><span class="fm-dash">', kv)  # a blank value is a faint dash
         table = ui.data_table(["eqy_ticker", "shares_cust", "Fund Weight"], [["None", "nan", "-1.50%"]])
         self.assertIn(">Ticker</th>", table)

@@ -154,7 +154,9 @@ def cell_text(value: object, numeric: bool = False) -> str:
         return DASH
     text = str(value)
     if numeric and "-" in text[:2]:
-        text = text.replace("-", MINUS, 1)
+        sign, rest = ("$", text[2:]) if text.startswith("$-") else ("", text[1:])
+        # '$-0.00' (a value that rounds to zero) reads 0; '$-3,061.00' reads '−$3,061.00'
+        text = sign + rest if not any(ch in "123456789" for ch in rest) else MINUS + sign + rest
     return esc(text)
 
 

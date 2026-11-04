@@ -546,7 +546,7 @@ def _holdings_sections(fund: str, details: Mapping[str, Any]) -> List[Dict[str, 
             tables.append(table)
         price_t = data.get("price_discrepancies_T")
         if custodian and non_empty(price_t):
-            table = _table("Custodian Price Breaks T", _RENDERER._filter_option_price_breaks(price_t, fund, recon_type))
+            table = _table("Custodian Price Breaks (T)", _RENDERER._filter_option_price_breaks(price_t, fund, recon_type))
             if table:
                 tables.append(table)
         counts = []

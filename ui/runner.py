@@ -57,6 +57,7 @@ GRACE_SECONDS = 5.0  # between terminate() and kill()
 DEFAULT_TIMEOUT_MINUTES = 120.0
 _STALE_UNREADABLE_LOCK_SECONDS = 30.0  # a lock file that never became valid JSON
 RETRIES, RETRY_DELAY = 20, 0.025  # for Windows sharing violations (a reader has the file open)
+RETRY_SECONDS = 2.0  # how long retry() and read_json() keep trying through sharing violations
 
 _PROCESSES: Dict[str, subprocess.Popen] = {}  # run folder -> worker started by this UI process
 _GUARD = threading.RLock()  # serialises meta/lock updates between sessions and watcher threads
@@ -138,26 +139,56 @@ def now_iso() -> str:
 
 def retry(action: Callable[..., T], *args: object) -> T:
     """``action(*args)``, retried for a moment on ``PermissionError`` (a Windows sharing violation)."""
-    for attempt in range(RETRIES - 1):
+    deadline = time.monotonic() + RETRY_SECONDS
+    attempt = 0
+    while time.monotonic() < deadline:
         try:
             return action(*args)
-        except PermissionError:
-            time.sleep(RETRY_DELAY * (1 + attempt % 2))
+        except PermissionError:  # many short tries: a reader's open window is brief, so a gap comes soon
+            time.sleep(RETRY_DELAY * (1 + attempt % 2) / 5)
+            attempt += 1
     return action(*args)
+
+
+@functools.lru_cache(maxsize=None)
+def _create_file_w() -> Callable[..., Optional[int]]:
+    import ctypes
+    create = ctypes.WinDLL("kernel32", use_last_error=True).CreateFileW
+    create.restype = ctypes.c_void_p
+    create.argtypes = (ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
+                       ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p)
+    return create
+
+
+def _read_shared(path: Path) -> bytes:
+    """``path``'s bytes. On Windows the file is opened with FILE_SHARE_DELETE, so a writer's ``os.replace`` of it
+    succeeds while we read (a plain ``open`` blocks the replace, and busy readers could starve the writer)."""
+    if os.name != "nt":
+        return Path(path).read_bytes()
+    import ctypes
+    import msvcrt
+    generic_read, share_all, open_existing, normal = 0x80000000, 0x7, 3, 0x80
+    handle = _create_file_w()(str(path), generic_read, share_all, None, open_existing, normal, None)
+    if handle is None or handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())  # FileNotFoundError / PermissionError as usual
+    with open(msvcrt.open_osfhandle(handle, os.O_RDONLY), "rb") as stream:
+        return stream.read()
 
 
 def read_json(path: Path) -> Optional[dict]:
     """The JSON object in ``path``, or ``None`` if it is missing, unreadable or not an object."""
-    for _ in range(3):
+    deadline = time.monotonic() + RETRY_SECONDS
+    while True:
         try:
-            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            data = json.loads(_read_shared(path).decode("utf-8"))
         except PermissionError:  # being replaced right now (Windows)
+            if time.monotonic() >= deadline:
+                return None
             time.sleep(RETRY_DELAY)
             continue
         except (OSError, ValueError):
             return None
         return data if isinstance(data, dict) else None
-    return None
 
 
 def _write_json(path: Path, data: dict) -> None:

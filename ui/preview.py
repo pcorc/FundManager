@@ -169,7 +169,8 @@ def render(catalog: dict, choices: "nr.Choices", request: Optional[RunRequest], 
     funds_note = ", ".join(picked[:6]) + (f" +{len(picked) - 6}" if len(picked) > 6 else "")
     cards = [(c.days if c.days is not None else "—", "Days Selected", days_note),
              (c.funds, "Funds Selected", funds_note),
-             (c.checks, "Checks Selected", "" if c.checks or not c.recons else "compliance off"),
+             (c.checks, "Checks Selected", "" if c.checks else
+              "none picked" if "compliance" in c.operations else "compliance off" if c.recons else ""),
              (len(c.operations), "Operations", ops_note)]
     estimate = None
     if c.fund_days and c.days:
