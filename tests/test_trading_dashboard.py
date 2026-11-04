@@ -109,7 +109,11 @@ class CashMathsTests(unittest.TestCase):
         self.assertEqual(cash["change"], cash["post"] - cash["current"])
         self.assertAlmostEqual(cash["post_pct_tna"], cash["post"] / 1_000_000.0)
         self.assertFalse(cash["negative"])
-        self.assertEqual((cash["excluded"], self.fund["warnings"]), ([], []))
+        self.assertEqual(cash["excluded"], [])
+        # T-1 cash $50,000 vs $999 on the trade date (4.9% of TNA): the only data note.
+        self.assertTrue(cash["t_differs"])
+        self.assertEqual(len(self.fund["warnings"]), 1)
+        self.assertIn("differs sharply from the trade-date figure ($999)", self.fund["warnings"][0])
 
     def test_waterfall_runs_from_current_to_post_cash(self):
         steps = self.fund["waterfall"]
@@ -438,6 +442,70 @@ class RoundOneTests(unittest.TestCase):
         totals = dash["totals"]
         self.assertEqual((totals["tna"], totals["tna_funds"]), (1000.0, 1))
         self.assertAlmostEqual(totals["gross_pct_tna"], 0.1)  # KNG's 100 over KNG's TNA only
+
+
+class RoundTwoTests(unittest.TestCase):
+    """Results that rest on missing trade-date data are not counted as breaches; T-1 vs T cash gaps are noted."""
+
+    def setUp(self):
+        held = [("AAA", 100.0, 100.0, 0.0, 10.0)]
+        # EMPTY: the ex-post book is empty (iiv_shares 0) although only a small buy is staged (the real
+        # 2026-11-04 DOGG / KNG case: ex-post MV 0 in every class). LIQ: the trades really close the book.
+        funds = {
+            "EMPTY": (_fund("EMPTY", equity=_frame("eqyticker", held), prev_cash=500.0, prev_tna=1000.0),
+                      _fund("EMPTY", equity=_frame("eqyticker", [("AAA", 100.0, 0.0, 0.0, 10.0),
+                                                                 ("BBB", 0.0, 0.0, 10.0, 5.0)]))),
+            "LIQ": (_fund("LIQ", equity=_frame("eqyticker", held), prev_cash=500.0, prev_tna=1000.0),
+                    _fund("LIQ", equity=_frame("eqyticker", [("AAA", 100.0, 0.0, -100.0, 10.0)]))),
+            "NOTNA": (_fund("NOTNA", equity=_frame("eqyticker", held), prev_cash=500.0, prev_tna=1000.0),
+                      _fund("NOTNA", equity=_frame("eqyticker", [("AAA", 100.0, 110.0, 10.0, 10.0)]))),
+            "OK": (_fund("OK", equity=_frame("eqyticker", held), prev_cash=-5000.0, prev_tna=1_000_000.0,
+                         cash=3000.0, tna=1_000_000.0),
+                   _fund("OK", equity=_frame("eqyticker", [("AAA", 100.0, 110.0, 10.0, 10.0)]))),
+        }
+        metrics = [{"label": "Cash", "value": "1"}, {"label": "Total Assets", "value": "1,000"},
+                   {"label": "Total Net Assets", "value": "1,000"}]
+        no_tna = [{"label": "Cash", "value": "1"}, {"label": "Total Assets", "value": "0"},
+                  {"label": "Total Net Assets", "value": "0"}]
+        ante = {name: {IRS: _rule("PASS"), "summary_metrics": _rule(None, no_tna if name == "NOTNA" else metrics)}
+                for name in funds}
+        post = {name: {IRS: _rule("FAIL"), "summary_metrics": _rule(None, no_tna if name == "NOTNA" else metrics)}
+                for name in funds}
+        self.dash = _dashboard(funds, ante, post)
+        self.funds = {f["fund"]: f for f in self.dash["funds"]}
+
+    def test_empty_ex_post_book_and_missing_trade_date_tna_are_flagged(self):
+        self.assertEqual(self.funds["EMPTY"]["data_missing"], ["ex_post_book"])
+        self.assertEqual(self.funds["NOTNA"]["data_missing"], ["tna_t"])
+        self.assertEqual((self.funds["LIQ"]["data_missing"], self.funds["OK"]["data_missing"]), ([], []))
+        self.assertEqual({n: f["unreliable"] for n, f in self.funds.items()},
+                         {"EMPTY": True, "NOTNA": True, "LIQ": False, "OK": False})
+        self.assertTrue(any("ex-post holdings are empty" in w for w in self.funds["EMPTY"]["warnings"]))
+        self.assertTrue(any("trade-date (T) custodian TNA" in w for w in self.funds["NOTNA"]["warnings"]))
+        self.assertTrue(self.funds["EMPTY"]["transitions"][IRS]["missing"])
+        self.assertNotIn("missing", self.funds["OK"]["transitions"][IRS])
+
+    def test_unreliable_breaks_are_counted_apart(self):
+        self.assertEqual([f["fund"] for f in self.dash["funds"]], ["LIQ", "OK", "EMPTY", "NOTNA"])
+        kpis = self.dash["kpis"]
+        self.assertEqual((kpis["funds_breaking"], kpis["rule_breaks"]), (2, 2))  # LIQ and OK only
+        self.assertEqual((kpis["funds_unreliable"], kpis["unreliable_impacts"], kpis["unreliable_rule_breaks"]),
+                         (2, {"BREAKS": 2}, 2))
+        self.assertEqual(kpis["data_notes"]["unreliable"], ["EMPTY", "NOTNA"])
+        self.assertEqual(kpis["data_notes"]["missing"], {"EMPTY": ["ex_post_book"], "NOTNA": ["tna_t"]})
+        risk = self.dash["rules_at_risk"][0]
+        self.assertEqual((risk["breaks"], risk["missing"]), (["LIQ", "OK", "EMPTY", "NOTNA"], ["EMPTY", "NOTNA"]))
+        self.assertEqual([r["fund"] for r in self.dash["matrix"]["rows"]], ["LIQ", "OK", "EMPTY", "NOTNA"])
+
+    def test_t_minus_1_cash_far_from_the_trade_date_figure_is_noted(self):
+        cash = self.funds["OK"]["cash"]
+        self.assertEqual((cash["current"], cash["custodian_t"], cash["t_differs"]), (-5000.0, 3000.0, True))
+        self.assertTrue(any("differs sharply from the trade-date figure ($3,000)" in w
+                            for w in self.funds["OK"]["warnings"]))
+        self.assertFalse(self.funds["LIQ"]["cash"]["t_differs"])  # no T cash loaded
+        self.assertEqual(self.dash["kpis"]["funds_cash_differs"], 1)
+        self.assertEqual((self.dash["totals"]["cash_t"], self.dash["totals"]["cash_t_funds"]), (3000.0, 1))
+        json.dumps(self.dash, allow_nan=False)
 
 
 class TradingViewIntegrationTests(unittest.TestCase):

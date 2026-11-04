@@ -47,6 +47,11 @@ BAR = 12  # px bar thickness (<= 24)
 AXIS_BAND = 20  # px for the tick labels above the plot
 PLOT_LEFT, PLOT_RIGHT = 4.0, 96.0  # % of the SVG width the data may use
 LEFT_OUT_SHOWN = 5  # funds named in a chart's "not plotted" note (largest first)
+# Tick labels are kept apart for the narrowest plot a per-fund chart gets (about 125px, three charts across at 1600px).
+TICK_PLOT_PX = 120.0
+TICK_GAP_PX = 4.0
+WIDE_PLOT_PX = 240.0  # labels that only fit a plot this wide are shown by a container query (ui.theme)
+_CHAR_PX = {"−": 6.0, "-": 6.0, "%": 8.6, ".": 2.7, ",": 2.7, "M": 8.6, "K": 6.6, "B": 6.6, "<": 6.0}
 
 
 def esc(value: object) -> str:
@@ -146,32 +151,55 @@ def _figure(title: str, subtitle: str, body: str, *, legend_html: str = "", note
             f"</figcaption>{legend_html}{body}{foot}</figure>")
 
 
-def labelled_ticks(ticks: Sequence[float]) -> List[float]:
-    """The ticks that get a label: the two ends and zero, so labels never collide however narrow the card; every
-    tick keeps its gridline. A positive end too close to zero is dropped; a negative low end is always labelled
-    (then zero gives way when the two would collide), so a below-zero zone is never unlabelled."""
+def label_px(text: str) -> float:
+    """The approximate width in px of a 10.5px tick label (digits and $ ~5.9px; %, M wider; . narrower)."""
+    return sum(_CHAR_PX.get(char, 5.9) for char in text)
+
+
+def labelled_ticks(ticks: Sequence[float], kind: str = "money", plot_px: float = TICK_PLOT_PX) -> List[float]:
+    """The ticks that get a label: the two ends and zero, as long as their text does not collide; every tick keeps
+    its gridline. The widths are measured against ``plot_px``, the narrowest the plot gets (the SVG is in percent,
+    so the real width is unknown here). A negative low end is always labelled, so a below-zero zone is never
+    unlabelled; then zero, then the high end, each only when it clears the labels already placed (the low end is
+    drawn from its left edge, the high end up to its right edge, the rest centred)."""
     if len(ticks) <= 2:
         return list(ticks)
     low, high = ticks[0], ticks[-1]
     span = (high - low) or 1.0
-    keep = [t for t in (low, 0.0, high) if low <= t <= high]
-    if 0.0 in keep:
-        keep = [t for t in keep if t == 0.0 or abs(t) / span >= 0.3 or t == low < 0]
-        if low < 0 and abs(low) / span < 0.18:
-            keep = [t for t in keep if t != 0.0]
-    return sorted(set(keep))
+    width = plot_px * (PLOT_RIGHT - PLOT_LEFT) / 100.0
+
+    def extent(tick: float) -> Tuple[float, float]:
+        x, w = (tick - low) / span * width, label_px(tick_label(tick, kind))
+        if tick == low:
+            return x, x + w
+        if tick == high:
+            return x - w, x
+        return x - w / 2, x + w / 2
+
+    placed: List[Tuple[float, float]] = []
+    keep: List[float] = []
+    for tick in dict.fromkeys(t for t in ([low] if low < 0 else []) + [0.0, high] if low <= t <= high):
+        left, right = extent(tick)
+        if all(right + TICK_GAP_PX <= a or left >= b + TICK_GAP_PX for a, b in placed):
+            placed.append((left, right))
+            keep.append(tick)
+    return sorted(keep)
 
 
 def _grid_lines(scale: Scale, ticks: Sequence[float], height: int, kind: str) -> str:
+    """Gridlines with their labels: the ones that fit the narrowest plot always; the ones that only fit a plot of
+    WIDE_PLOT_PX get class ``tk-wide``, which the theme shows only when the plot is that wide (container query)."""
     out = []
-    shown = labelled_ticks(ticks)
+    shown = labelled_ticks(ticks, kind)
+    wide = labelled_ticks(ticks, kind, plot_px=WIDE_PLOT_PX)
     for tick in ticks:
         x = scale(tick)
         anchor = "start" if x <= PLOT_LEFT + 0.01 else "end" if x >= PLOT_RIGHT - 0.01 else "middle"
         color = AXIS if tick == 0 else GRID
+        css = "" if tick in shown else ' class="tk-wide"'
         out.append(f'<line x1="{x}%" x2="{x}%" y1="{AXIS_BAND - 4}" y2="{height}" stroke="{color}" stroke-width="1"/>'
-                   + (f'<text x="{x}%" y="{AXIS_BAND - 8}" text-anchor="{anchor}" fill="{TICK}" font-size="10.5">'
-                      f"{esc(tick_label(tick, kind))}</text>" if tick in shown else ""))
+                   + (f'<text x="{x}%" y="{AXIS_BAND - 8}" text-anchor="{anchor}" fill="{TICK}" font-size="10.5"{css}>'
+                      f"{esc(tick_label(tick, kind))}</text>" if tick in shown or tick in wide else ""))
     return "".join(out)
 
 

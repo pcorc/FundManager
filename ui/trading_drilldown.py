@@ -30,8 +30,11 @@ ALL_FUNDS = "__all__"
 ALL_FUNDS_LABEL = "All funds with proposed trades"
 FILTER_LABEL = "Funds by rule (failing or cured)"
 _SHOWN_FIRST = ("BREAKS", "STILL_FAILS", "FAILS", "ERROR", "CURES")
-_CHANGE_TEXT = {"OUT_OF_COMPLIANCE": "Out of compliance", "INTO_COMPLIANCE": "Into compliance",
-                "STILL_IN_BREACH": "Still in breach", "UNCHANGED": "Unchanged"}
+# The trading report's status_change compares the fund's overall PASS / FAIL before and after; the header adds the
+# violation counts, so "unchanged" never reads as "nothing happens" beside a "Worsens" chip (a failing rule can get
+# worse with the count and the overall status unchanged).
+_CHANGE_TEXT = {"OUT_OF_COMPLIANCE": "Goes out of compliance", "INTO_COMPLIANCE": "Comes into compliance",
+                "STILL_IN_BREACH": "Still in breach"}
 _EFFECT = {"open": "opens", "close": "closes", "increase": "adds to", "reduce": "reduces", "flip": "flips"}
 _FLAG_TEXT = {"no_price": ("no price", "No usable price: the report values it at quantity x multiplier; "
                                        "left out of the cash estimate"),
@@ -45,24 +48,44 @@ _NUMBER = re.compile(r"^[−\-+]?\$?[\d,]*\.?\d+%?$")
 _TABLE_ROWS = 8  # changed table rows shown per GICS table (the rest are counted)
 METRICS_NOTE = ("Cash and TNA here are the trade-date custodian figures the compliance checks use, on both sides; "
                 "they are not adjusted for the trades. The waterfall has the estimated post-trade cash.")
+METRICS_MV_NOTE = ("Equity, options and treasury are the compliance engine's inputs (the holdings' market-value "
+                   "columns as loaded); they can differ from the trading report's ex-post market value, which "
+                   "values each holding at its IIV shares × price, and from the trades in the blotter.")
 
 
 # ---------------------------------------------------------------------------
 # Builders
 # ---------------------------------------------------------------------------
 
+def status_change_text(fund: Mapping) -> str:
+    """The report's status change with the violation counts: 'Goes out of compliance (violations 0 → 2)'; for an
+    unchanged overall status 'Violations unchanged (1 → 1)', or 'Overall status unchanged · violations up (2 → 3)'."""
+    change = str(fund.get("status_change") or "UNCHANGED")
+    before, after = fund.get("violations_before"), fund.get("violations_after")
+    counts = f"{before if before is not None else '—'} → {after if after is not None else '—'}"
+    if change in _CHANGE_TEXT:
+        return f"{_CHANGE_TEXT[change]} (violations {counts})"
+    if change != "UNCHANGED":
+        return f"{change.replace('_', ' ').capitalize()} (violations {counts})"
+    if before is None or after is None or before == after:
+        return f"Violations unchanged ({counts})"
+    return f"Overall status unchanged · violations {'up' if after > before else 'down'} ({counts})"
+
+
 def fund_header_html(fund: Mapping) -> str:
     cash = fund.get("cash") or {}
-    change = str(fund.get("status_change") or "UNCHANGED")
     tna = charts._num(fund.get("tna")) or None
     stats = [("TNA", ui.money(tna) if tna else "no data", "" if tna else "warnish"),
              ("Trades", f"{fund.get('trade_count') or 0}", ""),
              ("Buys", ui.money(fund.get("buy_value")), ""),
              ("Sells", ui.money(fund.get("sell_value")), "")]
     if tna:
-        stats.append(("Traded", f"{ui.pct(fund.get('gross_pct_tna'))} of TNA", ""))
-    stats.append(("Violations", f"{fund.get('violations_before', '—')} → {fund.get('violations_after', '—')}",
-                  "bad" if (fund.get("violations_after") or 0) > (fund.get("violations_before") or 0) else ""))
+        priced = (fund.get("priced") or {}).get("gross_pct_tna")
+        report = fund.get("gross_pct_tna")
+        text = f"{ui.pct(priced if priced is not None else report)} of TNA"
+        if priced is not None and report is not None and abs(priced - report) >= 0.00005:
+            text += f" (report {ui.pct(report)})"  # the same basis as the summary table: priced, report beneath
+        stats.append(("Traded", text, ""))
     if cash.get("current") is None:
         stats.append(("Cash", "not estimated (no custodian cash)", "warnish"))
     else:
@@ -72,9 +95,12 @@ def fund_header_html(fund: Mapping) -> str:
     if cash.get("custodian_t") is not None:
         stats.append((f"Cash ({cash.get('custodian_t_date') or 'T'}, used by the checks)",
                       ui.money(cash.get("custodian_t")), ""))
+    worse = (fund.get("violations_after") or 0) > (fund.get("violations_before") or 0)
+    chg = " bad" if worse and not fund.get("unreliable") else ""
     return (f'<div class="fm-fundhead"><div class="who"><span class="t">{ui.esc(fund.get("fund"))}</span>'
-            f'{tr.impact_chip(fund.get("impact"), bool(fund.get("worsens")))}{tr.missing_icon(fund)}'
-            f'<span class="chg">{ui.esc(_CHANGE_TEXT.get(change, change.title()))}</span></div>{ui.stats(stats)}</div>')
+            f'{tr.impact_chip(fund.get("impact"), bool(fund.get("worsens")), bool(fund.get("unreliable")))}'
+            f'{tr.missing_icon(fund)}<span class="chg{chg}">{ui.esc(status_change_text(fund))}</span></div>'
+            f'{ui.stats(stats)}</div>')
 
 
 def _cell(value: object, status: Optional[str]) -> str:
@@ -322,7 +348,8 @@ def unstaged_html(fund: Mapping) -> List[str]:
 def metrics_card_html(fund: Mapping) -> str:
     rows = list(fund.get("metrics") or [])
     body = comparison_table(rows) or '<div class="fm-reason">No summary metrics for this fund.</div>'
-    footer = f'<div class="fm-foot"><p>{ui.esc(METRICS_NOTE)}</p></div>' if rows else ""
+    footer = (f'<div class="fm-foot"><p>{ui.esc(METRICS_NOTE)}</p><p>{ui.esc(METRICS_MV_NOTE)}</p></div>'
+              if rows else "")
     return ui.card("Summary Metrics", body, subtitle="before → after the trades · compliance inputs", footer=footer)
 
 

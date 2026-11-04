@@ -165,7 +165,7 @@ class DashboardBuildersTest(unittest.TestCase):
         d = dashboard()
         dogg = d["funds"][0]
         head = dd.fund_header_html(dogg)
-        self.assertIn("Out of compliance", head)
+        self.assertIn("Goes out of compliance (violations 0 → 1)", head)
         self.assertIn("0 → 1", head)
         shown, folded = dd.split_rules(dogg["rules"])
         self.assertEqual([r["rule"] for r in shown], ["diversification_IRS_check"])
@@ -269,7 +269,7 @@ class RoundOneBuildersTest(unittest.TestCase):
         html = tr.data_notes_html(self.d)
         self.assertIn('class="fm-callout warn"', html)
         self.assertIn("1 duplicate trade row(s) worth $400 in 1 fund(s), counted once", html)
-        self.assertIn("no custodian TNA or cash for PD2", html)
+        self.assertIn("no custodian TNA or cash at the T-1 close for PD2", html)
         self.assertIn("without staged rows in 1 fund(s)", html)
         self.assertEqual(tr.data_notes_html(fx.trading_dashboard()), "")  # schema 1: no notes block
 
@@ -306,7 +306,7 @@ class RoundOneBuildersTest(unittest.TestCase):
 
     def test_summary_table_marks_missing_unpriced_and_report_only(self) -> None:
         html = tr.summary_table_html(self.d)
-        self.assertIn('title="No custodian TNA for the T-1 close', html)
+        self.assertIn('title="No custodian TNA at the T-1 close', html)
         self.assertIn(">no data</td>", html)
         self.assertIn("in report · not staged", html)  # HE3's option changes
         self.assertIn("2026-10-29 close", html)
@@ -364,8 +364,28 @@ class RoundOneBuildersTest(unittest.TestCase):
         self.assertIn(charts.TOTAL, pct)
         self.assertNotIn(charts.ASSET_COLORS["equity"], pct)
         self.assertIn("Not plotted", charts.net_by_asset_chart(funds))
-        self.assertEqual(charts.labelled_ticks([-0.2, 0.0, 0.2, 0.4, 0.6]), [-0.2, 0.0, 0.6])
-        self.assertIn(-0.05, charts.labelled_ticks([-0.05, 0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3]))
+        # The 2026-11-03 net chart: "−$200K" and "$0" overlapped in a 125px plot; zero gives way, the negative end
+        # stays. A wider plot has room for all three.
+        money = [-200_000.0, 0.0, 200_000.0, 400_000.0, 600_000.0]
+        self.assertEqual(charts.labelled_ticks(money, "money"), [-200_000.0, 600_000.0])
+        self.assertEqual(charts.labelled_ticks(money, "money", plot_px=400), [-200_000.0, 0.0, 600_000.0])
+        self.assertEqual(charts.labelled_ticks([-0.1, 0.0, 0.1], "pct"), [-0.1, 0.0, 0.1])
+        self.assertIn(-0.05, charts.labelled_ticks([-0.05, 0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3], "pct"))
+        cases = ((money, "money"), ([-6e6, -4e6, -2e6, 0.0, 2e6], "money"), ([0.0, 0.01, 0.02, 0.03], "pct"))
+        for ticks, kind in cases:
+            spans = []
+            for tick in charts.labelled_ticks(ticks, kind):
+                x = (tick - ticks[0]) / (ticks[-1] - ticks[0]) * charts.TICK_PLOT_PX * 0.92
+                w = charts.label_px(charts.tick_label(tick, kind))
+                spans.append((x, x + w) if tick == ticks[0] else (x - w, x) if tick == ticks[-1]
+                             else (x - w / 2, x + w / 2))
+            for (_, right), (left, _) in zip(spans, spans[1:]):
+                self.assertLessEqual(right, left, (ticks, spans))  # no two labels overlap
+        # The zero label that only fits a wide plot is still drawn, shown by the theme's container query.
+        grid = charts._grid_lines(charts.Scale(money[0], money[-1]), money, 100, "money")
+        self.assertEqual(re.findall(r'<text [^>]*class="tk-wide">([^<]+)</text>', grid), ["$0"])
+        self.assertIn("@container (min-width: 240px) { .fm-chart svg text.tk-wide { display: inline; } }",
+                      __import__("ui.theme", fromlist=["TRADING_CSS"]).TRADING_CSS)
         dumbbell = charts.cash_dumbbell_chart(funds)
         self.assertIn("% of TNA", dumbbell)
         self.assertIn("the trades take cash below zero", dumbbell)
@@ -381,6 +401,100 @@ class RoundOneBuildersTest(unittest.TestCase):
         self.assertIn("table.fm-summary tr.hl-bad td:first-child { background: linear-gradient", css)
         self.assertIn(".fm-kpi.breaks .s { color: var(--fm-muted); }", css)
         self.assertIn('[class*="st-key-tcjump"] { display: none !important; }', css)
+
+
+def round_two_dashboard() -> dict:
+    """tdt.RoundTwoTests' funds: EMPTY (empty ex-post book) and NOTNA (no trade-date TNA) rest on missing data; LIQ
+    and OK break on complete data; OK's T-1 cash (−$5,000) differs in sign from its trade-date cash ($3,000)."""
+    case = tdt.RoundTwoTests()
+    case.setUp()
+    return case.dash
+
+
+def restated_treasury_dashboard() -> dict:
+    """DOGG-like: an equity buy plus a staged treasury quantity that only restates the bill held (flagged)."""
+    ante = tdt._fund("TB", equity=tdt._frame("eqyticker", [("AAA", 10.0, 10.0, 0.0, 10.0)]),
+                     treasury=tdt._frame("cusip", [("912797XX1", 1000.0, 1000.0, 0.0, 99.0)]),
+                     prev_cash=500.0, prev_tna=10_000.0)
+    post = tdt._fund("TB", equity=tdt._frame("eqyticker", [("AAA", 10.0, 20.0, 10.0, 10.0)]),
+                     treasury=tdt._frame("cusip", [("912797XX1", 1000.0, 1000.0, 1000.0, 99.0)]))
+    return tdt._dashboard({"TB": (ante, post)})
+
+
+class RoundTwoBuildersTest(unittest.TestCase):
+    """Missing trade-date data, cash basis notes, summary columns, the badge count and the drill-down header."""
+
+    def setUp(self) -> None:
+        self.d = round_two_dashboard()
+        self.funds = {f["fund"]: f for f in self.d["funds"]}
+
+    def test_results_on_missing_data_are_not_shown_as_breaches(self) -> None:
+        kpis = tr.kpi_html(self.d)
+        self.assertIn('<div class="v">2</div><div class="s">2 rule(s) pass before and fail after · 2 more on missing '
+                      "data (∅)</div>", kpis)
+        self.assertIn('class="fm-kpi miss"', kpis)
+        self.assertIn("Rests on missing data", kpis)
+        self.assertIn("2 would break; trade-date data missing, not counted above", kpis)
+        matrix = tr.matrix_html(self.d, only_changes=False)
+        self.assertEqual(matrix.count("∅ Data missing"), 2)
+        self.assertEqual(matrix.count('class="fm-tx breaks miss"'), 3)  # EMPTY, NOTNA (dashed), the legend
+        self.assertEqual(matrix.count('<tr class="hl-bad">'), 2)  # LIQ and OK only
+        self.assertIn("Rests on missing data · EMPTY", matrix)
+        self.assertIn("results rest on missing trade-date data, not counted", matrix)  # the legend
+        risk = tr.rules_at_risk_html(self.d)
+        self.assertIn("4 of 4 fail after · 2 on missing data", risk)
+        self.assertIn('<i class="miss" style="width:50.00%"', risk)
+        self.assertIn('class="gap" data-fm-jump="EMPTY"', risk)
+        notes = tr.data_notes_html(self.d)
+        self.assertIn("the rule results of EMPTY, NOTNA rest on missing trade-date data (ex-post holdings (the book "
+                      "is empty); trade-date custodian TNA / total assets)", notes)
+        self.assertIn("T-1 custodian cash differs sharply from the trade-date figure for 1 fund(s) (OK)", notes)
+        icon = tr.missing_icon(self.funds["EMPTY"])
+        self.assertIn('class="fm-ico warn"', icon)
+        self.assertIn("Rests on missing data (ex-post holdings (the book is empty))", icon)
+        head = dd.fund_header_html(self.funds["NOTNA"])
+        self.assertIn("∅ Data missing", head)
+        self.assertNotIn('class="chg bad"', head)
+
+    def test_cash_tile_shows_the_trade_date_total_when_t_minus_1_differs(self) -> None:
+        html = tr.kpi_html(self.d)
+        self.assertIn("trade-date cash $3.0K (1 fund(s) differ sharply)", html)
+
+    def test_badge_counts_the_drill_down_notes(self) -> None:
+        for fund in self.d["funds"] + real_dashboard()["funds"]:
+            count = len(fund["warnings"])
+            badge = re.search(r'aria-label="(\d+) data notes"', tr._flags(fund))
+            self.assertEqual(int(badge.group(1)) if badge else 0, count, fund["fund"])
+            if count:
+                self.assertIn(f"Data notes for {fund['fund']} ({count}):", dd.warnings_html(fund))
+
+    def test_summary_keeps_options_and_treasury_sides_and_the_priced_traded_share(self) -> None:
+        d = restated_treasury_dashboard()
+        html = tr.summary_table_html(d)
+        self.assertIn('<th colspan="1" class="c grp">Options</th>', html)  # no option trades: one compact column
+        self.assertIn(f"<span>{tr.NONE_STAGED}</span>", html)
+        self.assertIn('<th colspan="3" class="c grp">Treasury</th>', html)
+        self.assertEqual(html.count('<th class="num grp">Buys</th><th class="num">Sells</th><th class="num">Net</th>'),
+                         2)  # equity and treasury
+        self.assertIn("flagged · not in est.", html)  # the restated bill: muted, not a trade
+        self.assertIn('<td class="num grp">1.00%<span class="sub"', html)  # priced: the $100 equity buy only
+        self.assertIn("report 10.90%", html)  # the report's figure incl. the $990 restated bill
+        self.assertIn('class="num grp muted flagged" title="The report&#x27;s $990 includes $990 of flagged', html)
+        self.assertIn('<s>+$990</s>', html)  # the treasury net: struck through, not a trade
+
+    def test_drill_down_status_reads_as_violation_counts(self) -> None:
+        fund = dict(self.funds["OK"], status_change="UNCHANGED", violations_before=1, violations_after=1,
+                    impact="STILL_FAILS", worsens=True)
+        head = dd.fund_header_html(fund)
+        self.assertIn("Worsens", head)
+        self.assertIn("Violations unchanged (1 → 1)", head)
+        self.assertNotIn("Violations<b>", head)
+        self.assertEqual(dd.status_change_text(dict(fund, violations_after=3)),
+                         "Overall status unchanged · violations up (1 → 3)")
+        self.assertIn('class="chg bad"', dd.fund_header_html(dict(fund, violations_after=3)))
+        card = dd.metrics_card_html(dict(fund, metrics=[{"label": "Equity", "before": "1", "after": "2",
+                                                         "changed": True}]))
+        self.assertIn("can differ from the trading report&#x27;s ex-post market value", card)
 
 
 class TradingPageTest(AppTestCase):

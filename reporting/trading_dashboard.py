@@ -30,6 +30,16 @@ Definitions (also in ``dashboard["definitions"]``):
   KPI tiles and charts show; the per-class ``buy_value`` / ``sell_value`` stay the report's.
 * The compliance checks themselves use the trade-date (T) custodian cash and TNA (``cash.custodian_t``
   and the Summary Metrics rows), unchanged on the ex-post side: they are not trade-adjusted.
+* Data that the rule results rest on (``data_missing``): besides the T-1 TNA / cash, a fund is flagged
+  ``tna_t`` when the trade-date custodian TNA or total assets (the Summary Metrics rows the checks divide
+  by) are 0 or blank, and ``ex_post_book`` when the ex-post holdings are empty (ex-post market value 0
+  in every asset class) although the ex-ante book is not and the staged trades do not close it (the
+  ex-post / IIV data is not loaded yet). Either makes the fund's verdicts ``unreliable``: its matrix
+  cells carry ``missing: True``, it is listed after the funds on complete data, and it is counted under
+  ``funds_unreliable`` instead of breaking / curing / staying compliant.
+* Current cash that differs sharply from the trade-date custodian cash (``cash.t_differs``: the two
+  differ by more than :data:`CASH_DIFF_PCT` of TNA, or by more than :data:`CASH_FLIP_PCT` with opposite
+  signs) gets a data note.
 * Trend of a rule that fails before and after (``Cell.trend``): ``worse`` / ``better`` when the number
   of failing sub-checks rises / falls, else when the rule's key figure (:data:`KEY_METRICS`) moves away
   from / towards compliance; ``moves`` when other figures change; ``same`` when nothing changes.
@@ -50,24 +60,30 @@ Schema::
                "funds_compliant", "funds_breaking", "funds_curing", "funds_still_failing", "funds_worsening",
                "funds_error", "funds_unknown", "rule_breaks", "rule_cures", "rule_still_fails", "rule_worsens",
                "funds_negative_cash", "funds_negative_before", "funds_going_negative",
-               "funds_with_warnings", "funds_data_missing",
+               "funds_with_warnings", "funds_data_missing", "funds_cash_differs",
+               "funds_unreliable", "unreliable_impacts": {impact: int}, "unreliable_rule_breaks",
                "data_notes": {"duplicate" | "restates_position" | "no_price": {"count", "value", "funds"},
-                              "unstaged": {"value", "funds"}, "data_missing": [fund], "flex": [fund]}},
-                                           # all over the funds with proposed trades
+                              "unstaged": {"value", "funds"}, "data_missing": [fund], "flex": [fund],
+                              "missing": {fund: [code]}, "unreliable": [fund], "cash_differs": [fund]}},
+                                           # over the funds with proposed trades; the compliance counts
+                                           # (funds_compliant ... rule_worsens) over the reliable ones only
       "funds": [FundDashboard],            # funds with proposed trades; BREAKS, STILL_FAILS (worsening
-                                           # first), ERROR, CURES, COMPLIANT, UNKNOWN, then by name
+                                           # first), ERROR, CURES, COMPLIANT, UNKNOWN, then by name; the
+                                           # unreliable funds after the others, in the same order
       "no_trade_funds": [{"fund", "impact", "status_after", "failed_after": [rule], "report_trade_value"}],
       "unavailable_funds": [{"fund", "errors": [str]}],   # selected but no result on either side
       "matrix": {"rules": [{"key", "label", "title", "changes_or_fails": bool}],
                  "rows": [{"fund", "impact", "cells": {rule: Cell}}]},   # rows in "funds" order
       "rules_at_risk": [{"rule", "label", "title", "breaks", "still_fails", "fails", "errors", "cures": [fund],
-                         "worsens": [fund], "trends": {fund: trend}}],   # still_fails: worse first
+                         "worsens": [fund], "trends": {fund: trend},
+                         "missing": [fund]}],   # still_fails: worse first; missing: the unreliable ones
       "totals": Totals,                    # sums over "funds" (the summary table's totals row)
     }
     Cell = {"before": "PASS"|"FAIL"|"N/A"|"ERROR"|None, "after": ..., "transition": Transition,
             "changed"?: int,                 # figures (rows, details, table rows) that differ
             "key"?: {"label", "before", "after"},     # the rule's key figure, when it has one
-            "trend"?: "worse" | "better" | "moves" | "same"}   # STILL_FAILS only
+            "trend"?: "worse" | "better" | "moves" | "same",   # STILL_FAILS only
+            "missing"?: True}                # the fund's results rest on missing data (unreliable)
     Transition = "OK" (PASS->PASS) | "BREAKS" (PASS->FAIL) | "CURES" (FAIL->PASS) | "STILL_FAILS" (FAIL->FAIL)
                | "FAILS" (FAIL after, no ex-ante verdict) | "ERROR" (either side errored) | "N/A"
                # statuses are the rule cards' (RuleView.status): a skipped rule is N/A here, where the
@@ -85,7 +101,9 @@ Schema::
                                          # the compliance checks' own trade-date custodian figures
       "blotter": [{"asset_class", "label", "unit", "buy_value", "sell_value", "trades": [Trade]}],  # classes with trades
       "unstaged": [{"asset_class", "label", "unit", "value", "changes": [Change]}],  # report-only classes
-      "data_missing": ["tna" | "cash"],  # no custodian TNA / cash: figures and results rest on missing data
+      "data_missing": ["tna" | "cash" | "tna_t" | "ex_post_book"],  # T-1 TNA / cash, trade-date TNA / TA,
+                                         # an empty ex-post book: figures or results rest on missing data
+      "unreliable": bool,                # "tna_t" or "ex_post_book": the rule verdicts rest on missing data
       "warnings": [str],
     }
     Change = {"ticker", "before_qty" (ex-post nav_shares), "after_qty" (iiv_shares), "change", "price",
@@ -105,6 +123,8 @@ Schema::
             "post", "change", "post_pct_tna", "current_pct_tna",
             "negative": bool (post < 0), "negative_before": bool (current < 0),
             "goes_negative": bool (current >= 0 > post: the trades take cash below zero),
+            "t_differs": bool (current and custodian_t differ by > CASH_DIFF_PCT of TNA, or by > CASH_FLIP_PCT
+                               with opposite signs),
             "estimate": True, "excluded": [{"asset_class", "ticker", "side", "value", "reason"}],
             "excluded_value"}         # current / post are None when no custodian cash was loaded
     Step = {"key", "label", "value", "running", "kind": "start" | "delta" | "end"}
@@ -126,8 +146,9 @@ Schema::
               "buy_quantity", "sell_quantity", "gross_pct_tna", "priced_buy_value", "priced_sell_value",
               "unpriced_value"}}, "buy_value", "sell_value", "net_value", "gross_value", "gross_pct_tna",
               "priced": {...}, "cash", "post_cash", "cash_change", "post_pct_tna", "funds_negative_cash",
-              "funds_going_negative", "cash_funds", "tna_funds"}
-              # cash sums cover the funds with a cash figure; "tna" the funds with a TNA
+              "funds_going_negative", "cash_funds", "tna_funds", "cash_t", "cash_t_funds"}
+              # cash sums cover the funds with a cash figure; "tna" the funds with a TNA; cash_t: the
+              # trade-date custodian cash of those funds that have one
 """
 from __future__ import annotations
 
@@ -190,6 +211,11 @@ KEY_METRICS: Dict[str, Tuple[str, int]] = {
     "twelve_d3_sec_biz": ("Max Ownership %", 1),
 }
 GICS_KEY = ("gics_compliance", "Largest fund weight", "Fund Weight")  # the top weight over the GICS tables
+# Missing data the rule verdicts themselves rest on (the T-1 "tna" / "cash" only affect % of TNA and the cash estimate).
+RULE_DATA_MISSING = ("tna_t", "ex_post_book")
+TOTALS_ROWS = ("Total Assets", "Total Net Assets")  # the Summary Metrics rows the checks divide by
+CASH_DIFF_PCT = 0.02  # current (T-1) vs trade-date custodian cash: a gap above this share of TNA gets a data note
+CASH_FLIP_PCT = 0.005  # ... or above this share when the two have opposite signs
 
 DEFINITIONS = {
     "tna": "Custodian total net assets at the T-1 close (the trading report's TNA column).",
@@ -261,7 +287,7 @@ def build_dashboard(
                                 rules, day_str)
         traded.append(entry)
 
-    traded.sort(key=lambda f: (IMPACT_ORDER.index(f["impact"]), not f["worsens"], f["fund"]))
+    traded.sort(key=lambda f: (f["unreliable"], IMPACT_ORDER.index(f["impact"]), not f["worsens"], f["fund"]))
     matrix_rules = _matrix_rules(traded, rules)
     return {
         "schema": DASHBOARD_SCHEMA,
@@ -489,6 +515,7 @@ def _matrix_rules(traded: Sequence[Mapping[str, Any]], rules: Mapping[str, Mappi
 def _rules_at_risk(traded: Sequence[Mapping[str, Any]], columns: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     groups = (("breaks", "BREAKS"), ("still_fails", "STILL_FAILS"), ("fails", "FAILS"), ("errors", "ERROR"),
               ("cures", "CURES"))
+    unreliable = [f["fund"] for f in traded if f.get("unreliable")]
     out = []
     for column in columns:
         key = column["key"]
@@ -500,9 +527,16 @@ def _rules_at_risk(traded: Sequence[Mapping[str, Any]], columns: Sequence[Mappin
         entry["still_fails"].sort(key=lambda fund: _TREND_RANK.get(cells[fund].get("trend"), 1))
         entry["trends"] = {fund: cells[fund]["trend"] for fund in entry["still_fails"] if cells[fund].get("trend")}
         entry["worsens"] = [fund for fund, trend in entry["trends"].items() if trend == "worse"]
-        if any(entry[name] for name, _ in groups):
+        listed = [fund for name, _ in groups for fund in entry[name]]
+        entry["missing"] = [fund for fund in unreliable if fund in listed]
+        if listed:
             out.append(entry)
-    out.sort(key=lambda e: (-len(e["breaks"]), -len(e["worsens"]), -(len(e["still_fails"]) + len(e["fails"])),
+
+    def reliable(entry: Mapping[str, Any], name: str) -> int:
+        return sum(fund not in unreliable for fund in entry[name])
+
+    out.sort(key=lambda e: (-reliable(e, "breaks"), -reliable(e, "worsens"),
+                            -(reliable(e, "still_fails") + reliable(e, "fails")), -len(e["breaks"]),
                             -len(e["errors"]), -len(e["cures"])))
     return out
 
@@ -531,14 +565,31 @@ def _fund_dashboard(name, fund_data, trade_info, ante_rules, post_rules, transit
         warnings.append(f"Cash is already below zero at the {cash['date']} close ({_money(cash['current'])}); "
                         f"after the trades it is an estimated {_money(cash['post'])}.")
     if not tna:
-        warnings.append("No custodian TNA for the T-1 close: % of TNA figures are not shown, and rule results may "
-                        "rest on missing data.")
+        warnings.append("No custodian TNA for the T-1 close: % of TNA figures are not shown (the rule results use "
+                        "the trade-date figures, flagged separately when missing).")
     unstaged = _unstaged(post_fund, assets)
     for stats in assets.values():
         if not stats["staged"] and stats["gross_value"] > 0.0:
             warnings.append(f"{stats['label']}: the trading report shows a trade value of "
                             f"{_money(stats['gross_value'])} from the ex-post share columns, without staged trades; "
                             "it is not in the cash estimate (see 'Position changes without staged rows').")
+    missing = [what for what, gap in (("tna", not tna), ("cash", cash["current"] is None)) if gap]
+    if _trade_date_totals_missing(ante_rules, post_rules):
+        missing.append("tna_t")
+        warnings.append("The trade-date (T) custodian TNA or total assets are missing (0 in the Summary Metrics): the "
+                        "compliance checks divide by them, so this fund's rule results rest on missing data and are "
+                        "not counted as breaks, cures or passes.")
+    if _ex_post_book_empty(assets):
+        missing.append("ex_post_book")
+        ante_mv = sum(abs(a["ex_ante_market_value"]) for a in assets.values())
+        warnings.append(f"The ex-post holdings are empty (market value 0 in every asset class, ex-ante "
+                        f"{_money(ante_mv)}) although the staged trades do not close the book: the ex-post (IIV) data "
+                        "is probably not loaded yet, so the after-trade results rest on missing data.")
+    if cash["t_differs"]:
+        warnings.append(f"Custodian cash at the {cash['date']} close ({_money(cash['current'])}) differs sharply from "
+                        f"the trade-date figure ({_money(cash['custodian_t'])}): the cash estimate starts from the "
+                        f"{cash['date']} figure, so check it before relying on post-trade cash.")
+    unreliable = any(code in missing for code in RULE_DATA_MISSING)
     flex = _flex_trade_count(post_fund)
     if flex:
         warnings.append(f"{flex} FLEX option trade row(s) are staged; the trading analysis does not value FLEX "
@@ -550,6 +601,9 @@ def _fund_dashboard(name, fund_data, trade_info, ante_rules, post_rules, transit
     priced_buy = sum(a["priced_buy_value"] for a in assets.values())
     priced_sell = sum(a["priced_sell_value"] for a in assets.values())
     rule_diffs = _rule_diffs(ante_rules, post_rules, transitions, rules)  # also annotates the transition cells
+    if unreliable:
+        for cell in transitions.values():
+            cell["missing"] = True
     return {
         "fund": name,
         "has_trades": True,
@@ -578,13 +632,32 @@ def _fund_dashboard(name, fund_data, trade_info, ante_rules, post_rules, transit
                               (post_rules.get(SUMMARY) or {}).get("rows") or [], with_status=False),
         "blotter": blotter,
         "unstaged": unstaged,
-        "data_missing": [what for what, missing in (("tna", not tna), ("cash", cash["current"] is None)) if missing],
+        "data_missing": missing,
+        "unreliable": unreliable,
         "warnings": warnings,
     }
 
 
 def _pct(value: Optional[float], tna: float) -> Optional[float]:
     return None if value is None or not tna else value / tna
+
+
+def _trade_date_totals_missing(ante_rules: Mapping[str, Any], post_rules: Mapping[str, Any]) -> bool:
+    """A Summary Metrics Total Assets / Total Net Assets row (the trade-date custodian figures) that is 0 or blank."""
+    for side in (ante_rules, post_rules):
+        for row in (side.get(SUMMARY) or {}).get("rows") or []:
+            if row.get("label") in TOTALS_ROWS and not _number(row.get("value")):
+                return True
+    return False
+
+
+def _ex_post_book_empty(assets: Mapping[str, Mapping[str, Any]]) -> bool:
+    """Ex-post market value 0 in every asset class while the ex-ante book is not, and the trades do not close it."""
+    ante = sum(abs(a["ex_ante_market_value"]) for a in assets.values())
+    if ante <= 0.0 or any(a["ex_post_market_value"] for a in assets.values()):
+        return False
+    remaining = sum(max(abs(a["ex_ante_market_value"]) - a["gross_value"], 0.0) for a in assets.values())
+    return remaining > 0.01 * ante
 
 
 def _asset_stats(key: str, trade_info: Mapping[str, Any], tna: float,
@@ -800,15 +873,27 @@ def _cash(ante_fund, post_fund, tna, blotter, assets, day_str) -> Dict[str, Any]
     post = None if current is None else current + change
     custodian_t = getattr(getattr(ante_fund, "data", None), "current", None)
     negative = post is not None and post < 0.0
+    t_cash = to_float(getattr(custodian_t, "cash", 0.0)) if _snapshot_has_data(custodian_t) else None
     return {
         "current": current, "source": source, "date": when,
-        "custodian_t": to_float(getattr(custodian_t, "cash", 0.0)) if _snapshot_has_data(custodian_t) else None,
+        "custodian_t": t_cash, "t_differs": source == "ex_ante_previous" and _cash_differs(current, t_cash, tna),
         "custodian_t_date": day_str,
         "post": post, "change": change, "post_pct_tna": _pct(post, tna), "current_pct_tna": _pct(current, tna),
         "negative": negative, "negative_before": current is not None and current < 0.0,
         "goes_negative": negative and current is not None and current >= 0.0, "estimate": True,
         "excluded": excluded, "excluded_value": sum(e["value"] for e in excluded),
     }
+
+
+def _cash_differs(current: Optional[float], t_cash: Optional[float], tna: float) -> bool:
+    """T-1 and trade-date custodian cash more than CASH_DIFF_PCT of TNA apart, or with opposite signs and more than
+    CASH_FLIP_PCT apart (more than $1,000 without a TNA)."""
+    if current is None or t_cash is None:
+        return False
+    gap = abs(current - t_cash)
+    if tna and gap > CASH_DIFF_PCT * abs(tna):
+        return True
+    return current * t_cash < 0.0 and gap > (CASH_FLIP_PCT * abs(tna) if tna else 1000.0)
 
 
 def _waterfall(cash: Mapping[str, Any], blotter: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
@@ -842,8 +927,11 @@ def _waterfall(cash: Mapping[str, Any], blotter: Sequence[Mapping[str, Any]]) ->
 # ---------------------------------------------------------------------------
 
 def _kpis(traded: Sequence[Mapping[str, Any]], selected: int, no_trades: int, unavailable: int) -> Dict[str, Any]:
-    impacts = Counter(f["impact"] for f in traded)
-    codes = Counter(cell["transition"] for f in traded for cell in f["transitions"].values())
+    # The compliance counts cover the funds whose verdicts rest on complete data; the others are counted apart.
+    reliable = [f for f in traded if not f.get("unreliable")]
+    unreliable = [f for f in traded if f.get("unreliable")]
+    impacts = Counter(f["impact"] for f in reliable)
+    codes = Counter(cell["transition"] for f in reliable for cell in f["transitions"].values())
     kpis: Dict[str, Any] = {
         "funds_selected": selected, "funds_with_trades": len(traded), "funds_without_trades": no_trades,
         "funds_unavailable": unavailable,
@@ -860,11 +948,11 @@ def _kpis(traded: Sequence[Mapping[str, Any]], selected: int, no_trades: int, un
         for side in ("buy", "sell"):
             kpis[f"{key}_{side}_value"] = sum(f["assets"][key][f"{side}_value"] for f in traded)
             kpis[f"{key}_priced_{side}_value"] = sum(f["assets"][key][f"priced_{side}_value"] for f in traded)
-    worse = [cell for f in traded for cell in f["transitions"].values() if cell.get("trend") == "worse"]
+    worse = [cell for f in reliable for cell in f["transitions"].values() if cell.get("trend") == "worse"]
     kpis.update(
         funds_compliant=impacts["COMPLIANT"], funds_breaking=impacts["BREAKS"], funds_curing=impacts["CURES"],
         funds_still_failing=impacts["STILL_FAILS"], funds_error=impacts["ERROR"], funds_unknown=impacts["UNKNOWN"],
-        funds_worsening=sum(1 for f in traded if f["impact"] == "STILL_FAILS" and f["worsens"]),
+        funds_worsening=sum(1 for f in reliable if f["impact"] == "STILL_FAILS" and f["worsens"]),
         rule_breaks=codes["BREAKS"], rule_cures=codes["CURES"], rule_still_fails=codes["STILL_FAILS"] + codes["FAILS"],
         rule_worsens=len(worse),
         funds_negative_cash=sum(bool(f["cash"]["negative"]) for f in traded),
@@ -872,6 +960,11 @@ def _kpis(traded: Sequence[Mapping[str, Any]], selected: int, no_trades: int, un
         funds_going_negative=sum(bool(f["cash"].get("goes_negative")) for f in traded),
         funds_with_warnings=sum(bool(f["warnings"]) for f in traded),
         funds_data_missing=sum(bool(f["data_missing"]) for f in traded),
+        funds_cash_differs=sum(bool(f["cash"].get("t_differs")) for f in traded),
+        funds_unreliable=len(unreliable),
+        unreliable_impacts=dict(Counter(f["impact"] for f in unreliable)),
+        unreliable_rule_breaks=sum(cell["transition"] == "BREAKS" for f in unreliable
+                                   for cell in f["transitions"].values()),
         data_notes=_data_notes(traded),
     )
     return kpis
@@ -892,6 +985,9 @@ def _data_notes(traded: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     notes["unstaged"] = {"value": sum(g["value"] for f in unstaged for g in f["unstaged"]),
                          "funds": [f["fund"] for f in unstaged]}
     notes["data_missing"] = [f["fund"] for f in traded if f["data_missing"]]
+    notes["missing"] = {f["fund"]: list(f["data_missing"]) for f in traded if f["data_missing"]}
+    notes["unreliable"] = [f["fund"] for f in traded if f.get("unreliable")]
+    notes["cash_differs"] = [f["fund"] for f in traded if f["cash"].get("t_differs")]
     notes["flex"] = [f["fund"] for f in traded if f.get("flex_trades")]
     return notes
 
@@ -913,6 +1009,7 @@ def _totals(traded: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
     cash = sum(f["cash"]["current"] for f in with_cash) if with_cash else None
     post = sum(f["cash"]["post"] for f in with_cash) if with_cash else None
     cash_tna = sum(f["tna"] for f in with_cash if f["tna"])
+    with_t = [f for f in with_cash if f["cash"].get("custodian_t") is not None]
     gross = sum(f["gross_value"] for f in traded)
     buy, sell = sum(f["buy_value"] for f in traded), sum(f["sell_value"] for f in traded)
     priced_buy, priced_sell = sum(f["priced"]["buy_value"] for f in traded), sum(f["priced"]["sell_value"] for f in traded)
@@ -928,4 +1025,5 @@ def _totals(traded: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "funds_negative_cash": sum(bool(f["cash"]["negative"]) for f in traded),
         "funds_going_negative": sum(bool(f["cash"].get("goes_negative")) for f in traded),
         "cash_funds": len(with_cash),
+        "cash_t": sum(f["cash"]["custodian_t"] for f in with_t) if with_t else None, "cash_t_funds": len(with_t),
     }

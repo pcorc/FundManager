@@ -58,8 +58,13 @@ TABS = ("Compliance impact", "Trading summary", "Fund drill-down")
 DRILL_TAB = TABS[2]
 BEFORE_AFTER = ("Before = ex-ante: the holdings as they stand · After = ex-post: the same holdings assuming the "
                 "staged but unexecuted trades execute")
-_MISSING_TIP = ("No custodian {what} for the T-1 close: figures are not estimated, and rule results may rest on "
-                "missing data")
+# What each data_missing code means (reporting.trading_dashboard): T-1 TNA / cash only affect % of TNA and the cash
+# estimate; the trade-date TNA and an empty ex-post book make the fund's rule verdicts rest on missing data.
+MISSING_TEXT = {"tna": "custodian TNA at the T-1 close", "cash": "custodian cash at the T-1 close",
+                "tna_t": "trade-date custodian TNA / total assets",
+                "ex_post_book": "ex-post holdings (the book is empty)"}
+UNRELIABLE_TIP = ("Rests on missing data ({what}): not counted as a break, cure or pass; see the fund's data notes")
+_TNA_TIP = "No custodian TNA at the T-1 close: % of TNA figures are not shown"
 
 # A static script (no data in it): a click (or Enter) on an element with data-fm-jump clicks the matching option of
 # the hidden jump pills, whose callback opens the drill-down tab on that fund and rule.
@@ -98,38 +103,51 @@ JUMP_SCRIPT = """<script>
 # Small pieces
 # ---------------------------------------------------------------------------
 
-def transition_chip(code: Optional[str], title: str = "", *, quiet_ok: bool = True, trend: Optional[str] = None) -> str:
+def transition_chip(code: Optional[str], title: str = "", *, quiet_ok: bool = True, trend: Optional[str] = None,
+                    missing: bool = False) -> str:
     """A before → after transition chip (``quiet_ok``: PASS → PASS is a faint tick, not a chip).
 
-    ``trend`` (STILL_FAILS only) adds "· worse" / "· better" / "· moves" inside the chip.
+    ``trend`` (STILL_FAILS only) adds "· worse" / "· better" / "· moves" inside the chip; ``missing`` (the fund's
+    results rest on missing data) draws it as a dashed outline with a ∅, never as a loud verdict.
     """
     code = code if code in TRANSITION_STYLE else "N/A"
     css, glyph, text = TRANSITION_STYLE[code]
+    miss = " miss" if missing else ""
     tip = f' title="{ui.esc(title)}"' if title else ""
     if code == "OK" and quiet_ok:
-        return f'<span class="fm-tx ok quiet"{tip} aria-label="passes before and after">✓</span>'
+        return f'<span class="fm-tx ok quiet{miss}"{tip} aria-label="passes before and after">✓</span>'
     if code == "N/A" and quiet_ok:
-        return f'<span class="fm-tx na quiet"{tip}>n/a</span>'
+        return f'<span class="fm-tx na quiet{miss}"{tip}>n/a</span>'
     mark = f'<b aria-hidden="true">{glyph}</b>' if glyph else ""
-    extra = ""
+    css += miss
+    extra = '<i class="ms" aria-label="rests on missing data">∅</i>' if missing else ""
     if code == "STILL_FAILS" and trend in TREND_STYLE:
         trend_css, word = TREND_STYLE[trend]
         css += f" {trend_css}"
-        extra = f'<i class="tr">· {ui.esc(word)}</i>' if word else ""
+        extra = (f'<i class="tr">· {ui.esc(word)}</i>' if word else "") + extra
     return f'<span class="fm-tx {css}"{tip}>{mark}{ui.esc(text)}{extra}</span>'
 
 
-def impact_chip(impact: Optional[str], worsens: bool = False) -> str:
+def impact_chip(impact: Optional[str], worsens: bool = False, missing: bool = False) -> str:
+    """The fund's overall impact; ``missing`` (its results rest on missing data): "∅ Data missing" instead."""
     css, text = IMPACT_STYLE.get(str(impact), ("na", str(impact or "—")))
     if impact == "STILL_FAILS" and worsens:
         css, text = "still worse", "Worsens"
+    if missing:
+        tip = (f"The results would read '{text}', but they rest on missing trade-date data (see the fund's data "
+               "notes), so they are not counted as a break, cure or pass")
+        return f'<span class="fm-tx na impact miss" title="{ui.esc(tip)}">∅ Data missing</span>'
     return f'<span class="fm-tx {css} impact">{ui.esc(text)}</span>'
 
 
-def _money_cell(value: object, *, signed: bool = False, sub: str = "", css: str = "", title: str = "") -> str:
+def _money_cell(value: object, *, signed: bool = False, sub: str = "", css: str = "", title: str = "",
+                strike: bool = False) -> str:
+    """``strike``: a value that is not a real trade (all flagged rows), struck through and muted."""
     exact = title or ui.money(value, signed=signed, compact=False)
     text = ui.money(value, signed=signed)
     shown = ui.DASH if text == "—" else ui.esc(text)
+    if strike and text != "—":
+        shown, css = f"<s>{shown}</s>", (css + " muted flagged").strip()
     extra = f'<span class="sub">{ui.esc(sub)}</span>' if sub else ""
     return f'<td class="{ui.esc(("num " + css).strip())}" title="{ui.esc(exact)}">{shown}{extra}</td>'
 
@@ -147,14 +165,20 @@ def rule_name(rule: Mapping) -> str:
     return str(rule.get("label") or rule.get("title") or rule.get("key") or rule.get("rule") or "")
 
 
+def missing_what(fund: Mapping) -> str:
+    return "; ".join(MISSING_TEXT.get(str(m), str(m)) for m in fund.get("data_missing") or [])
+
+
 def missing_icon(fund: Mapping) -> str:
-    """A small ∅ badge when the fund's custodian TNA or cash is missing (its results may rest on missing data)."""
-    missing = list(fund.get("data_missing") or [])
-    if not missing:
+    """A small ∅ badge when data is missing: T-1 TNA / cash (figures not estimated) or trade-date data (the rule
+    results rest on missing data; the badge is then amber)."""
+    if not fund.get("data_missing"):
         return ""
-    what = " and ".join({"tna": "TNA", "cash": "cash"}.get(m, m) for m in missing)
-    return (f'<span class="fm-ico na" title="{ui.esc(_MISSING_TIP.format(what=what))}" '
-            f'aria-label="missing data">∅</span>')
+    if fund.get("unreliable"):
+        tip, css = UNRELIABLE_TIP.format(what=missing_what(fund)), "warn"
+    else:
+        tip, css = f"Missing: {missing_what(fund)}. % of TNA and post-trade cash are not estimated.", "na"
+    return f'<span class="fm-ico {css}" title="{ui.esc(tip)}" aria-label="missing data">∅</span>'
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +238,9 @@ def kpi_html(dashboard: Mapping) -> str:
         cash_note += f" · {negative} fund(s) below zero"
     elif totals.get("cash") is not None:
         cash_note += " · no fund below zero"
+    differs = k.get("funds_cash_differs") or 0
+    if differs and totals.get("cash_t") is not None:
+        cash_note += f" · trade-date cash {ui.money(totals.get('cash_t'))} ({differs} fund(s) differ sharply)"
     trades = [
         _tile("Funds with trades", str(traded),
               f"of {selected} selected" + (f" · {without} without trades" if without else "")),
@@ -227,13 +254,16 @@ def kpi_html(dashboard: Mapping) -> str:
     breaking, curing, still = (k.get("funds_breaking") or 0, k.get("funds_curing") or 0,
                                k.get("funds_still_failing") or 0)
     worsening = k.get("funds_worsening") or 0
+    unreliable = k.get("funds_unreliable") or 0
+    would_break = (k.get("unreliable_impacts") or {}).get("BREAKS") or 0
+    breaks_note = f"{k.get('rule_breaks') or 0} rule(s) pass before and fail after" if breaking else "no rule breaks"
+    if would_break:
+        breaks_note += f" · {would_break} more on missing data (∅)"
     outcome = [
         _tile("Staying compliant", str(k.get("funds_compliant") or 0),
               "every rule passes before and after" if k.get("funds_compliant") else "none",
               tone="ok" if k.get("funds_compliant") else "", glyph="✓"),
-        _tile("Going out of compliance", str(breaking),
-              f"{k.get('rule_breaks') or 0} rule(s) pass before and fail after" if breaking else "no rule breaks",
-              tone="breaks" if breaking else "", glyph="✕"),
+        _tile("Going out of compliance", str(breaking), breaks_note, tone="breaks" if breaking else "", glyph="✕"),
         _tile("Breach deepens", str(worsening),
               f"{k.get('rule_worsens') or 0} failing rule(s) get worse" if worsening
               else "no failing rule gets worse", tone="worse" if worsening else "", glyph="▲"),
@@ -247,6 +277,9 @@ def kpi_html(dashboard: Mapping) -> str:
     if k.get("funds_error"):
         outcome.append(_tile("Check errors", str(k["funds_error"]), "a check raised an error", tone="error",
                              glyph="!"))
+    if unreliable:
+        note = (f"{would_break} would break; " if would_break else "") + "trade-date data missing, not counted above"
+        outcome.append(_tile("Rests on missing data", str(unreliable), note, tone="miss", glyph="∅"))
     return (f'<div class="fm-kpis"><div class="fm-kpi-group">Proposed trades · priced, each trade once</div>'
             f'<div class="fm-kpi-row">{"".join(trades)}</div><div class="fm-kpi-group">Compliance after the trades'
             f'</div><div class="fm-kpi-row">{"".join(outcome)}</div></div>')
@@ -277,8 +310,22 @@ def data_notes_html(dashboard: Mapping) -> str:
         parts.append(f"{ui.money(unstaged.get('value'))} of report trade value without staged rows in "
                      f"{len(unstaged['funds'])} fund(s) (ex-post position changes, mostly options; not in the "
                      "cash estimate)")
-    if notes.get("data_missing"):
-        parts.append(f"no custodian TNA or cash for {', '.join(notes['data_missing'])} (marked ∅)")
+    unreliable = list(notes.get("unreliable") or [])
+    missing = notes.get("missing") or {}
+    if unreliable:
+        whats = sorted({MISSING_TEXT.get(c, c) for f in unreliable for c in missing.get(f, []) if c in
+                        ("tna_t", "ex_post_book")})
+        parts.append(f"the rule results of {', '.join(unreliable)} rest on missing trade-date data "
+                     f"({'; '.join(whats) or 'see each fund'}): shown dashed and marked ∅, not counted as breaks, "
+                     "cures or passes")
+    t1_only = [f for f in notes.get("data_missing") or [] if f not in unreliable]
+    if t1_only:
+        parts.append(f"no custodian TNA or cash at the T-1 close for {', '.join(t1_only)} (marked ∅)")
+    differs = list(notes.get("cash_differs") or [])
+    if differs:
+        shown = ", ".join(differs[:6]) + (f" and {len(differs) - 6} more" if len(differs) > 6 else "")
+        parts.append(f"T-1 custodian cash differs sharply from the trade-date figure for {len(differs)} fund(s) "
+                     f"({shown}); post-trade cash starts from T-1, the summary table shows T beneath it")
     if notes.get("flex"):
         parts.append(f"staged FLEX option rows the analysis does not value: {', '.join(notes['flex'])}")
     if not parts:
@@ -316,6 +363,8 @@ def _cell_tip(fund: str, rule: Mapping, cell: Mapping) -> str:
     trend = cell.get("trend")
     if trend in ("worse", "better"):
         tip += f" · the trades make it {trend}"
+    if cell.get("missing"):
+        tip = "Rests on missing data · " + tip
     return tip + " · click to open it in the drill-down"
 
 
@@ -341,13 +390,15 @@ def matrix_html(dashboard: Mapping, only_changes: bool = True) -> str:
             cell = (row.get("cells") or {}).get(rule.get("key")) or {}
             code = cell.get("transition") or "N/A"
             index = all_rules.index(rule)
+            chip = transition_chip(code, _cell_tip(fund, rule, cell), trend=cell.get("trend"),
+                                   missing=bool(cell.get("missing")))
             cells.append(f'<td class="c jump" data-fm-jump="{ui.esc(fund)}" data-fm-rule="{index}" tabindex="0" '
-                         f'role="button">{transition_chip(code, _cell_tip(fund, rule, cell), trend=cell.get("trend"))}'
-                         f"</td>")
-        css = ' class="hl-bad"' if row.get("impact") == "BREAKS" else ""
+                         f'role="button">{chip}</td>')
+        css = ' class="hl-bad"' if row.get("impact") == "BREAKS" and not info.get("unreliable") else ""
+        impact = impact_chip(row.get("impact"), bool(info.get("worsens")), bool(info.get("unreliable")))
         body.append(f'<tr{css}><td class="fund jump" data-fm-jump="{ui.esc(fund)}" tabindex="0" role="button" '
                     f'title="Open {ui.esc(fund)} in the drill-down">{ui.esc(fund)}{missing_icon(info)}</td>'
-                    f'<td class="c">{impact_chip(row.get("impact"), bool(info.get("worsens")))}</td>'
+                    f'<td class="c">{impact}</td>'
                     f'{"".join(cells)}</tr>')
     table = (f'<div class="fm-tablewrap"><table class="fm-table fm-matrix fm-impact"><thead><tr><th>Fund</th>'
              f'<th class="c">Impact</th>{head}</tr></thead><tbody>{"".join(body)}</tbody></table></div>')
@@ -367,6 +418,9 @@ def legend_html(dashboard: Mapping) -> str:
                 if _seen_trend(dashboard, trend):
                     items.append(f'<span>{transition_chip(code, quiet_ok=False, trend=trend)}'
                                  f'<em>{ui.esc(trends.get(trend, ""))}</em></span>')
+    if any(cell.get("missing") for cell in _cells(dashboard)):
+        items.append(f'<span>{transition_chip("BREAKS", quiet_ok=False, missing=True)}<em>Dashed, ∅: the fund\'s '
+                     "results rest on missing trade-date data, not counted</em></span>")
     hint = ('<span class="hint">Click a fund or a cell to open it in the drill-down; hover a cell for the key figure '
             'before → after.</span>')
     return f'<div class="fm-txlegend">{"".join(items)}{hint}</div>'
@@ -450,7 +504,8 @@ def rules_at_risk_html(dashboard: Mapping) -> str:
     if not risks:
         return ui.callout("ok", "No rule fails, breaks or errors after the proposed trades.")
     keys = [str(r.get("key")) for r in (dashboard.get("matrix") or {}).get("rules") or []]
-    missing = {str(f.get("fund")) for f in dashboard.get("funds") or [] if f.get("data_missing")}
+    funds_by_name = {str(f.get("fund")): f for f in dashboard.get("funds") or []}
+    missing = {name for name, f in funds_by_name.items() if f.get("unreliable")}
     rows = []
     for risk in risks:
         index = keys.index(str(risk.get("rule"))) if str(risk.get("rule")) in keys else None
@@ -461,36 +516,53 @@ def rules_at_risk_html(dashboard: Mapping) -> str:
             funds = list(risk.get(group) or [])
             if not funds:
                 continue
+            gaps = [f for f in funds if f in missing]
+            if gaps and total:
+                segments_tail = (f'<i class="miss" style="width:{100 * len(gaps) / total:.2f}%" '
+                                 f'title="{ui.esc(label)} on missing data: {len(gaps)}"></i>')
+            else:
+                segments_tail = ""
+            counted = [f for f in funds if f not in missing]
             if group == "still_fails":
-                worse = [f for f in funds if trends.get(f) == "worse"]
+                worse = [f for f in counted if trends.get(f) == "worse"]
                 if worse and total:
                     segments.append(f'<i class="worse" style="width:{100 * len(worse) / total:.2f}%" '
                                     f'title="Still fails, worse: {len(worse)}"></i>')
-                rest = len(funds) - len(worse)
+                rest = len(counted) - len(worse)
                 if rest and total:
                     segments.append(f'<i class="still" style="width:{100 * rest / total:.2f}%" '
                                     f'title="{ui.esc(label)}: {rest}"></i>')
-            elif total:
-                segments.append(f'<i class="{css}" style="width:{100 * len(funds) / total:.2f}%" '
-                                f'title="{ui.esc(label)}: {len(funds)}"></i>')
+            elif total and counted:
+                segments.append(f'<i class="{css}" style="width:{100 * len(counted) / total:.2f}%" '
+                                f'title="{ui.esc(label)}: {len(counted)}"></i>')
+            if segments_tail:
+                segments.append(segments_tail)
             chips = []
             for f in funds:
                 trend = trends.get(f) if group == "still_fails" else None
-                cls = ' class="worse"' if trend == "worse" else ""
+                gap = (f' <i class="miss" aria-label="missing data" title="'
+                       f'{ui.esc(UNRELIABLE_TIP.format(what=missing_what(funds_by_name.get(f) or {})))}">∅</i>'
+                       if f in missing else "")
+                if f in missing:  # dashed, not counted: the result rests on missing trade-date data
+                    trend = None
+                cls = ' class="worse"' if trend == "worse" else ' class="gap"' if f in missing else ""
                 mark = '<b aria-hidden="true">▲</b>' if trend == "worse" else ""
-                gap = (' <i class="miss" aria-label="missing data" title="No custodian TNA or cash for the T-1 '
-                       'close: this result may rest on missing data">∅</i>') if f in missing else ""
-                tip = f"Open {f} · {rule_name(risk)} in the drill-down" + (" (the trades make it worse)"
-                                                                            if trend == "worse" else "")
+                tip = f"Open {f} · {rule_name(risk)} in the drill-down" + (
+                    " (the trades make it worse)" if trend == "worse" else
+                    " (rests on missing data)" if f in missing else "")
                 chips.append(f'<span{cls} data-fm-jump="{ui.esc(f)}"{rule_attr} tabindex="0" role="button" '
                              f'title="{ui.esc(tip)}">{mark}{ui.esc(f)}{gap}</span>')
-            groups.append(f'<div class="grp {css}"><em>{transition_chip(_group_code(group), quiet_ok=False)}'
+            chip = transition_chip(_group_code(group), quiet_ok=False, missing=not counted)  # all on missing data
+            groups.append(f'<div class="grp {css}"><em>{chip}'
                           f'</em><div class="funds">{"".join(chips)}</div></div>')
         failing = len(set(risk.get("breaks") or []) | set(risk.get("still_fails") or []) | set(risk.get("fails") or []))
         count = f"{failing} of {total} fail after" if total else f"{failing} fail after"
-        worse_count = len(risk.get("worsens") or [])
+        worse_count = len([f for f in risk.get("worsens") or [] if f not in missing])
         if worse_count:
             count += f" · {worse_count} worse"
+        on_gaps = len([f for f in risk.get("missing") or [] if f in missing])
+        if on_gaps:
+            count += f" · {on_gaps} on missing data"
         rows.append(f'<div class="fm-risk"><div class="head"><b>{ui.esc(rule_name(risk))}</b>'
                     f'<span>{ui.esc(count)}</span><div class="bar" role="img" aria-label="{ui.esc(count)}">'
                     f'{"".join(segments)}</div></div><div class="body">{"".join(groups)}</div></div>')
@@ -529,6 +601,34 @@ _REPORT_ONLY_TIP = ("The trading report shows {value} for this class from the ex
                     "drill-down lists these position changes.")
 
 
+_FLAGGED_TIP = ("The report's {value} includes {flagged} of flagged trade rows (duplicate rows, or a staged "
+                "quantity that only restates the position held); the KPI tiles, charts and post-trade cash use the "
+                "priced {priced}.")
+
+
+def _flagged(a: Mapping, side: str) -> Tuple[float, float]:
+    """(priced value, flagged value) of one side: flagged = report − unpriced − priced (duplicate / restated)."""
+    value = _num(a.get(f"{side}_value")) or 0.0
+    priced = _num(a.get(f"priced_{side}_value"))
+    if priced is None:  # an older run: nothing to compare
+        return value, 0.0
+    flagged = value - (_num(a.get(f"unpriced_{side}_value")) or 0.0) - priced
+    return priced, flagged if flagged > 0.5 else 0.0
+
+
+def _side_cell(a: Mapping, side: str, unit: str, quantities: bool, css: str = "") -> str:
+    """A buy / sell cell (the report's value); flagged rows give a "$X priced" note, and a value that is all
+    flagged is muted ("flagged · not in est.")."""
+    priced, flagged = _flagged(a, side)
+    if not flagged:
+        return _money_cell(a.get(f"{side}_value"), css=css, sub=_side_sub(a, side, unit, quantities))
+    tip = _FLAGGED_TIP.format(value=ui.money(a.get(f"{side}_value"), compact=False),
+                              flagged=ui.money(flagged, compact=False), priced=ui.money(priced, compact=False))
+    if priced < 0.5:
+        return _money_cell(a.get(f"{side}_value"), css=css, sub="flagged · not in est.", title=tip, strike=True)
+    return _money_cell(a.get(f"{side}_value"), css=css, sub=f"{ui.money(priced)} priced", title=tip)
+
+
 def _side_sub(a: Mapping, side: str, unit: str, quantities: bool) -> str:
     unpriced = _num(a.get(f"unpriced_{side}_value"))
     value = _num(a.get(f"{side}_value")) or 0.0
@@ -539,46 +639,69 @@ def _side_sub(a: Mapping, side: str, unit: str, quantities: bool) -> str:
     return _units(a.get(f"{side}_quantity"), unit) if quantities else ""
 
 
-def _class_cells(a: Mapping, asset: str, *, total: bool = False) -> List[str]:
-    """Equity / options: buys, sells, net (options with contracts beneath). Treasury: one net cell."""
+NONE_STAGED = "none staged"  # the compact one-column Options group on a day without option trades
+
+
+def _class_cells(a: Mapping, asset: str, *, total: bool = False, compact: bool = False) -> List[str]:
+    """Buys, sells, net per asset class (options and treasuries with contracts / face beneath); ``compact``: the
+    one-column group of a class with no trades on the day."""
+    if compact:
+        return [f'<td class="num grp muted" title="No {ui.esc(asset)} trades staged">{ui.DASH}</td>']
     unit = a.get("unit") or charts.ASSET_UNITS.get(asset, "shares")
     if not total and _report_only(a):
         tip = _REPORT_ONLY_TIP.format(value=ui.money(a.get("gross_value"), compact=False))
-        value = (f'<td class="num muted{{css}}" title="{ui.esc(tip)}">{ui.esc(ui.money(a.get("gross_value")))}'
+        value = (f'<td class="num muted grp" title="{ui.esc(tip)}">{ui.esc(ui.money(a.get("gross_value")))}'
                  f'<span class="sub">in report · not staged</span></td>')
         dash = f'<td class="num" title="{ui.esc(tip)}">{ui.DASH}</td>'
-        if asset == "treasury":
-            return [value.format(css=" grp")]
-        return [value.format(css=" grp"), dash, dash]
-    if asset == "treasury":
-        parts = [f"buys {ui.money(a.get('buy_value'))}" if _num(a.get("buy_value")) else "",
-                 f"sells {ui.money(a.get('sell_value'))}" if _num(a.get("sell_value")) else ""]
-        return [_money_cell(a.get("net_value"), signed=True, css="grp", sub=" · ".join(p for p in parts if p))]
+        return [value, dash, dash]
     quantities = asset != "equity"
     net_sub = "" if total or not _num(a.get("net_pct_tna")) else ui.pct(a.get("net_pct_tna"), signed=True) + " TNA"
     if total and _num(a.get("unstaged_value")):
         net_sub = f"+ {ui.money(a.get('unstaged_value'))} not staged"
-    return [_money_cell(a.get("buy_value"), css="grp", sub=_side_sub(a, "buy", unit, quantities)),
-            _money_cell(a.get("sell_value"), sub=_side_sub(a, "sell", unit, quantities)),
-            _money_cell(a.get("net_value"), signed=True, sub=net_sub)]
+    strike = False
+    (buy_priced, buy_flagged), (sell_priced, sell_flagged) = _flagged(a, "buy"), _flagged(a, "sell")
+    if buy_flagged or sell_flagged:
+        unpriced = (_num(a.get("unpriced_buy_value")) or 0.0) - (_num(a.get("unpriced_sell_value")) or 0.0)
+        priced_net = buy_priced - sell_priced + unpriced
+        net_sub = f"{ui.money(priced_net, signed=True)} priced"
+        strike = buy_priced < 0.5 and sell_priced < 0.5
+    return [_side_cell(a, "buy", unit, quantities, css="grp"), _side_cell(a, "sell", unit, quantities),
+            _money_cell(a.get("net_value"), signed=True, sub=net_sub, strike=strike)]
 
 
-def _fund_row(fund: Mapping, classes: Sequence[str]) -> str:
+_REPORT_PCT_TIP = "The trading report's % of TNA, incl. flagged rows"
+
+
+def _traded_cell(entry: Mapping, *, has_tna: bool = True) -> str:
+    """Priced gross % of TNA (the charts' basis); the report's figure muted beneath when flagged rows differ."""
+    if not has_tna:
+        return f'<td class="num grp">{ui.DASH}</td>'
+    report = _num(entry.get("gross_pct_tna"))
+    priced = _num((entry.get("priced") or {}).get("gross_pct_tna"))
+    if priced is None:
+        return f'<td class="num grp">{ui.esc(ui.pct(report))}</td>'
+    sub = ""
+    if report is not None and abs(report - priced) >= 0.00005:
+        sub = (f'<span class="sub" title="{ui.esc(_REPORT_PCT_TIP)}">report {ui.esc(ui.pct(report))}</span>')
+    return f'<td class="num grp">{ui.esc(ui.pct(priced))}{sub}</td>'
+
+
+def _fund_row(fund: Mapping, classes: Sequence[str], compact: Sequence[str] = ()) -> str:
     cash = fund.get("cash") or {}
     neg = bool(cash.get("negative"))
     post_sub = "" if cash.get("post") is None or _num(cash.get("post_pct_tna")) is None \
         else f"{ui.pct(cash.get('post_pct_tna'))} TNA"
     tna = _num(fund.get("tna")) or None
     tna_cell = (_money_cell(tna) if tna else
-                f'<td class="num muted" title="{ui.esc(_MISSING_TIP.format(what="TNA"))}">no data</td>')
+                f'<td class="num muted" title="{ui.esc(_TNA_TIP)}">no data</td>')
     current_sub = "" if cash.get("custodian_t") is None else f"T {ui.money(cash.get('custodian_t'))}"
     cells = [f'<td class="fund">{ui.esc(fund.get("fund"))}{_flags(fund)}</td>', tna_cell,
              _money_cell(cash.get("current"), css="grp", sub=current_sub),
              _money_cell(cash.get("post"), sub=post_sub, css="neg" if neg else ""),
-             f'<td class="num grp">{ui.esc(ui.pct(fund.get("gross_pct_tna")) if tna else "—")}</td>']
+             _traded_cell(fund, has_tna=bool(tna))]
     for asset in classes:
-        cells += _class_cells(_asset(fund, asset), asset)
-    css = ' class="hl-bad"' if fund.get("impact") == "BREAKS" else ""
+        cells += _class_cells(_asset(fund, asset), asset, compact=asset in compact)
+    css = ' class="hl-bad"' if fund.get("impact") == "BREAKS" and not fund.get("unreliable") else ""
     return f"<tr{css}>{''.join(cells)}</tr>"
 
 
@@ -592,10 +715,8 @@ def _flags(fund: Mapping) -> str:
                else "Estimated post-trade cash is below zero")
         out.append(f'<span class="fm-ico bad" title="{ui.esc(tip)}" aria-label="negative cash">⚠</span>')
     out.append(missing_icon(fund))
-    notes = [str(w) for w in fund.get("warnings") or [] if "below zero" not in str(w).lower()
-             and "negative" not in str(w).lower()]
-    if _num(cash.get("excluded_value")):
-        notes.append(f"{ui.money(cash.get('excluded_value'), compact=False)} of trades left out of the cash estimate.")
+    # The same notes, and so the same count, as the drill-down's "Data notes for FUND (n)".
+    notes = [str(w) for w in fund.get("warnings") or []]
     if notes:
         out.append(f'<span class="fm-ico warn" title="{ui.esc(" | ".join(notes))}" '
                    f'aria-label="{len(notes)} data notes">{len(notes)}</span>')
@@ -608,23 +729,27 @@ def summary_table_html(dashboard: Mapping) -> str:
     if not funds:
         return ""
     cash_date = dashboard.get("cash_date") or "T-1"
-    classes = [a for a in ASSETS if a == "equity" or _has_class(dashboard, a)]
-    group = "".join(f'<th colspan="{1 if a == "treasury" else 3}" class="c grp">{ui.esc(charts.ASSET_LABELS[a])}'
-                    f'{" premium" if a == "options" else ""}</th>' for a in classes)
-    sub = "".join('<th class="num grp">Net</th>' if a == "treasury" else
+    # Equity and options always (options as one compact "none staged" column on a day without option trades);
+    # treasuries when any fund trades them.
+    classes = [a for a in ASSETS if a != "treasury" or _has_class(dashboard, a)]
+    compact = [a for a in classes if a == "options" and not _has_class(dashboard, a)]
+    group = "".join(f'<th colspan="{1 if a in compact else 3}" class="c grp">{ui.esc(charts.ASSET_LABELS[a])}'
+                    f'{" premium" if a == "options" and a not in compact else ""}</th>' for a in classes)
+    sub = "".join(f'<th class="num grp"><span>{NONE_STAGED}</span></th>' if a in compact else
                   '<th class="num grp">Buys</th><th class="num">Sells</th><th class="num">Net</th>' for a in classes)
     head = (f'<thead><tr class="top"><th rowspan="2">Fund</th><th rowspan="2" class="num">TNA</th>'
-            f'<th colspan="2" class="c grp">Cash</th><th rowspan="2" class="num grp">Traded<br><span>% TNA</span></th>'
+            f'<th colspan="2" class="c grp">Cash</th>'
+            f'<th rowspan="2" class="num grp">Traded<br><span>% TNA, priced</span></th>'
             f'{group}</tr><tr><th class="num grp">Current<br><span>{ui.esc(cash_date)} close</span></th>'
             f'<th class="num">Post-trade<br><span>estimate</span></th>{sub}</tr></thead>')
-    body = "".join(_fund_row(f, classes) for f in funds)
-    body += _totals_row(dashboard, classes)
+    body = "".join(_fund_row(f, classes, compact) for f in funds)
+    body += _totals_row(dashboard, classes, compact)
     table = (f'<div class="fm-tablewrap fm-sumwrap"><table class="fm-table fm-summary">{head}<tbody>{body}</tbody>'
              f"</table></div>")
     return ui.panel(table + definitions_html(dashboard))
 
 
-def _totals_row(dashboard: Mapping, classes: Sequence[str]) -> str:
+def _totals_row(dashboard: Mapping, classes: Sequence[str], compact: Sequence[str] = ()) -> str:
     t = dashboard.get("totals") or {}
     cash_funds = t.get("cash_funds")
     negative = t.get("funds_negative_cash") or 0
@@ -634,9 +759,9 @@ def _totals_row(dashboard: Mapping, classes: Sequence[str]) -> str:
              _money_cell(t.get("tna"), sub=tna_sub),
              _money_cell(t.get("cash"), css="grp", sub=f"{cash_funds} funds" if cash_funds else ""),
              _money_cell(t.get("post_cash"), sub=f"{negative} below 0" if negative else ""),
-             f'<td class="num grp">{ui.esc(ui.pct(t.get("gross_pct_tna")))}</td>']
+             _traded_cell(t)]
     for asset in classes:
-        cells += _class_cells((t.get("assets") or {}).get(asset) or {}, asset, total=True)
+        cells += _class_cells((t.get("assets") or {}).get(asset) or {}, asset, total=True, compact=asset in compact)
     return f'<tr class="total">{"".join(cells)}</tr>'
 
 
@@ -648,13 +773,19 @@ def definitions_html(dashboard: Mapping) -> str:
              ("Trade value", d.get("trade_value")), ("Net", d.get("net_value")),
              ("Post-trade cash (estimate)", d.get("post_cash"))]
     text = "".join(f"<p><b>{ui.esc(label)}.</b> {ui.esc(body)}</p>" for label, body in notes if body)
-    text += ("<p>Amounts are compact ($M = millions); hover a figure for the exact amount. Option buys and sells are "
-             "premium, with contracts beneath (<i>unpriced</i>: no usable price, so the report's figure is contracts "
-             "× multiplier, not dollars); treasuries are at price per 100 face. <i>In report · not staged</i>: the "
-             "trading report shows a value from the ex-post share columns but there are no staged trade rows (the "
-             "drill-down lists those position changes). After a fund's name, ⚠ marks negative estimated cash, ∅ "
-             "missing custodian TNA or cash, and an amber number counts its data notes (duplicate rows, trades left "
-             "out of the estimate); hover them for the details, or see the fund drill-down.</p>")
+    text += ("<p>Amounts are compact ($M = millions); hover a figure for the exact amount. Buys and sells are the "
+             "trading report's; where it counts flagged rows (a duplicate row, or a staged quantity that only "
+             "restates the position held) the priced figure the tiles, charts and cash estimate use is beneath it "
+             "(<i>$X priced</i>), and a value that is all flagged is muted (<i>flagged · not in est.</i>). "
+             "<i>Traded</i> is the priced buys + sells over TNA, with the report's figure beneath when it differs. "
+             "Option buys and sells are premium, with contracts beneath (<i>unpriced</i>: no usable price, so the "
+             "report's figure is contracts × multiplier, not dollars); treasuries are at price per 100 face, with "
+             "face beneath. <i>In report · not staged</i>: the trading report shows a value from the ex-post share "
+             "columns but there are no staged trade rows (the drill-down lists those position changes). After a "
+             "fund's name, ⚠ marks negative estimated cash; ∅ missing data (grey: T-1 TNA or cash, so % of TNA "
+             "or the cash estimate is not shown; amber: trade-date data, so the fund's rule results rest on missing "
+             "data and are not counted); an amber number counts its data notes, the same notes as in its "
+             "drill-down.</p>")
     return f'<details class="fm-foot fm-defs" open><summary class="t">Definitions</summary>{text}</details>'
 
 
