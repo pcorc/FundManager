@@ -1273,15 +1273,19 @@ def generate_compliance_reports(
         gics_mapping=gics_mapping,
     )
 
+    # Report only the files this call wrote: export_to_excel writes nothing without sheet data,
+    # and a failed PDF leaves no file behind.
+    excel_file_path = str(report.file_path) if report.sheet_data else None
     pdf_file_path = None
     if create_pdf:
         try:
-            pdf_file_path = str(Path(output_dir) / f"{report.file_stem}.pdf")
-            ComplianceReportPDF(report.results, pdf_file_path, allowed_tests=test_functions)
+            pdf_target = str(Path(output_dir) / f"{report.file_stem}.pdf")
+            ComplianceReportPDF(report.results, pdf_target, allowed_tests=test_functions)
+            pdf_file_path = pdf_target
         except RuntimeError as exc:  # pragma: no cover - optional dependency missing
             logger.warning("PDF generation skipped: %s", exc)
         except Exception as exc:
             # exc_info=True so the actual fpdf2 stack trace surfaces in the log.
             logger.error("PDF generation failed: %s", exc, exc_info=True)
 
-    return GeneratedComplianceReport(excel_path=str(report.file_path), pdf_path=pdf_file_path)
+    return GeneratedComplianceReport(excel_path=excel_file_path, pdf_path=pdf_file_path)

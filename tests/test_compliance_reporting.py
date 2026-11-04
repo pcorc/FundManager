@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
@@ -15,7 +16,9 @@ from unittest import mock
 os.environ.setdefault("DB_CONNECTION_STRING", "sqlite:///:memory:")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from reporting import compliance_reporter  # noqa: E402
+from openpyxl import Workbook, load_workbook  # noqa: E402
+
+from reporting import compliance_reporter, compliance_reporting, trade_compliance_reporter  # noqa: E402
 from reporting.compliance_reporting import _PDF_SECTIONS, ComplianceReportPDF  # noqa: E402
 
 IRS = "diversification_IRS_check"
@@ -94,6 +97,60 @@ class StackedFileNameTests(unittest.TestCase):
     def test_single_day_keeps_the_range_form(self):
         """Never the daily report's name, which the same run may also write into the same folder."""
         self.assertEqual(self._stem((date(2026, 10, 30),), output_tag="t"), "compliance_results_t_2026-10-30_to_2026-10-30")
+
+
+class ReportedPathsTests(unittest.TestCase):
+    """D21: a report names only the files it wrote, and the trading merge skips a missing input."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+
+    def _generate(self, sheet_data, pdf_error=None):
+        report = SimpleNamespace(sheet_data=sheet_data, file_path=self.tmp / "c_2026-10-30.xlsx",
+                                 file_stem="c_2026-10-30", results={})
+        with mock.patch.object(compliance_reporting, "ComplianceReport", return_value=report),                 mock.patch.object(compliance_reporting, "ComplianceReportPDF", side_effect=pdf_error) as pdf:
+            generated = compliance_reporting.generate_compliance_reports({}, "2026-10-30", str(self.tmp))
+        return generated, pdf
+
+    def test_written_files_are_reported(self):
+        generated, pdf = self._generate({"Summary": object()})
+        self.assertEqual(generated.excel_path, str(self.tmp / "c_2026-10-30.xlsx"))
+        self.assertEqual(generated.pdf_path, str(self.tmp / "c_2026-10-30.pdf"))
+        self.assertEqual(pdf.call_args.args[1], generated.pdf_path)
+
+    def test_failed_pdf_is_not_reported(self):
+        with self.assertLogs(compliance_reporting.logger, "ERROR"):
+            generated, _ = self._generate({"Summary": object()}, pdf_error=ValueError("fpdf broke"))
+        self.assertIsNone(generated.pdf_path)
+        self.assertIsNotNone(generated.excel_path)
+
+    def test_workbook_without_sheets_is_not_reported(self):
+        generated, _ = self._generate({})
+        self.assertIsNone(generated.excel_path)
+
+    def _workbook(self, name, sheet):
+        workbook = Workbook()
+        workbook.active.title = sheet
+        workbook.save(self.tmp / name)
+        return str(self.tmp / name)
+
+    def _combine(self, compliance_excel):
+        return trade_compliance_reporter.combine_trading_and_compliance_reports(
+            trading_report=SimpleNamespace(excel_path=self._workbook("t.xlsx", "Summary"), pdf_path=None),
+            compliance_report=SimpleNamespace(excel_path=compliance_excel, pdf_path=None),
+            report_date="2026-10-30", output_dir=str(self.tmp), file_name_prefix="combined")
+
+    def test_merge_skips_a_missing_workbook(self):
+        with self.assertLogs(trade_compliance_reporter.logger, "WARNING"):
+            self.assertIsNone(self._combine(str(self.tmp / "never_written.xlsx")))
+        self.assertFalse((self.tmp / "combined_2026-10-30.xlsx").exists())
+
+    def test_merge_appends_the_compliance_sheets(self):
+        combined = self._combine(self._workbook("c.xlsx", "IRS_Diversification"))
+        with open(combined.excel_path, "rb") as handle:  # a closed handle, so the temp dir can be removed
+            self.assertEqual(load_workbook(handle).sheetnames, ["Summary", "IRS_Diversification"])
 
 
 if __name__ == "__main__":

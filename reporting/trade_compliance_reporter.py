@@ -1,5 +1,6 @@
 """Orchestration utilities for trading compliance reporting."""
 
+import logging
 from copy import copy as copy_style
 from datetime import date, datetime
 from pathlib import Path
@@ -16,6 +17,8 @@ from reporting.trade_compliance_reporting import (
     generate_trading_excel_report,
     generate_trading_pdf_report,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def build_trading_compliance_reports(
@@ -98,6 +101,11 @@ def combine_trading_and_compliance_reports(
 def _merge_excel_workbooks(
     trading_path: Path, compliance_path: Path, output_path: Path
 ) -> Optional[str]:
+    missing = [str(p) for p in (trading_path, compliance_path) if not Path(p).is_file()]
+    if missing:
+        logger.warning("Combined trading workbook skipped; missing input: %s", ", ".join(missing))
+        return None
+
     trading_wb = load_workbook(trading_path)
     compliance_wb = load_workbook(compliance_path)
 
