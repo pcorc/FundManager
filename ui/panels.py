@@ -103,7 +103,10 @@ def results_panel(run_dir: Path, user: str, key: str, day: Optional[str] = None)
             st.download_button(f"{report.day} · {report.label} ({kind}) · {path.name}", data=_reader(path),
                                file_name=path.name, mime=_MIME.get(report.kind, "application/octet-stream"),
                                key=f"{key}-file-{i}", on_click="ignore")
-        _publish_controls(run_dir, user, key)
+        if record.status in ("ok", "ok with errors"):  # never publish partial reports
+            _publish_controls(run_dir, user, key)
+        else:
+            st.caption("Publishing is only offered for runs that finished successfully.")
     elif record.status not in ("running", "incomplete"):
         st.info("This run produced no report files.")
     with st.expander("Run log (tail)"):

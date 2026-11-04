@@ -72,6 +72,8 @@ def load_record(run_dir: Path, active: Optional[Path] = None) -> Optional[RunRec
     request = _try_request(run_dir)
     exit_code = meta.get("exit_code", result.get("exit_code"))
     errors = [runner.redact(e) for e in result.get("errors") or [] if e]
+    if meta.get("error"):  # e.g. the worker could not be launched, so there is no result.json
+        errors.insert(0, runner.redact(str(meta["error"])))
     files = report_files(load_result(run_dir)) if result else []
     if request is not None:
         as_of = request.start_date.isoformat()

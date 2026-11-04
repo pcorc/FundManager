@@ -189,6 +189,10 @@ class RunLifecycleTest(RunnerTestCase):
         self.assertIsNone(runner.read_lock(self.root))
         meta = runner.read_json(next(self.root.iterdir()) / runner.META)
         self.assertIn("Could not start the worker", meta["error"])
+        from ui import history
+        record = history.load_record(next(self.root.iterdir()))
+        self.assertEqual(record.status, "failed")
+        self.assertTrue(record.errors and "Could not start the worker" in record.errors[0])
 
 
 class LongPathTest(RunnerTestCase):

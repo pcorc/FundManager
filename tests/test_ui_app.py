@@ -353,6 +353,15 @@ class OtherPagesTest(AppTestCase):
         self.assertEqual(at.selectbox(key="rep_day").options, [str(new_run.default_as_of())])  # the report date
         self.assertGreaterEqual(len(at.download_button), 2)
 
+    def test_publish_is_not_offered_for_an_unsuccessful_run(self) -> None:
+        with mock.patch.dict(os.environ, {"FUNDMANAGER_UI_PUBLISH_ROOT": str(self.tmp / "published")}):
+            at = self.app()
+            run_dir = self.run_once(at)
+            runner.update_meta(run_dir, cancelled=True)
+            self.ok(at.run())
+            self.assertFalse([b for b in at.button if b.key == f"nr-publish-{run_dir.name}"])
+            self.assertIn("Publishing is only offered for runs that finished successfully.", self.texts(at.caption))
+
     def test_publish_confirmation_does_not_carry_over_to_another_run(self) -> None:
         with mock.patch.dict(os.environ, {"FUNDMANAGER_UI_PUBLISH_ROOT": str(self.tmp / "published")}):
             at = self.app()
