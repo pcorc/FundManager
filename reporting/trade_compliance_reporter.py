@@ -84,11 +84,13 @@ def combine_trading_and_compliance_reports(
             output_path / f"{file_name_prefix}_{date_str}.xlsx",
         )
 
+    # Merge whenever an ex-post compliance pass ran, even if its PDF failed to render
+    # (pdf_path None): _merge_pdfs keeps the trading pages so the combined PDF still exists.
     combined_pdf = None
-    if trading_pdf and compliance_pdf:
+    if trading_pdf and compliance_report is not None:
         combined_pdf = _merge_pdfs(
             Path(trading_pdf),
-            Path(compliance_pdf),
+            Path(compliance_pdf) if compliance_pdf else None,
             output_path / f"{file_name_prefix}_{date_str}.pdf",
         )
 
@@ -139,12 +141,14 @@ def _append_sheet(source_sheet, target_wb):
         target_sheet.merge_cells(str(merged_cell))
 
 
-def _merge_pdfs(trading_pdf: Path, compliance_pdf: Path, output_path: Path) -> Optional[str]:
+def _merge_pdfs(
+    trading_pdf: Path, compliance_pdf: Optional[Path], output_path: Path
+) -> Optional[str]:
     """Merge the trading-compliance and ex-post compliance PDFs into one combined file.
 
-    Skips any source PDF that doesn't exist on disk (the compliance PDF can fail to
-    render and be logged as a swallowed warning) so the trading run still produces
-    a useful combined output. Returns None if no source PDFs were available.
+    Skips any source PDF that is None or doesn't exist on disk (the compliance PDF can
+    fail to render, which is logged and reported as pdf_path None) so the trading run
+    still produces a useful combined output. Returns None if no source PDFs were available.
     """
     available = [p for p in (trading_pdf, compliance_pdf) if p is not None and Path(p).exists()]
     if not available:

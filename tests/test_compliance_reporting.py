@@ -17,6 +17,7 @@ os.environ.setdefault("DB_CONNECTION_STRING", "sqlite:///:memory:")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from openpyxl import Workbook, load_workbook  # noqa: E402
+from PyPDF2 import PdfReader, PdfWriter  # noqa: E402
 
 from reporting import compliance_reporter, compliance_reporting, trade_compliance_reporter  # noqa: E402
 from reporting.compliance_reporting import _PDF_SECTIONS, ComplianceReportPDF  # noqa: E402
@@ -151,6 +152,35 @@ class ReportedPathsTests(unittest.TestCase):
         combined = self._combine(self._workbook("c.xlsx", "IRS_Diversification"))
         with open(combined.excel_path, "rb") as handle:  # a closed handle, so the temp dir can be removed
             self.assertEqual(load_workbook(handle).sheetnames, ["Summary", "IRS_Diversification"])
+
+    def _pdf(self, name, pages):
+        writer = PdfWriter()
+        for _ in range(pages):
+            writer.add_blank_page(width=72, height=72)
+        with open(self.tmp / name, "wb") as handle:
+            writer.write(handle)
+        return str(self.tmp / name)
+
+    def _combine_pdfs(self, compliance_report):
+        return trade_compliance_reporter.combine_trading_and_compliance_reports(
+            trading_report=SimpleNamespace(excel_path=None, pdf_path=self._pdf("t.pdf", 2)),
+            compliance_report=compliance_report,
+            report_date="2026-10-30", output_dir=str(self.tmp), file_name_prefix="combined")
+
+    def _pages(self, path):
+        with open(path, "rb") as handle:
+            return len(PdfReader(handle).pages)
+
+    def test_failed_compliance_pdf_still_combines_the_trading_pages(self):
+        combined = self._combine_pdfs(SimpleNamespace(excel_path=None, pdf_path=None))
+        self.assertEqual(self._pages(combined.pdf_path), 2)
+
+    def test_combined_pdf_appends_the_compliance_pages(self):
+        combined = self._combine_pdfs(SimpleNamespace(excel_path=None, pdf_path=self._pdf("c.pdf", 3)))
+        self.assertEqual(self._pages(combined.pdf_path), 5)
+
+    def test_no_ex_post_pass_means_no_combined_pdf(self):
+        self.assertIsNone(self._combine_pdfs(None))
 
 
 if __name__ == "__main__":
