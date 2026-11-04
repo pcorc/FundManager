@@ -84,14 +84,14 @@ def build_compliance_reports_for_range(
     aggregated_results = OrderedDict(normalized_runs)
     first_date = next(iter(aggregated_results))
     last_date = next(reversed(aggregated_results))
-    # generate_compliance_reports appends _{last_date} again (current file naming).
-    prefix = f"compliance_results_{first_date}" if first_date == last_date else f"compliance_results_{first_date}_to_{last_date}"
+    # Always "_to_" (even for one day) so the stacked file never overwrites that day's daily report.
+    prefix = f"compliance_results_{output_tag}" if output_tag else "compliance_results"
 
     return generate_compliance_reports(
         results=aggregated_results,
         report_date=last_date,
         output_dir=output_dir,
-        file_name_prefix=prefix,
+        file_stem=f"{prefix}_{first_date}_to_{last_date}",
         test_functions=test_functions,
         gics_mapping=gics_mapping,
         create_pdf=create_pdf,

@@ -7,11 +7,15 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 os.environ.setdefault("DB_CONNECTION_STRING", "sqlite:///:memory:")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from reporting import compliance_reporter  # noqa: E402
 from reporting.compliance_reporting import _PDF_SECTIONS, ComplianceReportPDF  # noqa: E402
 
 IRS = "diversification_IRS_check"
@@ -63,6 +67,33 @@ class IrcNonVitColumnTests(unittest.TestCase):
         etf = {IRS: {"is_compliant": True}}
         for label in ("Overall Status", "Condition 55", "Top 1 Exposure", "Top 4 Exposure"):
             self.assertEqual(self._cell(etf, label), "N/A", label)
+
+
+class StackedFileNameTests(unittest.TestCase):
+    """D18: the stacked workbook is compliance_results[_<tag>]_<first>_to_<last>, the last date not doubled."""
+
+    @staticmethod
+    def _day():
+        result = SimpleNamespace(compliance_results={IRS: {"is_compliant": True}})
+        return SimpleNamespace(fund_results={"KNG": result})
+
+    def _stem(self, days, **kwargs):
+        with mock.patch.object(compliance_reporter, "generate_compliance_reports") as generate:
+            compliance_reporter.build_compliance_reports_for_range(
+                [(day, self._day()) for day in days], "out", **kwargs)
+        return generate.call_args.kwargs["file_stem"]
+
+    def test_range_with_tag(self):
+        days = (date(2026, 10, 30), date(2026, 10, 26))
+        self.assertEqual(self._stem(days, output_tag="cefs_ts"), "compliance_results_cefs_ts_2026-10-26_to_2026-10-30")
+
+    def test_range_without_tag(self):
+        days = (date(2026, 10, 26), date(2026, 10, 30))
+        self.assertEqual(self._stem(days), "compliance_results_2026-10-26_to_2026-10-30")
+
+    def test_single_day_keeps_the_range_form(self):
+        """Never the daily report's name, which the same run may also write into the same folder."""
+        self.assertEqual(self._stem((date(2026, 10, 30),), output_tag="t"), "compliance_results_t_2026-10-30_to_2026-10-30")
 
 
 if __name__ == "__main__":

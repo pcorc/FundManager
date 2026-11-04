@@ -449,12 +449,14 @@ class ComplianceReport:
         output_dir: str,
         *,
         file_name_prefix: str = "compliance_results",
+        file_stem: Optional[str] = None,
         test_functions: Optional[Iterable[str]] = None,
         gics_mapping: Optional[pd.DataFrame] = None,
     ) -> None:
         self.report_date = normalize_report_date(report_date)
         self.output_dir = ensure_dir(output_dir)
-        self.file_path = self.output_dir / f"{file_name_prefix}_{self.report_date}.xlsx"
+        self.file_stem = file_stem or f"{file_name_prefix}_{self.report_date}"
+        self.file_path = self.output_dir / f"{self.file_stem}.xlsx"
 
         self.gics_mapping = gics_mapping.copy() if isinstance(gics_mapping, pd.DataFrame) else pd.DataFrame()
         self.test_functions = _selected_tests(test_functions) or None
@@ -1254,17 +1256,19 @@ def generate_compliance_reports(
     output_dir: str,
     *,
     file_name_prefix: str = "compliance_results",
+    file_stem: Optional[str] = None,
     test_functions: Optional[Iterable[str]] = None,
     gics_mapping: Optional[pd.DataFrame] = None,
     create_pdf: bool = True,
 ) -> GeneratedComplianceReport:
-    """Create Excel and PDF compliance reports."""
+    """Create Excel and PDF compliance reports named ``<file_stem>`` (default ``<prefix>_<report_date>``)."""
 
     report = ComplianceReport(
         results=results,
         report_date=report_date,
         output_dir=output_dir,
         file_name_prefix=file_name_prefix,
+        file_stem=file_stem,
         test_functions=test_functions,
         gics_mapping=gics_mapping,
     )
@@ -1272,7 +1276,7 @@ def generate_compliance_reports(
     pdf_file_path = None
     if create_pdf:
         try:
-            pdf_file_path = str(Path(output_dir) / f"{file_name_prefix}_{report.report_date}.pdf")
+            pdf_file_path = str(Path(output_dir) / f"{report.file_stem}.pdf")
             ComplianceReportPDF(report.results, pdf_file_path, allowed_tests=test_functions)
         except RuntimeError as exc:  # pragma: no cover - optional dependency missing
             logger.warning("PDF generation skipped: %s", exc)
