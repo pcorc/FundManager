@@ -57,7 +57,7 @@ GRACE_SECONDS = 5.0  # between terminate() and kill()
 DEFAULT_TIMEOUT_MINUTES = 120.0
 _STALE_UNREADABLE_LOCK_SECONDS = 30.0  # a lock file that never became valid JSON
 RETRIES, RETRY_DELAY = 20, 0.025  # for Windows sharing violations (a reader has the file open)
-RETRY_SECONDS = 2.0  # how long retry() and read_json() keep trying through sharing violations
+RETRY_SECONDS = 5.0  # how long retry() and read_json() keep trying through sharing violations
 
 _PROCESSES: Dict[str, subprocess.Popen] = {}  # run folder -> worker started by this UI process
 _GUARD = threading.RLock()  # serialises meta/lock updates between sessions and watcher threads
@@ -193,7 +193,7 @@ def read_json(path: Path) -> Optional[dict]:
 
 def _write_json(path: Path, data: dict) -> None:
     """Write atomically (temp file + replace, retried while a reader holds ``path`` open)."""
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex[:12]}.tmp")  # never reused: a scanner may still hold the last one
     tmp.write_text(json.dumps(data, indent=1, default=str), encoding="utf-8")
     try:
         retry(os.replace, tmp, path)

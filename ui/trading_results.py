@@ -132,7 +132,7 @@ def impact_chip(impact: Optional[str], worsens: bool = False, missing: bool = Fa
     """The fund's overall impact; ``missing`` (its results rest on missing data): "∅ Data missing" instead."""
     css, text = IMPACT_STYLE.get(str(impact), ("na", str(impact or "—")))
     if impact == "STILL_FAILS" and worsens:
-        css, text = "still worse", "Worsens"
+        css, text = "still worse", "Breach deepens"
     if missing:
         tip = (f"The results would read '{text}', but they rest on missing trade-date data (see the fund's data "
                "notes), so they are not counted as a break, cure or pass")

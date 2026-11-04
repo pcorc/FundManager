@@ -287,8 +287,9 @@ def _seconds_between(start: Optional[str], end: Optional[str]) -> Optional[float
         return None
 
 
-def fund_day_seconds(records: List[RunRecord]) -> List[float]:
-    """Seconds per fund-day of the successful runs in ``records`` (for the New run time estimate).
+def fund_day_seconds(records: List[RunRecord], trading: Optional[bool] = None) -> List[float]:
+    """Seconds per fund-day of the successful runs in ``records`` (for the preview time estimates);
+    ``trading`` True / False keeps only trading / end-of-day runs (a trading check is far quicker per fund).
 
     A run's fund-days are the ``total_funds`` of its per-day summaries (a trading day counts its ex-ante
     and ex-post passes); runs without a duration or a fund count are left out.
@@ -296,6 +297,8 @@ def fund_day_seconds(records: List[RunRecord]) -> List[float]:
     rates = []
     for record in records:
         if record.status not in ("ok", "ok with errors"):
+            continue
+        if trading is not None and is_trading(record.run_dir) != trading:
             continue
         seconds = _seconds_between(record.started, record.finished)
         summaries = (runner.read_json(record.run_dir / runner.RESULT) or {}).get("summaries") or {}

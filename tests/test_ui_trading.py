@@ -280,7 +280,7 @@ class RoundOneBuildersTest(unittest.TestCase):
         self.assertIn("Sum Large Securities % 60.0% → 61.5%", html)  # the key figure in the hover
         self.assertIn('data-fm-jump="WRS" data-fm-rule="0"', html)
         self.assertIn('aria-label="missing data">∅</span>', html)  # PD2
-        self.assertIn("Worsens", html)
+        self.assertIn("Breach deepens", html)
         self.assertEqual([r["fund"] for r in self.d["matrix"]["rows"]][:2], ["BRK", "WRS"])
         self.assertIn("the trades make it worse", tr.legend_html(self.d))
         risk = tr.rules_at_risk_html(self.d)
@@ -486,7 +486,7 @@ class RoundTwoBuildersTest(unittest.TestCase):
         fund = dict(self.funds["OK"], status_change="UNCHANGED", violations_before=1, violations_after=1,
                     impact="STILL_FAILS", worsens=True)
         head = dd.fund_header_html(fund)
-        self.assertIn("Worsens", head)
+        self.assertIn("Breach deepens", head)
         self.assertIn("Violations unchanged (1 → 1)", head)
         self.assertNotIn("Violations<b>", head)
         self.assertEqual(dd.status_change_text(dict(fund, violations_after=3)),

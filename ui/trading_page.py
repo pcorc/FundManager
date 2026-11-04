@@ -50,6 +50,7 @@ KEPT_KEYS = (DATE_KEY, KEYS.funds, KEYS.rules, KEYS.filter, KEYS.pdf, KEYS.email
 STAGED_RETRY_SECONDS = 60
 STAGED_KEY = "tc_staged"  # {date: lookup}: this session's copy, so a dashboard click never waits on the DB
 STAGED_TTL = 300
+TRADING_BASE_SECONDS, TRADING_FUND_SECONDS = 10.0, 1.5  # estimate before any trading run has finished
 EX_ANTE_TEXT = ("Ex-ante: the holdings as they stand on the trade date, before the trades (the checks use the "
                 "trade-date holdings and custodian data; the dashboard's cash estimate starts from the previous "
                 "business day's close).")
@@ -226,8 +227,10 @@ def preview_html(catalog: dict, c: "nr.Choices", staged: Sequence[str], problem:
              f'<span>{ui.esc(EX_POST_TEXT)}</span></div></div>')
     estimate = None
     if counts.fund_days and counts.days:
-        rates = preview._history_rates(str(runner.output_root()))
+        rates = preview._history_rates(str(runner.output_root()), trading=True)
         seconds, from_history = preview.estimate_seconds(counts.fund_days, counts.days, rates)
+        if not from_history:  # the end-of-day heuristic overstates a trading check about tenfold
+            seconds = TRADING_BASE_SECONDS + TRADING_FUND_SECONDS * counts.fund_days
         estimate = (seconds, from_history, len(rates))
     body += preview.sentence(counts, estimate)
     if problem:

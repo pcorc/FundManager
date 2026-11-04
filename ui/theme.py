@@ -70,6 +70,7 @@ hr {{ border-color: var(--fm-border) !important; opacity: .7; }}
 .fm-brand-sub {{ color: var(--fm-faint); font-size: .8rem; margin-left: .15rem; }}
 .st-key-fm_nav [data-testid="stButtonGroup"] button {{ min-width: 7.5rem; }}
 @media (max-width: 1440px) {{ .fm-brand-sub {{ display: none; }} .st-key-fm_nav [data-testid="stButtonGroup"] button {{ min-width: 6rem; }} }}
+@media (max-width: 1100px) {{ .st-key-fm_nav [data-testid="stButtonGroup"] button {{ min-width: 0; padding: 0 .55rem; }} }}
 .fm-page-head {{ margin: .4rem 0 1.1rem; }}
 .fm-page-head h1 {{ font-size: 1.5rem; font-weight: 650; margin: 0; color: var(--fm-text); }}
 .fm-page-head p {{ margin: .2rem 0 0; color: var(--fm-muted); font-size: .92rem; }}
@@ -507,7 +508,7 @@ table.fm-summary tr.total td:first-child { background: var(--fm-surface-2); }
 .fm-charts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
 @container (min-width: 620px) { .fm-charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fm-charts > .fm-chart:nth-child(3) { grid-column: 1 / -1; } }
-@container (min-width: 860px) { .fm-charts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@container (min-width: 1100px) { .fm-charts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .fm-charts > .fm-chart:nth-child(3) { grid-column: auto; } }
 .fm-chart { margin: 0; background: var(--fm-surface); border: 1px solid var(--fm-border); border-radius: 14px;
   padding: .8rem .8rem .7rem; box-shadow: var(--fm-shadow); min-width: 0; }

@@ -31,7 +31,7 @@ ALL_FUNDS_LABEL = "All funds with proposed trades"
 FILTER_LABEL = "Funds by rule (failing or cured)"
 _SHOWN_FIRST = ("BREAKS", "STILL_FAILS", "FAILS", "ERROR", "CURES")
 # The trading report's status_change compares the fund's overall PASS / FAIL before and after; the header adds the
-# violation counts, so "unchanged" never reads as "nothing happens" beside a "Worsens" chip (a failing rule can get
+# violation counts, so "unchanged" never reads as "nothing happens" beside a "Breach deepens" chip (a failing rule can get
 # worse with the count and the overall status unchanged).
 _CHANGE_TEXT = {"OUT_OF_COMPLIANCE": "Goes out of compliance", "INTO_COMPLIANCE": "Comes into compliance",
                 "STILL_IN_BREACH": "Still in breach"}

@@ -113,9 +113,10 @@ def format_duration(seconds: float) -> str:
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _history_rates(root: str) -> List[float]:
-    """Seconds per fund-day of the recent successful runs under ``root`` (cached briefly: it reads every folder)."""
-    return history.fund_day_seconds(history.list_runs(Path(root), limit=HISTORY_RUNS))
+def _history_rates(root: str, trading: bool = False) -> List[float]:
+    """Seconds per fund-day of the recent successful end-of-day (or ``trading``) runs under ``root``
+    (cached briefly: it reads every folder)."""
+    return history.fund_day_seconds(history.list_runs(Path(root), limit=HISTORY_RUNS), trading=trading)
 
 
 def _plural(n: int, word: str) -> str:

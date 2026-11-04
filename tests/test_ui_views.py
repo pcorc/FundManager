@@ -239,6 +239,8 @@ class HistoryViewsTest(unittest.TestCase):
                                    "summaries": {"2026-10-29": {"total_funds": 2}, "2026-10-30": {"total_funds": 4}}})
         record = history.load_record(self.run_dir)
         self.assertEqual(history.fund_day_seconds([record]), [10.0])
+        self.assertEqual(history.fund_day_seconds([record], trading=False), [10.0])  # no trading request
+        self.assertEqual(history.fund_day_seconds([record], trading=True), [])
         self.write(runner.META, {"user": "u", "started": "2026-11-03T10:00:00", "finished": "2026-11-03T10:01:00",
                                  "exit_code": 1})
         self.assertEqual(history.fund_day_seconds([history.load_record(self.run_dir)]), [])  # failed runs left out
