@@ -22,6 +22,8 @@ return one ``DayView``; ``processing.worker`` writes them to ``views.json``::
       # trading day only:
       "compliance_ex_ante": {fund: {rule_key: RuleView}},
       "trading": TradingView,
+      "dashboard": Dashboard | None,                    # the Trading Compliance tab (reporting.trading_dashboard)
+      "dashboard_error"?: str,                          # why the dashboard could not be built (it is then None)
     }
 
     RuleView = {
@@ -114,6 +116,7 @@ from reporting.trade_compliance_reporting import (
     _status_class,
     _trade_activity_records,
 )
+from reporting.trading_dashboard import build_dashboard
 from services.compliance_checker import GICS_CONCENTRATION_THRESHOLD, RULE_KEYS, RULE_LABELS
 
 __all__ = ["SCHEMA_VERSION", "build_day_view", "build_trading_view", "compliance_views", "holdings_views",
@@ -176,7 +179,11 @@ def build_trading_view(
     day: date | datetime | str,
     compliance_tests: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
-    """The trading ``DayView``: ex-post (and ex-ante) rules plus the ex-ante vs ex-post comparison."""
+    """The trading ``DayView``: ex-post (and ex-ante) rules plus the ex-ante vs ex-post comparison.
+
+    A dashboard that cannot be built leaves ``dashboard`` None and its reason in ``dashboard_error``;
+    the rest of the view is still returned.
+    """
     day_str = normalize_report_date(day)
     ante, post = _fund_results(results_ex_ante), _fund_results(results_ex_post)
     compliance = compliance_views(_payload(post, "compliance_results"), day_str, compliance_tests)
@@ -184,13 +191,22 @@ def build_trading_view(
     errors = _fund_errors(ante, "ex-ante: ")
     for fund, messages in _fund_errors(post, "ex-post: ").items():
         errors.setdefault(fund, []).extend(messages)
+    funds = sorted(set(ante) | set(post))
+    rules = _used_rules({**compliance_ex_ante, **compliance})
     view = {
-        "kind": "trading", "date": day_str, "funds": sorted(set(ante) | set(post)), "fund_errors": errors,
+        "kind": "trading", "date": day_str, "funds": funds, "fund_errors": errors,
         "compliance": compliance, "compliance_summary": _compliance_summary(compliance),
         "compliance_ex_ante": compliance_ex_ante,
         "trading": trading_view(comparison_data or {}),
-        "rules": _used_rules({**compliance_ex_ante, **compliance}),
+        "rules": rules,
     }
+    try:
+        view["dashboard"] = to_jsonable(build_dashboard(
+            comparison_data, compliance_ex_ante, compliance, day=day_str, funds=funds, fund_errors=errors,
+            rules=rules))
+    except Exception as exc:  # the dashboard is extra: never lose the rest of the view over it
+        view["dashboard"] = None
+        view["dashboard_error"] = f"{type(exc).__name__}: {exc}"
     return to_jsonable(view)
 
 
