@@ -26,7 +26,9 @@ FOOTNOTES = {
         "Compliance Conditions:",
         "Condition 40 Act 1: 75% of the fund must be invested in diversified assets.",
         "Condition 40 Act 2a: No single issuer in the 75% can exceed 5% of total assets.",
-        "Condition 40 Act 2b: No single issuer in the 75% can exceed 10% of the issuer's voting securities."
+        "Condition 40 Act 2b: No single issuer in the 75% can exceed 10% of the issuer's voting securities.",
+        "Registration Match: FAIL only when a fund registered as diversified is not operating as diversified; "
+        "a fund registered as non-diversified may operate either way."
     ],
 
     "irs": [

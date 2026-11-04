@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+import copy
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -82,6 +83,7 @@ class TradingComplianceParameters:
     compliance_tests: List[str]
     create_pdf: bool
     output_tag: str | None
+    send_email: bool = True
 
 
 @dataclass(frozen=True)
@@ -192,6 +194,8 @@ def run_trading_mode(
     emit_progress(on_progress, "process", message="ex_ante")
     results_ex_ante = _run_operations(registry, ex_ante_store, ["compliance"], "ex_ante", params.compliance_tests,
                                       on_progress=on_progress)
+    # The ex-post pass re-populates fund.data on these same Fund objects: keep the ex-ante view.
+    ex_ante_funds = {name: copy.copy(fund) for name, fund in registry.items()}
     emit_progress(on_progress, "process", message="ex_post")
     results_ex_post = _run_operations(registry, ex_post_store, ["compliance"], "ex_post", params.compliance_tests,
                                       on_progress=on_progress)
@@ -204,7 +208,7 @@ def run_trading_mode(
 
     # Compliance results hold only test-name keys plus the 'fund_object' FundManager adds.
     traded_funds_info = {
-        fund_name: {"fund_object": fund_results["fund_object"]}
+        fund_name: {"fund_object": fund_results["fund_object"], "ex_ante_fund_object": ex_ante_funds.get(fund_name)}
         for fund_name, fund_results in post_payload.items()
         if "fund_object" in fund_results
     }
@@ -246,17 +250,17 @@ def run_trading_mode(
         combined_report=combined_report,
     )
 
-    # Always sent: trading runs have no send_email switch.
-    emit_progress(on_progress, "email")
-    try:
-        EmailManager().send(
-            _build_trading_email_payload(results_ex_ante, results_ex_post, combined_artefacts, params),
-            OperationConfig.create(OperationMode.TRADING_COMPLIANCE),
-        )
-    except Exception as exc:
-        logging.getLogger(__name__).exception("Trading-analysis email notification failed")
-        if errors is not None:
-            errors.append(f"Trading-analysis email notification failed: {exc}")
+    if getattr(params, "send_email", True):
+        emit_progress(on_progress, "email")
+        try:
+            EmailManager().send(
+                _build_trading_email_payload(results_ex_ante, results_ex_post, combined_artefacts, params),
+                OperationConfig.create(OperationMode.TRADING_COMPLIANCE),
+            )
+        except Exception as exc:
+            logging.getLogger(__name__).exception("Trading-analysis email notification failed")
+            if errors is not None:
+                errors.append(f"Trading-analysis email notification failed: {exc}")
 
     return results_ex_ante, results_ex_post, combined_artefacts
 

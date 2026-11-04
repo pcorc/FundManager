@@ -34,6 +34,10 @@ RULE_12D3_EQUITY_LIMIT: float = 0.05
 RULE_12D3_DEBT_LIMIT: float = 0.25
 RULE_12D3_ASSET_LIMIT: float = 0.10
 
+# Shares outstanding (raw share counts) for issuers whose EQY_SH_OUT_million is missing in the
+# holdings data; applied by every ownership test.
+SHARES_OUTSTANDING_OVERRIDES = {"LOGI": 160784460, "RCI": 429073267, "TU": 1550930636}
+
 # Vehicle helper tokens
 VEHICLE_CLOSED_END = "closed_end_fund"
 VEHICLE_PRIVATE = "private_fund"

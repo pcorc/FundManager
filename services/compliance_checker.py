@@ -29,12 +29,15 @@ from config.constants import (
     RULE_12D3_ASSET_LIMIT,
     RULE_12D3_DEBT_LIMIT,
     RULE_12D3_EQUITY_LIMIT,
+    SHARES_OUTSTANDING_OVERRIDES,
     VEHICLE_PRIVATE,
     VEHICLE_VIT,
 )
 from processing.fund import Fund
 
 GICS_CONCENTRATION_THRESHOLD = 0.25
+# Ownership-test status when no holding breaches the limit but some held issuers lack shares outstanding.
+MISSING_SHARES_OUT_STATUS = "N/A (no shares outstanding data)"
 GICS_CLASS_COLUMNS: Tuple[str, ...] = (
     "GICS_SECTOR_NAME",
     "GICS_INDUSTRY_GROUP_NAME",
@@ -63,9 +66,44 @@ def _num(df: pd.DataFrame, column: str):
     return pd.to_numeric(df.get(column, 0.0), errors="coerce").fillna(0.0)
 
 
-def _ownership_pct(numerator: pd.Series, shares_out: pd.Series) -> pd.Series:
-    with np.errstate(divide="ignore", invalid="ignore"):
-        return np.divide(numerator, shares_out.replace(0, np.nan)).fillna(0.0)
+def _options_per_underlying(opt_df: pd.DataFrame) -> pd.DataFrame:
+    """One row per equity_underlying_ticker (numeric columns summed), so merging options onto
+    issuer-level equity never repeats an issuer once per option on it."""
+    if opt_df.empty or "equity_underlying_ticker" not in opt_df.columns:
+        return opt_df
+    numeric_columns = opt_df.select_dtypes(include=[np.number]).columns.tolist()
+    aggregation = {column: "sum" for column in numeric_columns}
+    aggregation.update(
+        {column: "first" for column in opt_df.columns if column not in numeric_columns + ["equity_underlying_ticker"]}
+    )
+    return opt_df.groupby("equity_underlying_ticker", as_index=False, sort=False, dropna=False).agg(aggregation)
+
+
+def _ownership_status(exceeds: pd.Series, missing: pd.Series) -> str:
+    if exceeds.any():
+        return "FAIL"
+    return MISSING_SHARES_OUT_STATUS if missing.any() else "PASS"
+
+
+def _shares_outstanding(df: pd.DataFrame) -> pd.Series:
+    """Issuer shares outstanding per row: EQY_SH_OUT_million (a raw share count, despite the name) with
+    SHARES_OUTSTANDING_OVERRIDES applied by eqyticker. Missing or zero is NaN."""
+    if "EQY_SH_OUT_million" in df.columns:
+        shares_out = pd.to_numeric(df["EQY_SH_OUT_million"], errors="coerce")
+    else:
+        shares_out = pd.Series(np.nan, index=df.index, dtype=float)
+    if "eqyticker" in df.columns:
+        shares_out = df["eqyticker"].map(SHARES_OUTSTANDING_OVERRIDES).astype(float).fillna(shares_out)
+    return shares_out.replace(0, np.nan)
+
+
+def _max_or_zero(values: pd.Series) -> float:
+    """Largest known value (NaN = unknown ownership is skipped); 0.0 when none is known."""
+    return float(values.max()) if values.notna().any() else 0.0
+
+
+def _missing_tickers(df: pd.DataFrame, missing: pd.Series) -> list:
+    return df.loc[missing, "eqyticker"].tolist() if "eqyticker" in df.columns else []
 
 
 # (result key, method name, display name for error results, error log format), in execution order.
@@ -104,11 +142,23 @@ class ComplianceChecker:
     def _share_col(self) -> str:
         return "iiv_shares" if self.analysis_type == "ex_post" else "nav_shares"
 
-    def _zero_shares(self, df: pd.DataFrame) -> pd.Series:
-        # Ownership tests in IRS, 12d-2 and 12d-3 deliberately use zero shares, so they always pass.
-        zeros = pd.Series(0.0, index=df.index, dtype=float)
-        df[self._share_col] = zeros
-        return zeros
+    def _held_shares(self, df: pd.DataFrame) -> pd.Series:
+        """Shares the fund holds per row (the analysis type's share column, numeric; missing -> 0)."""
+        share_col = self._share_col
+        if share_col in df.columns:
+            held = pd.to_numeric(df[share_col], errors="coerce").fillna(0.0)
+        else:
+            held = pd.Series(0.0, index=df.index, dtype=float)
+        df[share_col] = held
+        return held
+
+    def _ownership(self, df: pd.DataFrame) -> Tuple[pd.Series, pd.Series]:
+        """(ownership, missing) per row: held shares / shares outstanding. Where shares are held but
+        shares outstanding is missing, ownership is NaN and missing is True; nothing held is 0."""
+        held = self._held_shares(df)
+        shares_out = _shares_outstanding(df)
+        missing = shares_out.isna() & held.ne(0)
+        return (held / shares_out).mask(held.eq(0), 0.0), missing
 
     def _consolidate_holdings_by_issuer(self, holdings_df: pd.DataFrame) -> pd.DataFrame:
         """Aggregate holdings exposure by issuer without conditional adjustments."""
@@ -176,7 +226,9 @@ class ComplianceChecker:
         if flex_positions.empty:
             return _base_result(holdings_df)
 
-        long_flex = flex_positions.loc[_num(flex_positions, "nav_shares_option") > 0].copy()
+        # Vest flex frames carry nav_shares (nav_shares_option only exists after an equity/option merge).
+        qty_col = "nav_shares_option" if "nav_shares_option" in flex_positions.columns else "nav_shares"
+        long_flex = flex_positions.loc[_num(flex_positions, qty_col) > 0].copy()
         if long_flex.empty:
             long_flex = flex_positions.loc[_num(flex_positions, "option_market_value") > 0].copy()
 
@@ -195,6 +247,8 @@ class ComplianceChecker:
             how="left",
         )
         merged["security_weight"] = _num(merged, "security_weight")
+        # The listed-option merge repeats an equity once per option on it; spread the box over each ticker once.
+        merged.loc[merged["eqyticker"].notna() & merged["eqyticker"].duplicated(), "security_weight"] = 0.0
         merged["overlap_market_value"] = total_flex_mv * merged["security_weight"]
         merged["long_box_market_value_overlap"] = (
             _num(merged, "long_box_market_value_overlap") + merged["overlap_market_value"]
@@ -255,7 +309,8 @@ class ComplianceChecker:
         """Execute the requested compliance checks for every fund."""
         rules = _RULES
         if test_functions:
-            requested = set(test_functions)
+            # Summary metrics are fund totals, not a rule: always computed so a filtered run can still report them.
+            requested = set(test_functions) | {"summary_metrics"}
             rules = tuple(rule for rule in _RULES if rule[0] in requested)
 
         results: Dict[str, Dict[str, ComplianceResult]] = {}
@@ -388,7 +443,7 @@ class ComplianceChecker:
         if fund.has_listed_option:
             holdings_df = pd.merge(
                 vest_eqy_holdings,
-                vest_opt_holdings,
+                _options_per_underlying(vest_opt_holdings),
                 left_on="eqyticker",
                 right_on="equity_underlying_ticker",
                 how="outer",
@@ -416,7 +471,7 @@ class ComplianceChecker:
             df_flex_calls = vest_flex_holdings[vest_flex_holdings["option_notional_value"] > 0]
             holdings_df = pd.merge(
                 holdings_df,
-                df_flex_calls[["equity_underlying_ticker", "option_notional_value"]],
+                _options_per_underlying(df_flex_calls[["equity_underlying_ticker", "option_notional_value"]]),
                 left_on="eqyticker",
                 right_on="equity_underlying_ticker",
                 how="outer",
@@ -452,12 +507,15 @@ class ComplianceChecker:
         bottom_50_df["exceeds_5_percent"] = bottom_50_df["tna_wgt"] > IRS_BOTTOM_50_LIMIT
         condition_IRS_2_a_5_original = not bool(bottom_50_df["exceeds_5_percent"].any())
 
+        # Missing/zero shares outstanding is NaN: those issuers are flagged and left out of the 10% test.
         if "EQY_SH_OUT_million" not in bottom_50_df.columns:
-            bottom_50_df["EQY_SH_OUT_million"] = 1.0
-        denom = bottom_50_df["EQY_SH_OUT_million"].replace(0, 1)
-        share_series = self._zero_shares(bottom_50_df)
-        bottom_50_df["exceeds_10_percent"] = (share_series / denom) > IRS_OWNERSHIP_LIMIT
+            bottom_50_df["EQY_SH_OUT_million"] = np.nan
+        shares_out = _shares_outstanding(bottom_50_df)
+        share_series = self._held_shares(bottom_50_df)
+        bottom_50_df["missing_shares_out"] = shares_out.isna() & share_series.ne(0)
+        bottom_50_df["exceeds_10_percent"] = (share_series / shares_out) > IRS_OWNERSHIP_LIMIT
         condition_IRS_2_a_10 = not bool(bottom_50_df["exceeds_10_percent"].any())
+        missing_shares_out = bottom_50_df.loc[bottom_50_df["missing_shares_out"], "eqyticker"].tolist()
 
         details = {
             "rule": "IRS Diversification",
@@ -466,6 +524,9 @@ class ComplianceChecker:
             "condition_IRS_2_a_5": condition_IRS_2_a_5_new,
             "condition_IRS_2_a_5_original": condition_IRS_2_a_5_original,
             "condition_IRS_2_a_10": condition_IRS_2_a_10,
+            "condition_IRS_2_a_10_status": _ownership_status(
+                bottom_50_df["exceeds_10_percent"], bottom_50_df["missing_shares_out"]
+            ),
         }
         calculations = {
             "total_assets": total_assets,
@@ -485,6 +546,8 @@ class ComplianceChecker:
             "expenses": expenses,
             "bottom_50_exceeds_5_percent": int(bottom_50_df["exceeds_5_percent"].sum()),
             "bottom_50_exceeds_10_percent": int(bottom_50_df["exceeds_10_percent"].sum()),
+            "missing_shares_out": len(missing_shares_out),
+            "missing_shares_out_tickers": missing_shares_out,
             "large_securities": large_securities.to_dict("records"),
             "overlap": overlap_details_df.to_dict("records"),
             "overlap_weight_sum": float(overlap_details_df["overlap_weight"].sum()),
@@ -558,11 +621,8 @@ class ComplianceChecker:
         occ_weight_mkt_val = abs(float(vest_opt_holdings["option_market_value"].sum()))
         condition_2a_occ_met = occ_weight_mkt_val <= 0.05 * total_net_assets if total_net_assets else False
 
-        if "EQY_SH_OUT_million" not in remaining_securities.columns:
-            remaining_securities["EQY_SH_OUT_million"] = 1.0
-        remaining_securities["EQY_SH_OUT_million"] = (
-            pd.to_numeric(remaining_securities["EQY_SH_OUT_million"], errors="coerce").replace(0, 1)
-        )
+        # Missing/zero shares outstanding is NaN: those issuers are flagged and left out of the 2b test.
+        remaining_securities["EQY_SH_OUT_million"] = _shares_outstanding(remaining_securities)
 
         share_col = self._share_col
         if share_col not in remaining_securities.columns:
@@ -570,17 +630,14 @@ class ComplianceChecker:
         else:
             remaining_securities[share_col] = pd.to_numeric(remaining_securities[share_col], errors="coerce").fillna(0.0)
 
-        if not remaining_securities.empty:
-            ticker_overrides = {"LOGI": 160784460, "RCI": 429073267, "TU": 1550930636}
-            for ticker, value in ticker_overrides.items():
-                if ticker in remaining_securities["eqyticker"].values:
-                    remaining_securities.loc[remaining_securities["eqyticker"] == ticker, "EQY_SH_OUT_million"] = value
-
+        held = remaining_securities[share_col]
+        missing_2b = remaining_securities["EQY_SH_OUT_million"].isna() & held.ne(0)
         remaining_securities["vest_ownership_of_float"] = (
-                remaining_securities[share_col] / remaining_securities["EQY_SH_OUT_million"]
-        ).fillna(0.0)
-        issuer_compliance_2b = remaining_securities["vest_ownership_of_float"] <= ACT_40_OWNERSHIP_LIMIT
+                held / remaining_securities["EQY_SH_OUT_million"]
+        ).mask(held.eq(0), 0.0)  # NaN only where shares are held but shares outstanding is missing
+        issuer_compliance_2b = (remaining_securities["vest_ownership_of_float"] <= ACT_40_OWNERSHIP_LIMIT) | missing_2b
         condition_2b_met = bool(issuer_compliance_2b.all())
+        missing_shares_out = remaining_securities.loc[missing_2b, "eqyticker"].tolist()
 
         cumulative_weight_excluded = (
             excluded_bucket_total / total_net_assets
@@ -624,6 +681,8 @@ class ComplianceChecker:
             "remaining_stocks_details": remaining_stocks_details,
             "share_column_used": share_col,
             "max_ownership_float": float(remaining_securities["vest_ownership_of_float"].max()),
+            "missing_shares_out": len(missing_shares_out),
+            "missing_shares_out_tickers": missing_shares_out,
             "condition_2a_occ_met": condition_2a_occ_met,
             "occ_market_value": occ_weight_mkt_val,
             "occ_weight": occ_weight_mkt_val / total_assets if total_assets else 0.0,
@@ -633,13 +692,16 @@ class ComplianceChecker:
             "condition_40act_1": condition_1_met,
             "condition_40act_2a": condition_2a_met,
             "condition_40act_2b": condition_2b_met,
+            "condition_40act_2b_status": _ownership_status(~issuer_compliance_2b, missing_2b),
             "condition_40act_2a_occ": condition_2a_occ_met,
             "diversified_since_inception_40act": condition_1_met and condition_2a_met and condition_2b_met,
             "diversification_failure_duration_40act": 0 if actual_diversified else 1,
             "expected_registration_status": expected_status,
             "actual_registration_status": fund_status_today,
         }
-        return ComplianceResult(actual_diversified == expected_diversified, details, calculations)
+        # Only a fund registered as diversified that is not operating as diversified fails; a
+        # non-diversified registration permits operating either way.
+        return ComplianceResult(actual_diversified or not expected_diversified, details, calculations)
 
     def diversification_IRC_check(self, fund: Fund) -> ComplianceResult:
         """IRC diversification; the dispatcher only runs it for VIT funds."""
@@ -710,14 +772,15 @@ class ComplianceChecker:
         if exposures is None:
             calculations = {"real_estate_exposure": 0.0, "real_estate_percentage": 0.0, "total_exposure": 0.0}
             return _res(True, rule, calculations, real_estate_check_compliant=True)
-        # Exposure is deliberately forced to zero and the flag hard-coded True: this check always passes.
-        real_estate_exposure, total_exposure = 0.0, exposures[1]
+        real_estate_exposure, total_exposure = exposures
         calculations = {
             "real_estate_exposure": real_estate_exposure,
             "real_estate_percentage": real_estate_exposure / total_exposure if total_exposure > 0 else 0.0,
             "total_exposure": total_exposure,
         }
-        return _res(real_estate_exposure == 0.0, rule, calculations, real_estate_check_compliant=True)
+        # Same zero-tolerance test as commodities_check.
+        is_compliant = real_estate_exposure == 0.0
+        return _res(is_compliant, rule, calculations, real_estate_check_compliant=is_compliant)
 
     def commodities_check(self, fund: Fund) -> ComplianceResult:
         rule = "Commodities Exposure"
@@ -741,6 +804,7 @@ class ComplianceChecker:
         all_pass = {
             "twelve_d1a_other_inv_cos_compliant": True,
             "test_1_pass": True,
+            "test_1_status": "PASS",
             "test_2_pass": True,
             "test_3_pass": True,
         }
@@ -767,18 +831,15 @@ class ComplianceChecker:
         if investment_companies.empty:
             return _res(True, rule, {**base_calculations, **thresholds}, **all_pass)
 
-        if "EQY_SH_OUT_million" not in investment_companies.columns:
-            investment_companies["EQY_SH_OUT_million"] = 0.0
-        if "quantity" not in investment_companies.columns:
-            investment_companies["quantity"] = 0.0
-        investment_companies["ownership_pct"] = _ownership_pct(
-            investment_companies["quantity"], investment_companies["EQY_SH_OUT_million"]
-        )
+        # Held shares (vest equity has no "quantity" column); missing shares outstanding is flagged, not 0%.
+        investment_companies["ownership_pct"], missing = self._ownership(investment_companies)
+        exceeds_1 = investment_companies["ownership_pct"] > RULE_12D1A_OWNERSHIP_LIMIT
+        missing_shares_out = _missing_tickers(investment_companies, missing)
 
-        max_ownership_pct = float(investment_companies["ownership_pct"].max())
+        max_ownership_pct = _max_or_zero(investment_companies["ownership_pct"])
         max_equity_value = float(investment_companies["equity_market_value"].max())
         sum_equity_value = float(investment_companies["equity_market_value"].sum())
-        test_1_pass = max_ownership_pct <= RULE_12D1A_OWNERSHIP_LIMIT
+        test_1_pass = not bool(exceeds_1.any())
         test_2_pass = max_equity_value <= RULE_12D1A_SINGLE_ASSETS_LIMIT * total_assets
         test_3_pass = sum_equity_value <= RULE_12D1A_TOTAL_ASSETS_LIMIT * total_assets
 
@@ -789,6 +850,8 @@ class ComplianceChecker:
             "equity_market_value_sum": sum_equity_value,
             "equity_market_value_max": max_equity_value,
             "ownership_pct_values": investment_companies["ownership_pct"].tolist(),
+            "missing_shares_out": len(missing_shares_out),
+            "missing_shares_out_tickers": missing_shares_out,
             **thresholds,
         }
         is_compliant = all([test_1_pass, test_2_pass, test_3_pass])
@@ -798,6 +861,7 @@ class ComplianceChecker:
             calculations,
             twelve_d1a_other_inv_cos_compliant=is_compliant,
             test_1_pass=test_1_pass,
+            test_1_status=_ownership_status(exceeds_1, missing),
             test_2_pass=test_2_pass,
             test_3_pass=test_3_pass,
         )
@@ -820,23 +884,30 @@ class ComplianceChecker:
                 "max_ownership_pct": 0.0,
                 "threshold": RULE_12D2_INSURANCE_LIMIT,
             }
-            return _res(True, rule, calculations, twelve_d2_insurance_cos_compliant=True, test_pass=True)
+            return _res(
+                True, rule, calculations, twelve_d2_insurance_cos_compliant=True, test_pass=True, test_status="PASS"
+            )
 
-        if "EQY_SH_OUT_million" not in insurance_holdings.columns:
-            insurance_holdings["EQY_SH_OUT_million"] = 0.0
-        share_series = self._zero_shares(insurance_holdings)
-        insurance_holdings["ownership_pct"] = _ownership_pct(share_series, insurance_holdings["EQY_SH_OUT_million"])
+        # Missing shares outstanding is flagged and left out of the test, not counted as 0%.
+        insurance_holdings["ownership_pct"], missing = self._ownership(insurance_holdings)
+        exceeds = insurance_holdings["ownership_pct"] > RULE_12D2_INSURANCE_LIMIT
+        missing_shares_out = _missing_tickers(insurance_holdings, missing)
 
-        max_ownership_pct = float(insurance_holdings["ownership_pct"].max())
-        test_pass = max_ownership_pct <= RULE_12D2_INSURANCE_LIMIT
+        max_ownership_pct = _max_or_zero(insurance_holdings["ownership_pct"])
+        test_pass = not bool(exceeds.any())
         calculations = {
             "total_assets": total_assets,
             "insurance_holdings": insurance_holdings.to_dict("records"),
             "insurance_count": len(insurance_holdings),
             "max_ownership_pct": max_ownership_pct,
+            "missing_shares_out": len(missing_shares_out),
+            "missing_shares_out_tickers": missing_shares_out,
             "threshold": RULE_12D2_INSURANCE_LIMIT,
         }
-        return _res(test_pass, rule, calculations, twelve_d2_insurance_cos_compliant=test_pass, test_pass=test_pass)
+        return _res(
+            test_pass, rule, calculations, twelve_d2_insurance_cos_compliant=test_pass, test_pass=test_pass,
+            test_status=_ownership_status(exceeds, missing),
+        )
 
     def twelve_d3_sec_biz(self, fund: Fund) -> ComplianceResult:
         rule = "12d-3 Securities Businesses"
@@ -858,15 +929,16 @@ class ComplianceChecker:
             }
             return _res(
                 True, rule, calculations,
-                twelve_d3_sec_biz_compliant=True, rule_1_pass=True, rule_2_pass=True, rule_3_pass=True,
+                twelve_d3_sec_biz_compliant=True, rule_1_pass=True, rule_1_status="PASS",
+                rule_2_pass=True, rule_3_pass=True,
             )
 
-        sec_related_businesses["EQY_SH_OUT_million"] = sec_related_businesses["EQY_SH_OUT_million"].replace(0, np.nan)
-        share_series = self._zero_shares(sec_related_businesses)
-        sec_related_businesses["ownership_pct"] = (
-            share_series / sec_related_businesses["EQY_SH_OUT_million"]
-        ).fillna(0.0)
-        rule_1_pass = bool((sec_related_businesses["ownership_pct"] <= RULE_12D3_EQUITY_LIMIT).all())
+        # Missing shares outstanding is flagged and left out of Rule 1, not counted as 0%.
+        sec_related_businesses["EQY_SH_OUT_million"] = _shares_outstanding(sec_related_businesses)
+        sec_related_businesses["ownership_pct"], missing = self._ownership(sec_related_businesses)
+        exceeds_1 = sec_related_businesses["ownership_pct"] > RULE_12D3_EQUITY_LIMIT
+        missing_shares_out = _missing_tickers(sec_related_businesses, missing)
+        rule_1_pass = not bool(exceeds_1.any())
 
         if "SECURITY_TYP" in vest_eqy_holdings.columns:
             debt_mask = vest_eqy_holdings["SECURITY_TYP"].eq("Debt")
@@ -881,7 +953,7 @@ class ComplianceChecker:
 
         combined_holdings = pd.merge(
             sec_related_businesses,
-            vest_opt_holdings,
+            _options_per_underlying(vest_opt_holdings),
             how="left",
             left_on="eqyticker",
             right_on="equity_underlying_ticker",
@@ -904,12 +976,15 @@ class ComplianceChecker:
             "total_assets": total_assets,
             "sec_related_businesses": sec_related_businesses.to_dict("records"),
             "combined_holdings": combined_holdings.to_dict("records"),
-            "max_ownership_pct": float(sec_related_businesses["ownership_pct"].max()),
+            "max_ownership_pct": _max_or_zero(sec_related_businesses["ownership_pct"]),
+            "missing_shares_out": len(missing_shares_out),
+            "missing_shares_out_tickers": missing_shares_out,
             "max_weight": max_weight,
         }
         return _res(
             is_compliant, rule, calculations,
             twelve_d3_sec_biz_compliant=is_compliant, rule_1_pass=rule_1_pass,
+            rule_1_status=_ownership_status(exceeds_1, missing),
             rule_2_pass=rule_2_pass, rule_3_pass=rule_3_pass,
         )
 
@@ -1013,7 +1088,8 @@ class ComplianceChecker:
         # Every group is judged at industry level only.
         fund_over_industries = set(exceeding_fund_gics.get("GICS_INDUSTRY_NAME", {}).keys())
         index_over_industries = set(exceeding_index_gics.get("GICS_INDUSTRY_NAME", {}).keys())
-        industry_within_limit = len(fund_over_industries) == 0
+        # Reported only: no compliance group is judged on industry groups.
+        fund_over_industry_groups = exceeding_fund_gics.get("GICS_INDUSTRY_GROUP_NAME", {})
         industry_mismatches = fund_over_industries - index_over_industries
         if compliance_group == "dogg":
             # DOGG: no industry may exceed 25%
@@ -1046,7 +1122,8 @@ class ComplianceChecker:
             "rule": rule,
             "fund": fund.name,
             "overall_gics_compliance": overall_status,
-            "industry_exceeds_25": industry_within_limit,
+            "industry_exceeds_25": bool(fund_over_industries),
+            "industry_group_exceeds_25": bool(fund_over_industry_groups),
             "exceeding_fund_gics": exceeding_fund_gics,
             "exceeding_index_gics": exceeding_index_gics,
             "fund_exposures": gics_summary_fund,

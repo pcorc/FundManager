@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Mapping, Optional, Tuple
+import numpy as np
 import pandas as pd
 from processing.fund import Fund
 from reporting.report_utils import non_empty
@@ -18,8 +19,8 @@ _TICKER_COLUMNS: Dict[str, Tuple[str, ...]] = {
 
 
 def _bool_status(value: Any) -> Optional[str]:
-    # Exact bool only: numpy.bool_ results deliberately resolve to UNKNOWN.
-    if isinstance(value, bool):
+    # numpy.bool_ too: checks comparing numpy floats return it.
+    if isinstance(value, (bool, np.bool_)):
         return "PASS" if value else "FAIL"
     return None
 
@@ -74,17 +75,18 @@ class TradingComplianceAnalyzer:
 
     # ------------------------------------------------------------------
     def _compare_fund(self, fund_name: str) -> Dict[str, Any]:
-        ante_results = self.results_ex_ante.get(fund_name)
-        post_results = self.results_ex_post.get(fund_name)
+        # A fund can be on one side only (e.g. it failed to process in the other pass).
+        ante_results = self.results_ex_ante.get(fund_name) or {}
+        post_results = self.results_ex_post.get(fund_name) or {}
         trade_info = self._build_trade_info(fund_name, ante_results, post_results)
 
         checks = {}
         violations_before = 0
         violations_after = 0
 
-        # Precedence is intentional: only the ex-post side drops these keys.
+        # summary_metrics (always computed) and fund_object are not checks, on either side.
         check_names = sorted(
-            set(ante_results.keys()) | set(post_results.keys()) - {"summary_metrics", "fund_object"}
+            (set(ante_results.keys()) | set(post_results.keys())) - {"summary_metrics", "fund_object"}
         )
 
         for check in check_names:
@@ -134,23 +136,30 @@ class TradingComplianceAnalyzer:
     ) -> Dict[str, Any]:
         base_info = dict(self.traded_funds_info.get(fund_name, {}))
 
-        # base_info (the ex-post Fund) wins; ante and post holdings both come from it.
-        fund = self._resolve_fund_object(base_info, ante_results, post_results)
+        # base_info carries the ex-post Fund and a copy of the Fund taken after the ex-ante pass
+        # (both passes populate fund.data on the same Fund object).
+        fund = self._resolve_fund_object(base_info, post_results, ante_results)
+        ante_fund = base_info.get("ex_ante_fund_object")
+        if not isinstance(ante_fund, Fund):
+            ante_fund = fund  # no ex-ante copy given: both sides read the ex-post holdings
 
-        for key, value in self._compute_trade_summary(fund).items():
+        for key, value in self._compute_trade_summary(fund, ante_fund).items():
             if key not in base_info or base_info[key] in (None, "", {}, [], ()):  # type: ignore[arg-type]
                 base_info[key] = value
 
         return base_info
 
-    def _compute_trade_summary(self, fund: Optional[Fund]) -> Dict[str, Any]:
+    def _compute_trade_summary(self, fund: Optional[Fund], ante_fund: Optional[Fund] = None) -> Dict[str, Any]:
         # Trading analysis runs intraday — the custodian hasn't reported T's TNA/TA yet,
         # so fund.data.current.{tna,ta} would be zero. Use the previous (T-1) snapshot
         # the bulk loader populated with the prior-day custodian numbers, falling back
         # to current only if T-1 is missing (e.g., a Monday after a holiday).
+        # The ex-ante pass loads previous = T-1; the ex-post pass loads previous = the custodian
+        # previous date (T-2), so its snapshot is only a fallback.
         data = getattr(fund, "data", None)
         previous_snapshot = getattr(data, "previous", None)
         current_snapshot = getattr(data, "current", None)
+        ante_previous_snapshot = getattr(getattr(ante_fund, "data", None), "previous", None)
 
         def _from_snapshot(snapshot: Any, attr: str) -> float:
             try:
@@ -158,8 +167,12 @@ class TradingComplianceAnalyzer:
             except (TypeError, ValueError):
                 return 0.0
 
-        total_net_assets = _from_snapshot(previous_snapshot, "tna") or _from_snapshot(current_snapshot, "tna")
-        total_assets = _from_snapshot(previous_snapshot, "ta") or _from_snapshot(current_snapshot, "ta")
+        total_net_assets, total_assets = (
+            _from_snapshot(ante_previous_snapshot, attr)
+            or _from_snapshot(previous_snapshot, attr)
+            or _from_snapshot(current_snapshot, attr)
+            for attr in ("tna", "ta")
+        )
 
         net_trades: Dict[str, Dict[str, float]] = {}
         trade_activity: Dict[str, Dict[str, Any]] = {}
@@ -168,12 +181,26 @@ class TradingComplianceAnalyzer:
 
         for key in ASSET_ORDER:
             post_df = self._get_holdings(fund, key)
-            ante_df = self._get_holdings(fund, key)
+            ante_df = self._get_holdings(ante_fund if ante_fund is not None else fund, key)
 
             post_quantities = self._resolve_quantity_series(post_df, preferred="iiv_shares")
             ante_quantities = self._resolve_quantity_series(ante_df, preferred="nav_shares")
 
-            trade_rebal_series = self._extract_trade_series(post_df)
+            # Splice closed positions back in so sell-to-close shows up (in trades only, not in market values).
+            traded_df = post_df
+            if key == "options" and non_empty(ante_df) and "optticker" in ante_df.columns:
+                post_tickers = post_df["optticker"] if "optticker" in post_df.columns else []
+                ante_only = ante_df[~ante_df["optticker"].isin(post_tickers)].copy()
+                # Options expiring on or before the analysis date drop out by expiry, not by a trade.
+                ante_only = ante_only.loc[~self._expires_by(ante_only, self.date)]
+                if not ante_only.empty:
+                    ante_only["iiv_shares"] = 0.0
+                    ante_only["trade_rebal"] = -pd.to_numeric(
+                        ante_only.get("nav_shares", 0.0), errors="coerce"
+                    ).fillna(0.0)
+                    traded_df = pd.concat([post_df, ante_only], ignore_index=True)
+
+            trade_rebal_series = self._extract_trade_series(traded_df)
             quantity_delta = float(trade_rebal_series.sum())
             if quantity_delta == 0.0:
                 quantity_delta = float(post_quantities.sum()) - float(ante_quantities.sum())
@@ -188,18 +215,13 @@ class TradingComplianceAnalyzer:
 
             post_notional = self._calculate_notional(post_df, post_quantities, asset_type=key)
             ante_notional = self._calculate_notional(ante_df, ante_quantities, asset_type=key)
+            # Trade-value fallback without trade_rebal values: the ex-post holdings' share change
+            # (nav_shares -> iiv_shares) at ex-post prices, so ex-ante -> ex-post price moves are not trades.
+            post_start_notional = self._calculate_notional(
+                post_df, self._resolve_quantity_series(post_df, preferred="nav_shares"), asset_type=key
+            )
 
-            # Splice closed positions back in so sell-to-close shows up.
-            if key == "options" and non_empty(ante_df):
-                ante_only = ante_df[~ante_df["optticker"].isin(post_df["optticker"])].copy()
-                if not ante_only.empty:
-                    ante_only["iiv_shares"] = 0.0
-                    ante_only["trade_rebal"] = -pd.to_numeric(
-                        ante_only.get("nav_shares", 0.0), errors="coerce"
-                    ).fillna(0.0)
-                    post_df = pd.concat([post_df, ante_only], ignore_index=True)
-
-            activity_details = self._calculate_trade_activity(post_df, asset_type=key)
+            activity_details = self._calculate_trade_activity(traded_df, asset_type=key)
             if activity_details["buys"] or activity_details["sells"]:
                 trade_activity[key] = activity_details
 
@@ -216,7 +238,7 @@ class TradingComplianceAnalyzer:
 
             trade_total = buy_value + sell_value
             if trade_total <= 0.0:
-                trade_total = abs(post_notional - ante_notional)
+                trade_total = abs(post_notional - post_start_notional)
             total_traded += trade_total
 
             asset_trade_summary[key] = {
@@ -260,6 +282,16 @@ class TradingComplianceAnalyzer:
         return None
 
     @staticmethod
+    def _expires_by(df: pd.DataFrame, as_of: Any) -> pd.Series:
+        """True for rows whose maturity (vest ``maturity`` / custodian ``maturity_date``) is on or before ``as_of``;
+        rows without a parsable maturity are False."""
+        cutoff = pd.to_datetime(as_of, errors="coerce")
+        for column in ("maturity", "maturity_date"):
+            if column in df.columns and not pd.isna(cutoff):
+                return (pd.to_datetime(df[column], errors="coerce") <= cutoff).fillna(False)
+        return pd.Series(False, index=df.index, dtype=bool)
+
+    @staticmethod
     def _extract_trade_series(df: pd.DataFrame) -> pd.Series:
         if not non_empty(df):
             return pd.Series(dtype=float)
@@ -272,6 +304,8 @@ class TradingComplianceAnalyzer:
         if not non_empty(df) or "price" not in df.columns or quantities.empty:
             return 0.0
         prices = pd.to_numeric(df["price"], errors="coerce").fillna(0.0)
+        if asset_type == "treasury":
+            prices = prices / 100.0  # quoted per 100 face, as in the holdings' treasury_market_value
 
         # First existing multiplier column (not first positive value, unlike per-trade estimates).
         multiplier_series = pd.Series(1.0, index=df.index, dtype=float)
@@ -370,7 +404,8 @@ class TradingComplianceAnalyzer:
 
     @staticmethod
     def _estimate_trade_market_value(row: pd.Series, quantity: float, asset_type: str) -> float:
-        """Market value of one trade: price x quantity x multiplier, or abs(qty x multiplier) without a price."""
+        """Market value of one trade: price x quantity x multiplier (treasury prices per 100 face), or
+        abs(qty x multiplier) without a price."""
         multiplier = 1.0
         if asset_type == "options":
             multiplier = 100.0  # Default for options; first positive multiplier column wins.
@@ -393,6 +428,8 @@ class TradingComplianceAnalyzer:
                 price_value = 0.0
 
         if price_value > 0:
+            if asset_type == "treasury":
+                price_value /= 100.0  # quoted per 100 face
             return abs(price_value * quantity * multiplier)
         return abs(quantity * multiplier)
 

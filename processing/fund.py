@@ -12,7 +12,8 @@ from typing import Any, Dict, Optional, Sequence, Set
 
 import pandas as pd
 
-from config.fund_definitions import FUND_DEFINITIONS
+from config.constants import VEHICLE_CLOSED_END, VEHICLE_ETF, VEHICLE_PRIVATE
+from config.fund_definitions import FUND_DEFINITIONS, vehicle_for_strategy
 
 
 FundRegistry = Dict[str, "Fund"]
@@ -223,9 +224,10 @@ def _third_friday(month_start: pd.Timestamp) -> pd.Timestamp:
 class Fund:
     """Fund entity: configuration + loaded data + typed accessors.
 
-    All config-derived flags (is_etf, has_flex_option, …) are computed once in
-    __init__ and stored as plain attributes — there are no @property
-    descriptors, since config is fixed for the lifetime of a Fund.
+    The FUND_DEFINITIONS policy flags (has_flex_option, …) are computed once in
+    __init__. The v_fund_metadata fields (vehicle, index_ticker_join) are
+    properties over ``config``, because the loader merges the metadata into
+    ``config`` after the Fund is built.
     """
 
     def __init__(self, name: str, config: Dict[str, Any]):
@@ -235,14 +237,6 @@ class Fund:
 
         c = self.config
         self.expense_ratio: float = float(c.get("expense_ratio") or 0.0)
-        self.index_ticker_join: Optional[str] = c.get("index_ticker_join")
-
-        vehicle = c.get("vehicle_wrapper")
-        self.vehicle: Optional[str] = vehicle if isinstance(vehicle, str) else None
-        vehicle_lower = (self.vehicle or "").lower()
-        self.is_private_fund: bool = vehicle_lower == "private_fund"
-        self.is_closed_end_fund: bool = vehicle_lower == "closed_end_fund"
-        self.is_etf: bool = vehicle_lower == "etf"
 
         self.diversification_status: Optional[str] = _str_or_none(c.get("diversification_status"))
         self.has_listed_option: bool = bool(c.get("has_listed_option"))
@@ -256,6 +250,33 @@ class Fund:
         self.uses_index_flex: bool = (
                 self.has_flex_option and (self.flex_option_type or "").lower() == "index"
         )
+
+    # ------------------------------------------------------------------
+    # v_fund_metadata-derived attributes (read from config on every access)
+    # ------------------------------------------------------------------
+    @property
+    def index_ticker_join(self) -> Optional[str]:
+        return _str_or_none(self.config.get("index_ticker_join"))
+
+    @property
+    def vehicle(self) -> Optional[str]:
+        """Explicit ``vehicle_wrapper`` if configured, else derived from ``eod_report_strategy``."""
+        vehicle = self.config.get("vehicle_wrapper")
+        if isinstance(vehicle, str):
+            return vehicle
+        return vehicle_for_strategy(self.config.get("eod_report_strategy"))
+
+    @property
+    def is_private_fund(self) -> bool:
+        return (self.vehicle or "").lower() == VEHICLE_PRIVATE
+
+    @property
+    def is_closed_end_fund(self) -> bool:
+        return (self.vehicle or "").lower() == VEHICLE_CLOSED_END
+
+    @property
+    def is_etf(self) -> bool:
+        return (self.vehicle or "").lower() == VEHICLE_ETF
 
     # ------------------------------------------------------------------
     # Holdings accessors

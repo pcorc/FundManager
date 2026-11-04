@@ -9,7 +9,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from config.fund_definitions import FUND_DEFINITIONS
+from config.fund_definitions import vehicle_wrapper
 from reporting.report_utils import (
     _normalize_reconciliation_payload,
     ensure_dir,
@@ -55,11 +55,6 @@ RECON_DESCRIPTOR_REGISTRY: Dict[str, ReconDescriptor] = {
     "custodian_flex_option": ReconDescriptor("optticker"),  # Don't filter FLEX price breaks
     "custodian_treasury": ReconDescriptor("cusip", price_keys=("price_discrepancies_T", None)),
 }
-
-
-def vehicle_wrapper(fund: str) -> str:
-    """Lower-cased FUND_DEFINITIONS vehicle_wrapper ('' when unset)."""
-    return (FUND_DEFINITIONS.get(fund, {}).get("vehicle_wrapper") or "").lower()
 
 
 def split_flex_price_frames(df: Any, flag_column: str = "is_flex") -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -309,7 +304,7 @@ class ReconciliationReport:
                     pass
 
         has_private_or_closed = any(
-            (FUND_DEFINITIONS.get(f, {}).get("vehicle_wrapper") in {"private_fund", "closed_end_fund"})
+            vehicle_wrapper(f) in {"private_fund", "closed_end_fund"}
             for f in funds
         )
         if has_private_or_closed:

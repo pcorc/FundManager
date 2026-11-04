@@ -116,7 +116,12 @@ class FundManager:
         self.data_store = data_store
         self.analysis_type = analysis_type
         self.logger = logging.getLogger(__name__)
-        self.available_funds = list(data_store.loaded_funds)
+        # Registry order (loaded_funds is a set, so its order depended on PYTHONHASHSEED);
+        # loaded funds missing from the registry go last, sorted, and are reported as errors.
+        loaded = data_store.loaded_funds
+        self.available_funds = [name for name in fund_registry if name in loaded] + sorted(
+            set(loaded) - set(fund_registry)
+        )
 
     def run_daily_operations(
         self, operations: List[str], *, compliance_tests: Optional[Sequence[str]] = None
@@ -240,7 +245,8 @@ class FundManager:
             nav = d.get(f"nav{sfx}", pd.DataFrame())
             return FundSnapshot(
                 **holdings,
-                index=FundHoldings(equity=d.get("index", pd.DataFrame())),  # T index for both snapshots
+                index=FundHoldings(equity=d.get(f"index{sfx}", pd.DataFrame())),
+                overlap=d.get(f"overlap{sfx}", pd.DataFrame()),
                 cash=_sum_numeric(d.get(f"cash{sfx}", pd.DataFrame()), ["cash_value"]),
                 **{name: _first_numeric(nav, columns) for name, columns in _NAV_FIELDS.items()},
                 equity_trades=d.get(f"equity_trades{sfx}", pd.DataFrame()),

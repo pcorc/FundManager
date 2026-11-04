@@ -487,7 +487,7 @@ class NAVReconciliator:
         """
         Calculate T-1 flows adjustment for creations/redemptions.
 
-        Returns adjusted beginning TNA that accounts for flows.
+        Returns the TNA change from flows; the caller adds it to beginning TNA.
         """
         flows = self.fund.data.flows
         if flows is None or flows.empty:
@@ -514,7 +514,7 @@ class NAVReconciliator:
         flows_adjustment_per_share = net_units * (beg_tna / beg_shares)
         tna_adjustment = flows_adjustment_per_share * shares_per_cu
 
-        return beg_tna + tna_adjustment
+        return tna_adjustment
 
     # ========================================================================
     # NAV SUMMARY CALCULATION

@@ -110,6 +110,7 @@ Reports land on the shared drive, partitioned by mode:
 
 ```
 G:\Shared drives\Portfolio Management\Funds\Archive\Daily_Compliance\2026\
+    ├── compliance_results_<tag>_<first>_to_<last>.{xlsx,pdf}   (stacked time series)
     ├── Compliance\
     │     compliance_results_<tag>_<date>.{xlsx,pdf}
     ├── Holdings and NAV Recon\

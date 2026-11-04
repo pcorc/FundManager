@@ -1,7 +1,7 @@
 """Generate Excel and PDF summaries for compliance results."""
 
 from __future__ import annotations
-from functools import lru_cache, partial
+from functools import partial
 
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -9,9 +9,18 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Mapping, NamedTuple, Optional
 
+import numpy as np
 import pandas as pd
 
-from config.fund_definitions import FUND_DEFINITIONS
+from config.constants import (
+    PROSPECTUS_MIN_THRESHOLD,
+    RULE_12D1A_SINGLE_ASSETS_LIMIT,
+    RULE_12D1A_TOTAL_ASSETS_LIMIT,
+    RULE_12D3_ASSET_LIMIT,
+    RULE_12D3_DEBT_LIMIT,
+    RULE_12D3_EQUITY_LIMIT,
+)
+from config.fund_definitions import vehicle_wrapper as _vehicle_wrapper
 from reporting.base_report_pdf import BaseReportPDF, draw_header_row
 from reporting.footnotes import FOOTNOTES
 from reporting.report_utils import (
@@ -24,10 +33,6 @@ from utilities.logger import setup_logger
 from utilities.numbers import float_or, num, resolve_number, to_float
 
 logger = setup_logger("compliance_report", "logs/compliance.log")
-@lru_cache(maxsize=None)
-def _vehicle_wrapper(fund_name: str) -> str:
-    """Return the lowercase vehicle_wrapper for a fund. Cached for the process."""
-    return str(FUND_DEFINITIONS.get(fund_name, {}).get("vehicle_wrapper", "") or "").lower()
 
 
 def _is_vit_fund(fund_name: str) -> bool:
@@ -51,11 +56,25 @@ _SUMMARY_FIELDS = (
     ("Total Assets", "total_assets"),
     ("Total Net Assets", "total_net_assets"),
 )
-# "Option MV" is not in the sheet columns, so the three Option MV columns are always 0.0.
-_SUMMARY_COLUMNS = [
-    "Date", "Fund", "Cash", "Treasury", "Equity", "Option DAN",
-    "Regular Option MV", "Flex Option MV", "Total Option MV", "Total Assets", "Total Net Assets",
-]
+# The Summary sheet splits the PDF's (regular) "Option MV" into regular / flex / total.
+_SUMMARY_SHEET_FIELDS = (
+    *_SUMMARY_FIELDS[:4],
+    ("Regular Option MV", "option_market_value"),
+    ("Flex Option MV", "flex_option_market_value"),
+    ("Total Option MV", "total_option_market_value"),
+    *_SUMMARY_FIELDS[5:],
+)
+_SUMMARY_COLUMNS = ["Date", "Fund", *(column for column, _ in _SUMMARY_SHEET_FIELDS)]
+
+_SUMMARY_ALIAS = "summary"  # processing.api accepts it for the summary_metrics step
+
+
+def _selected_tests(test_functions: Optional[Iterable[str]]) -> Optional[set]:
+    """Requested report steps with the "summary" alias mapped to summary_metrics; None = everything."""
+    if test_functions is None:
+        return None
+    return {"summary_metrics" if test == _SUMMARY_ALIAS else test for test in test_functions if test}
+
 
 _GICS_CAN_EXCEED = {"KNG", "FDND", "KNGIX"}
 _GICS_EXCEPTIONS = {"TDVI": "Information Technology Sector"}
@@ -65,8 +84,8 @@ def _gics_flags(fund_key: str, gics: Mapping[str, Any]) -> tuple:
     """(industry, group, index industry, index group) flags, can-exceed and exceptions text."""
     exceeding_index = gics.get("exceeding_index_gics", {}) or {}
     return (
-        not bool(gics.get("industry_exceeds_25", True)),
-        not bool(gics.get("industry_group_exceeds_25", True)),
+        bool(gics.get("industry_exceeds_25")),
+        bool(gics.get("industry_group_exceeds_25")),
         len(exceeding_index.get("GICS_INDUSTRY_NAME") or {}) > 0,
         len(exceeding_index.get("GICS_INDUSTRY_GROUP_NAME") or {}) > 0,
         "Yes" if fund_key in _GICS_CAN_EXCEED else "No",
@@ -79,6 +98,17 @@ def _gics_flags(fund_key: str, gics: Mapping[str, Any]) -> tuple:
 # ----------------------------------------------------------------------
 def _pf(value: object) -> str:
     return "PASS" if value else "FAIL"
+
+
+def _ownership_text(value: Any, spec: str) -> str:
+    # The checker leaves ownership NaN where shares are held but shares outstanding is missing.
+    if value is not None and pd.isna(value):
+        return "N/A (no shares out)"
+    return format(float(value or 0.0), spec)
+
+
+def _na_status(value: Any) -> Optional[str]:
+    return value if isinstance(value, str) and value.startswith("N/A") else None
 
 
 def _join(items: Any, fmt: Callable[[Any], str]) -> str:
@@ -104,22 +134,28 @@ def _prospectus_row(report_date, fund_name, payload, calc, r):
     tbill = calc.get("total_tbill_value", 0.0) or 0.0
     cash = calc.get("total_cash_value", 0.0) or 0.0
     in_scope = bool(payload.get("options_in_scope"))
+    # The checker's ratios: options count on both sides only when in scope (closed-end funds use the
+    # option MV as the primary amount). A skipped fund has none, so its ratio leaves options out.
+    numerator = calc.get("numerator", equity + tbill)
+    denominator = calc.get("denominator", equity + cash + tbill)
+    numerator_mv = calc.get("numerator_mv", equity + tbill)
+    denominator_mv = calc.get("denominator_mv", equity + cash + tbill)
     return OrderedDict(
         [
             ("Date", report_date),
             ("Fund", fund_name),
-            ("Prospectus 80% Compliance", f'=IF(K{r}/J{r}>=0.8,"PASS","FAIL")'),
+            ("Prospectus 80% Compliance", f'=IF(K{r}/J{r}>={PROSPECTUS_MIN_THRESHOLD:g},"PASS","FAIL")'),
             ("Total Equity Market Value", equity),
             ("Total Option Delta Notional Value (DAN)", option_dan),
             ("Total Option Market Value", option_mv),
             ("Total T-Bill Value", tbill),
             ("Total Cash Value", cash),
             ("Max(CCET - DAN, 0)", max((cash + tbill) - option_dan, 0.0)),
-            ("Denominator", equity + option_dan + cash + tbill),
-            ("Numerator", equity + (option_dan if in_scope else 0.0) + tbill),
+            ("Denominator", denominator),
+            ("Numerator", numerator),
             ("Formula", f"=K{r}/J{r}"),
-            ("Denominator (Market Value)", equity + option_mv + cash + tbill),
-            ("Numerator (Market Value)", equity + (option_mv if in_scope else 0.0) + tbill),
+            ("Denominator (Market Value)", denominator_mv),
+            ("Numerator (Market Value)", numerator_mv),
             ("Formula (MV)", f"=N{r}/M{r}"),
             ("Options in Scope for 80%?", "Yes" if in_scope else "No"),
         ]
@@ -138,7 +174,7 @@ def _forty_act_row(report_date, fund_name, payload, calc, r):
         calc.get("remaining_stocks_details", []) or [],
         lambda e: (
             f"({e.get('eqyticker')}, {_extract_share_value(e):,.0f}, "
-            f"{num(e, 'vest_weight'):.2%}, {num(e, 'vest_ownership_of_float'):.7%})"
+            f"{num(e, 'vest_weight'):.2%}, {_ownership_text(e.get('vest_ownership_of_float'), '.7%')})"
         ),
     )
 
@@ -159,10 +195,12 @@ def _forty_act_row(report_date, fund_name, payload, calc, r):
             ("Fund", fund_name),
             ("Fund Registration", calc.get("fund_registration")),
             ("Fund Status Today", calc.get("fund_status_today")),
-            ("Registration Match", f'=IF(C{r}=D{r},"PASS","FAIL")'),
+            # The checker's rule: only a fund registered as diversified that is not operating as diversified fails.
+            ("Registration Match", f'=IF(OR(D{r}="diversified",C{r}<>"diversified"),"PASS","FAIL")'),
             ("Condition 40 Act 1", f'=IF(L{r}>=0.75,"PASS","FAIL")'),
             ("Condition 40 Act 2a", f'=IF(O{r}=0,"PASS","FAIL")'),
-            ("Condition 40 Act 2b", f'=IF(VALUE(U{r})="","",IF(VALUE(U{r})<=0.1,"PASS","FAIL"))'),
+            ("Condition 40 Act 2b", _na_status(payload.get("condition_40act_2b_status"))
+             or f'=IF(VALUE(U{r})="","",IF(VALUE(U{r})<=0.1,"PASS","FAIL"))'),
             ("Condition 2a OCC", f'=IF(V{r}=0,"PASS",IF(V{r}<=0.05*M{r},"PASS","FAIL"))'),
             ("Total Assets", num(calc, "total_assets")),
             ("Non-Qualifying Assets Weight", num(calc, "non_qualifying_assets_1_wgt")),
@@ -208,10 +246,13 @@ def _irs_row(report_date, fund_name, payload, calc, r):
             ("Date", report_date),
             ("Fund", fund_name),
             ("condition_IRS_1", _pf(payload.get("condition_IRS_1"))),
-            ("condition_IRS_2_a_50", f'=IF((I{r}+S{r})/H{r}>=0.5,"PASS","FAIL")'),
+            # The checker's test: qualifying assets >= 50% of net assets (net assets is not on the sheet).
+            ("condition_IRS_2_a_50", _pf(payload.get("condition_IRS_2_a_50"))),
             ("condition_IRS_2_a_5", f'=IF(L{r}<=0.5,"PASS","FAIL")'),
-            ("condition_IRS_2_a_10", _pf(payload.get("condition_IRS_2_a_10"))),
-            ("condition_IRS_2_b", _pf(payload.get("condition_IRS_2_b", True))),
+            ("condition_IRS_2_a_10", _na_status(payload.get("condition_IRS_2_a_10_status"))
+             or _pf(payload.get("condition_IRS_2_a_10"))),
+            ("condition_IRS_2_b", _pf(payload["condition_IRS_2_b"]) if "condition_IRS_2_b" in payload
+             else "N/A (not evaluated)"),  # the checker has no 2b test
             ("total_assets", num(calc, "total_assets")),
             ("qualifying_assets_value", num(calc, "qualifying_assets_value")),
             ("expenses", abs(num(calc, "expenses"))),
@@ -269,8 +310,10 @@ def _commodities_row(report_date, fund_name, payload, calc, r):
 def _12d1_row(report_date, fund_name, payload, calc, r):
     holdings_str = _join(
         calc.get("investment_companies", []) or [],
-        lambda h: f"{h.get('ticker')} ({(h.get('ownership_pct') or 0):.2%})",
+        lambda h: f"{h.get('ticker')} ({_ownership_text(h.get('ownership_pct'), '.2%')})",
     )
+    # With an N/A ownership test the AND formula would read FAIL, so write the checker's verdict.
+    test_1_na = _na_status(payload.get("test_1_status"))
     return OrderedDict(
         [
             ("Date", report_date),
@@ -279,10 +322,16 @@ def _12d1_row(report_date, fund_name, payload, calc, r):
             ("Investment Companies", holdings_str),
             ("Ownership % Max", num(calc, "ownership_pct_max")),
             ("Equity Market Value Sum", num(calc, "equity_market_value_sum")),
-            ("Test 1 (<=3% Ownership)", f'=IF(E{r}<=0.03,"PASS","FAIL")'),
-            ("Test 2 (<=5% Total Assets)", f'=IF(F{r}/C{r}<=0.05,"PASS","FAIL")'),
-            ("Test 3 (<=10% Total Assets)", f'=IF(F{r}/C{r}<=0.10,"PASS","FAIL")'),
-            ("12d1(a) Compliant", f'=IF(AND(G{r}="PASS",H{r}="PASS",I{r}="PASS"),"PASS","FAIL")'),
+            ("Test 1 (<=3% Ownership)", test_1_na or f'=IF(E{r}<=0.03,"PASS","FAIL")'),
+            # Test 2 is the largest single holding (K), Test 3 the sum (F), as in the checker; with no
+            # total assets the formula falls back to the checker's verdict instead of #DIV/0!.
+            ("Test 2 (<=5% Total Assets)", f'=IFERROR(IF(K{r}/C{r}<={RULE_12D1A_SINGLE_ASSETS_LIMIT:g},'
+             f'"PASS","FAIL"),"{_pf(payload.get("test_2_pass"))}")'),
+            ("Test 3 (<=10% Total Assets)", f'=IFERROR(IF(F{r}/C{r}<={RULE_12D1A_TOTAL_ASSETS_LIMIT:g},'
+             f'"PASS","FAIL"),"{_pf(payload.get("test_3_pass"))}")'),
+            ("12d1(a) Compliant", _pf(payload.get("twelve_d1a_other_inv_cos_compliant")) if test_1_na
+             else f'=IF(AND(G{r}="PASS",H{r}="PASS",I{r}="PASS"),"PASS","FAIL")'),
+            ("Equity Market Value Max", num(calc, "equity_market_value_max")),
         ]
     )
 
@@ -290,35 +339,48 @@ def _12d1_row(report_date, fund_name, payload, calc, r):
 def _12d2_row(report_date, fund_name, payload, calc, r):
     holdings = calc.get("insurance_holdings", [])
     holdings_str = ", ".join(
-        f"{h.get('eqyticker') or h.get('ticker')} ({(h.get('ownership_pct') or 0)*100:.5f}%)" for h in holdings
+        f"{h.get('eqyticker') or h.get('ticker')} ({_ownership_text(h.get('ownership_pct'), '.5%')})"
+        for h in holdings
     ) or "None"
     return {
         "Date": report_date,
         "Fund": fund_name,
-        "Compliant": _pf(payload.get("test_pass")),
+        "Compliant": _na_status(payload.get("test_status")) or _pf(payload.get("test_pass")),
         "Total Assets": calc.get("total_assets", 0.0),
         "Insurance Holdings": holdings_str,
     }
 
 
+# The checker's 12d3 limits; the Excel columns and the PDF rows share these labels.
+_12D3_RULE_LABELS = (
+    f"Rule 1 (<={RULE_12D3_EQUITY_LIMIT:.0%} equities)",
+    f"Rule 2 (<={RULE_12D3_DEBT_LIMIT:.0%} debt)",
+    f"Rule 3 (<={RULE_12D3_ASSET_LIMIT:.0%} total assets)",
+)
+
+
 def _12d3_row(report_date, fund_name, payload, calc, r):
     sec_related_str = _join(
         calc.get("sec_related_businesses", []) or [],
-        lambda biz: f"{biz.get('eqyticker')} ({(biz.get('ownership_pct') or 0) * 100:.5f}%)",
+        lambda biz: f"{biz.get('eqyticker')} ({_ownership_text(biz.get('ownership_pct'), '.5%')})",
     )
     combined_str = _join(
         calc.get("combined_holdings", []) or [],
         lambda h: f"{h.get('eqyticker')} ({(h.get('vest_weight') or 0) * 100:.2f}%)",
     )
-    # Rule 3 points at column L, which is past the last column (known issue, kept as-is).
+    # With an N/A ownership test the AND formula would read FAIL, so write the checker's verdict.
+    rule_1_na = _na_status(payload.get("rule_1_status"))
+    # Rule 1 is the max ownership of shares outstanding (J is text), so it is the checker's status;
+    # Rule 3 is the max portfolio weight (K) against the checker's limit.
     return OrderedDict(
         [
             ("Date", report_date),
             ("Fund", fund_name),
-            ("Rule 1 (<=5% equities)", f'=IF(K{r}<=0.05,"PASS","FAIL")'),
-            ("Rule 2 (<=10% debt)", _pf(payload.get("rule_2_pass"))),
-            ("Rule 3 (<=5% total assets)", f'=IF(L{r}<=0.05,"PASS","FAIL")'),
-            ("12d3 Sec Biz Compliant", f'=IF(AND(C{r}="PASS",D{r}="PASS",E{r}="PASS"),"PASS","FAIL")'),
+            (_12D3_RULE_LABELS[0], rule_1_na or _pf(payload.get("rule_1_pass"))),
+            (_12D3_RULE_LABELS[1], _pf(payload.get("rule_2_pass"))),
+            (_12D3_RULE_LABELS[2], f'=IF(K{r}<={RULE_12D3_ASSET_LIMIT:g},"PASS","FAIL")'),
+            ("12d3 Sec Biz Compliant", _pf(payload.get("twelve_d3_sec_biz_compliant")) if rule_1_na
+             else f'=IF(AND(C{r}="PASS",D{r}="PASS",E{r}="PASS"),"PASS","FAIL")'),
             ("SEC-Related Businesses (Shs Out %)", sec_related_str),
             ("Combined Holdings (Portfolio %)", combined_str),
             ("Total Assets", num(calc, "total_assets")),
@@ -326,6 +388,19 @@ def _12d3_row(report_date, fund_name, payload, calc, r):
             ("Max Weight", num(calc, "max_weight")),
         ]
     )
+
+
+def _is_verdict(value: object) -> bool:
+    return isinstance(value, str) and (value.startswith(("=", "N/A")) or value in {"PASS", "FAIL"})
+
+
+def _skipped_row(row: Mapping[str, object], reason: object) -> Dict[str, object]:
+    """A rule the checker skipped: its verdict / formula cells say why, the other values stay blank."""
+    status = f"N/A (skipped: {reason})" if reason else "N/A (skipped)"
+    return {
+        column: value if column in ("Date", "Fund") else (status if _is_verdict(value) else None)
+        for column, value in row.items()
+    }
 
 
 class _RuleSheet(NamedTuple):
@@ -342,7 +417,8 @@ class _RuleSheet(NamedTuple):
 _RULE_SHEETS = (
     _RuleSheet(
         "prospectus_80pct_policy", "Prospectus_80pct", "prospectus_80pct", _prospectus_row,
-        fund_filter=lambda fund: not (_is_closed_end_fund(fund) and fund.startswith("TR")),
+        # The checker skips the P3 and TR closed-end funds (prospectus_80pct_policy).
+        fund_filter=lambda fund: not (_is_closed_end_fund(fund) and fund.startswith(("P3", "TR"))),
         warn_missing=True,
     ),
     _RuleSheet("diversification_40act_check", "40Act_Diversification", "40act", _forty_act_row),
@@ -373,15 +449,17 @@ class ComplianceReport:
         output_dir: str,
         *,
         file_name_prefix: str = "compliance_results",
+        file_stem: Optional[str] = None,
         test_functions: Optional[Iterable[str]] = None,
         gics_mapping: Optional[pd.DataFrame] = None,
     ) -> None:
         self.report_date = normalize_report_date(report_date)
         self.output_dir = ensure_dir(output_dir)
-        self.file_path = self.output_dir / f"{file_name_prefix}_{self.report_date}.xlsx"
+        self.file_stem = file_stem or f"{file_name_prefix}_{self.report_date}"
+        self.file_path = self.output_dir / f"{self.file_stem}.xlsx"
 
         self.gics_mapping = gics_mapping.copy() if isinstance(gics_mapping, pd.DataFrame) else pd.DataFrame()
-        self.test_functions = set(test_functions) if test_functions else None
+        self.test_functions = _selected_tests(test_functions) or None
         self.sheet_data: Dict[str, pd.DataFrame] = {}
 
         self.results = self._prepare_results(results)
@@ -391,7 +469,7 @@ class ComplianceReport:
 
     # ------------------------------------------------------------------
     def process_all_checks(self) -> None:
-        steps = [("summary", self.process_summary), ("gics_compliance", self.process_gics_compliance)]
+        steps = [("summary_metrics", self.process_summary), ("gics_compliance", self.process_gics_compliance)]
         steps += [(spec.key, partial(self._build_rule_sheet, spec)) for spec in _RULE_SHEETS]
         for test_name, processor in steps:
             if self.test_functions is None or test_name in self.test_functions:
@@ -468,7 +546,8 @@ class ComplianceReport:
                 if not spec.raw_calc:
                     calc = calc or {}
                 # Excel row of this record: header is row 1, data starts at row 2.
-                rows.append(spec.row(report_date, fund_name, payload, calc, len(rows) + 2))
+                row = spec.row(report_date, fund_name, payload, calc, len(rows) + 2)
+                rows.append(_skipped_row(row, payload.get("reason")) if payload.get("skipped") else row)
 
         if rows:
             self.sheet_data[spec.sheet] = self._append_footnotes(pd.DataFrame(rows), spec.footnote)
@@ -484,7 +563,7 @@ class ComplianceReport:
                     continue
                 combined = {**fund_totals, **summary}
                 row = {"Date": date_str, "Fund": fund_name}
-                row.update((column, combined.get(key, 0.0)) for column, key in _SUMMARY_FIELDS)
+                row.update((column, combined.get(key, 0.0)) for column, key in _SUMMARY_SHEET_FIELDS)
                 rows.append(row)
 
         if not rows:
@@ -667,11 +746,6 @@ class ComplianceReport:
 # PDF metric tables: (title, test_key, footnote_key, labels exempt from FAIL
 # highlighting, metrics). Each metric is (label, formatter, source, field).
 # ----------------------------------------------------------------------
-_IRC_LABELS = (
-    "Overall Status", "Condition 55", "Condition 70", "Condition 80", "Condition 90",
-    "Top 1 Exposure", "Top 4 Exposure",
-)
-
 _PDF_SECTIONS = (
     (
         "Summary Metrics", "summary_metrics", None, (),
@@ -697,7 +771,7 @@ _PDF_SECTIONS = (
             ("Registration Match", "status", "registrations_match", None),
             ("Condition 1", "status", "detail", "condition_40act_1"),
             ("Condition 2a", "status", "detail", "condition_40act_2a"),
-            ("Condition 2b", "status", "detail", "condition_40act_2b"),
+            ("Condition 2b", "status", "detail", "condition_40act_2b_status"),
             ("Condition 2a OCC", "status", "detail", "condition_40act_2a_occ"),
             ("Max Ownership %", "pct", "calc", "max_ownership_float"),
         ),
@@ -709,16 +783,20 @@ _PDF_SECTIONS = (
             ("Condition 1", "status", "detail", "condition_IRS_1"),
             ("Condition 2a 50%", "status", "detail", "condition_IRS_2_a_50"),
             ("Condition 2a 5%", "status", "detail", "condition_IRS_2_a_5"),
-            ("Condition 2a 10%", "status", "detail", "condition_IRS_2_a_10"),
-            ("Condition 2b", "status", "detail", "condition_IRS_2_b"),
+            ("Condition 2a 10%", "status", "detail", "condition_IRS_2_a_10_status"),
+            ("Condition 2b", "status", "detail_or_na", "condition_IRS_2_b"),  # the checker has no 2b test
             ("Sum Large Securities %", "pct", "calc", "sum_large_securities_weights"),
             ("Large Securities Count", "int", "calc", "large_securities_count"),
         ),
     ),
-    # Never rendered today (see _is_test_selected); its metric helpers were never implemented.
     (
         "IRC Diversification", "diversification_IRC_check", "irc", (),
-        tuple((label, None, "unimplemented", None) for label in _IRC_LABELS),
+        (
+            ("Overall Status", "status", "top", "is_compliant"),
+            *((f"Condition {n}", "status", "detail", f"condition_IRC_{n}") for n in (55, 70, 80, 90)),
+            ("Top 1 Exposure", "pct", "calc", "top_1"),
+            ("Top 4 Exposure", "pct", "calc", "top_4"),
+        ),
     ),
     (
         "15% Illiquid Assets", "max_15pct_illiquid_sai", "illiquid", (),
@@ -746,7 +824,7 @@ _PDF_SECTIONS = (
         "Rule 12d1-1", "twelve_d1a_other_inv_cos", "12d1", (),
         (
             ("Status", "status", "top", "is_compliant"),
-            ("Test 1", "status", "detail", "test_1_pass"),
+            ("Test 1", "status", "first_detail", ("test_1_status", "test_1_pass")),
             ("Test 2", "status", "detail", "test_2_pass"),
             ("Test 3", "status", "detail", "test_3_pass"),
         ),
@@ -754,7 +832,8 @@ _PDF_SECTIONS = (
     (
         "Rule 12d2", "twelve_d2_insurance_cos", "12d2", (),
         (
-            ("Status", "status", "top", "is_compliant"),
+            # A single test: its status (N/A when shares outstanding is missing), else the verdict.
+            ("Status", "status", "first_detail", ("test_status", "is_compliant")),
             ("Max Ownership", "pct", "calc", "max_ownership_pct"),
         ),
     ),
@@ -762,9 +841,9 @@ _PDF_SECTIONS = (
         "Rule 12d3", "twelve_d3_sec_biz", "12d3", (),
         (
             ("Overall Status", "status", "top", "is_compliant"),
-            ("Rule 1 (<=5%)", "status", "detail", "rule_1_pass"),
-            ("Rule 2 (<=10%)", "status", "detail", "rule_2_pass"),
-            ("Rule 3 (<=5%)", "status", "detail", "rule_3_pass"),
+            (_12D3_RULE_LABELS[0], "status", "first_detail", ("rule_1_status", "rule_1_pass")),
+            (_12D3_RULE_LABELS[1], "status", "detail", "rule_2_pass"),
+            (_12D3_RULE_LABELS[2], "status", "detail", "rule_3_pass"),
         ),
     ),
 )
@@ -782,11 +861,7 @@ class ComplianceReportPDF(BaseReportPDF):
     ) -> None:
         super().__init__(output_path, orientation="L")
         self.results = flatten_compliance_results(results)
-        self.allowed_tests = (
-            {test for test in allowed_tests if test}
-            if allowed_tests is not None
-            else None
-        )
+        self.allowed_tests = _selected_tests(allowed_tests)
         self.generate_pdf()
         self.save_pdf()
 
@@ -813,12 +888,10 @@ class ComplianceReportPDF(BaseReportPDF):
         self.fund_order = sorted(grouped_results)
 
         for idx, (title, test_key, footnote, skip_labels, metrics) in enumerate(_PDF_SECTIONS):
-            if not self._is_test_selected(test_key):
-                continue
+            if self._is_test_selected(test_key):
+                self._render_metric_section(title, test_key, metrics, footnote, skip_labels)
 
-            self._render_metric_section(title, test_key, metrics, footnote, skip_labels)
-
-            # GICS overview only appears right after Summary Metrics.
+            # GICS overview goes right after the Summary Metrics slot, whether or not Summary is selected.
             if idx == 0 and self._is_test_selected("gics_compliance"):
                 has_gics_data = any(
                     isinstance(payload, dict) and "gics_compliance" in payload
@@ -846,11 +919,7 @@ class ComplianceReportPDF(BaseReportPDF):
             row: list[str] = [self._sanitize_text(label)]
             for fund in self.fund_order:
                 fund_payload = self.grouped_results.get(fund, {})
-                try:
-                    value = self._metric_value(fund_payload, test_key, fmt, source, field)
-                except Exception:
-                    value = ""
-                row.append(self._sanitize_text(str(value or "")))
+                row.append(self._sanitize_text(self._cell_text(fund_payload, test_key, fmt, source, field)))
             rows.append(row)
 
         estimated_height = 5.0 + (4.2 * len(rows)) + 6
@@ -862,8 +931,19 @@ class ComplianceReportPDF(BaseReportPDF):
         self._draw_footnotes_section(footnote_key)
         self.pdf.ln(2)
 
+    def _cell_text(self, fund_data, test_key, fmt, source, field) -> str:
+        # The checker runs IRC only for VIT funds; another fund in the run has no IRC result,
+        # so its column reads N/A rather than blank statuses and a measured-looking 0% exposure.
+        if test_key == "diversification_IRC_check" and test_key not in (fund_data or {}):
+            return "N/A"
+        try:
+            value = self._metric_value(fund_data, test_key, fmt, source, field)
+        except Exception:
+            value = ""
+        return str(value or "")
+
     def _metric_value(self, fund_data, test_key, fmt, source, field) -> object:
-        if source == "status_or_skip":
+        if source == "status_or_skip" or (fmt == "status" and self._is_test_skipped(fund_data, test_key)):
             return self._status_or_skip(fund_data, test_key)
         payload = self._get_test_payload(fund_data, test_key)
         if source == "summary":
@@ -876,6 +956,13 @@ class ComplianceReportPDF(BaseReportPDF):
             value = self._first_not_none(*(self._get_calculation(payload, key) for key in field))
         elif source == "detail":
             value = self._get_detail(payload, field)
+        elif source == "detail_or_na":
+            # A condition the checker does not evaluate reads N/A, as in the workbook, instead of blank.
+            value = self._get_detail(payload, field)
+            if value is None and payload:
+                value = "N/A (not evaluated)"
+        elif source == "first_detail":
+            value = self._first_not_none(*(self._get_detail(payload, key) for key in field))
         elif source == "registrations_match":
             value = self._registrations_match(payload)
         else:
@@ -964,14 +1051,9 @@ class ComplianceReportPDF(BaseReportPDF):
         return summary_result.get(key, 0.0)
 
     def _is_test_selected(self, test_name: str) -> bool:
-        # Known quirk: self.results is keyed by (fund, date), so this iterates test
-        # names rather than funds and the IRC section never renders.
+        # The IRC section only appears when the run has a VIT fund (self.results is keyed by (fund, date)).
         if test_name == "diversification_IRC_check":
-            has_vit_wrapper = any(
-                _vehicle_wrapper(fund_name) == "vit"
-                for funds in self.results.values()
-                for fund_name in funds.keys()
-            )
+            has_vit_wrapper = any(_vehicle_wrapper(fund_name) == "vit" for fund_name, _ in self.results)
             if not has_vit_wrapper:
                 return False
         if not self.allowed_tests:
@@ -979,11 +1061,12 @@ class ComplianceReportPDF(BaseReportPDF):
         return test_name in self.allowed_tests
 
     def _is_test_skipped(self, fund_data: Mapping[str, Any], key: str) -> bool:
+        # The checker's details are flattened into the payload (report_utils); a nested
+        # "details" mapping is still honoured.
         payload = self._get_test_payload(fund_data, key)
-        details = payload.get("details") if isinstance(payload, Mapping) else None
-        if not isinstance(details, Mapping):
-            return False
-        return bool(details.get("skipped") or details.get("skip"))
+        details = payload.get("details")
+        details = details if isinstance(details, Mapping) else {}
+        return bool(payload.get("skipped") or details.get("skipped") or details.get("skip"))
 
     def _status_or_skip(self, fund_data: Mapping[str, Any], key: str) -> str:
         if self._is_test_skipped(fund_data, key):
@@ -1028,22 +1111,25 @@ class ComplianceReportPDF(BaseReportPDF):
         actual = calculations.get("fund_status_today")
         if expected is None or actual is None:
             return None
-        return str(expected).strip().lower() == str(actual).strip().lower()
+        # Same rule as the checker: a non-diversified registration permits operating either way.
+        return str(actual).strip().lower() == "diversified" or str(expected).strip().lower() != "diversified"
 
     @staticmethod
     def _status_text(value: object) -> str:
-        if isinstance(value, bool):
+        if isinstance(value, (bool, np.bool_)):  # numpy.bool_ from checks on numpy values
             return "PASS" if value else "FAIL"
         if isinstance(value, str):
             upper = value.strip().upper()
             if upper in {"PASS", "FAIL"}:
                 return upper
+            if upper.startswith("N/A"):  # e.g. no shares outstanding data for an ownership test
+                return "N/A"
         # Unknown / missing test result: surface it rather than silently passing.
         return ""
 
     @staticmethod
     def _yes_no(value: object) -> str:
-        if isinstance(value, bool):
+        if isinstance(value, (bool, np.bool_)):
             return "Yes" if value else "No"
         return ""
 
@@ -1114,7 +1200,8 @@ class ComplianceReportPDF(BaseReportPDF):
             rows.append([
                 str(date_disp),
                 str(fund_name),
-                str(gics.get("overall_gics_compliance", "")),
+                # Same fallback as the GICS_Compliance sheet: an early checker fail() carries no overall status.
+                str(gics.get("overall_gics_compliance", "FAIL")),
                 *("Yes" if flag else "No" for flag in flags),
                 can_exceed,
                 exceptions,
@@ -1169,30 +1256,36 @@ def generate_compliance_reports(
     output_dir: str,
     *,
     file_name_prefix: str = "compliance_results",
+    file_stem: Optional[str] = None,
     test_functions: Optional[Iterable[str]] = None,
     gics_mapping: Optional[pd.DataFrame] = None,
     create_pdf: bool = True,
 ) -> GeneratedComplianceReport:
-    """Create Excel and PDF compliance reports."""
+    """Create Excel and PDF compliance reports named ``<file_stem>`` (default ``<prefix>_<report_date>``)."""
 
     report = ComplianceReport(
         results=results,
         report_date=report_date,
         output_dir=output_dir,
         file_name_prefix=file_name_prefix,
+        file_stem=file_stem,
         test_functions=test_functions,
         gics_mapping=gics_mapping,
     )
 
+    # Report only the files this call wrote: export_to_excel writes nothing without sheet data,
+    # and a failed PDF leaves no file behind.
+    excel_file_path = str(report.file_path) if report.sheet_data else None
     pdf_file_path = None
     if create_pdf:
         try:
-            pdf_file_path = str(Path(output_dir) / f"{file_name_prefix}_{report.report_date}.pdf")
-            ComplianceReportPDF(report.results, pdf_file_path, allowed_tests=test_functions)
+            pdf_target = str(Path(output_dir) / f"{report.file_stem}.pdf")
+            ComplianceReportPDF(report.results, pdf_target, allowed_tests=test_functions)
+            pdf_file_path = pdf_target
         except RuntimeError as exc:  # pragma: no cover - optional dependency missing
             logger.warning("PDF generation skipped: %s", exc)
         except Exception as exc:
             # exc_info=True so the actual fpdf2 stack trace surfaces in the log.
             logger.error("PDF generation failed: %s", exc, exc_info=True)
 
-    return GeneratedComplianceReport(excel_path=str(report.file_path), pdf_path=pdf_file_path)
+    return GeneratedComplianceReport(excel_path=excel_file_path, pdf_path=pdf_file_path)

@@ -356,6 +356,25 @@ class RunModesProgressTests(unittest.TestCase):
                                        params=params, output_dir=Path("."), errors=errors)
         self.assertEqual(errors[1:], ["Trading-analysis email notification failed: smtp down"])
 
+    def test_trading_mode_without_email(self):
+        fund = SimpleNamespace(compliance_results={"fund_object": object()})
+        results = SimpleNamespace(fund_results={"KNG": fund}, summary={})
+        params = SimpleNamespace(compliance_tests=[], ex_post_date=DAY, create_pdf=False, send_email=False)
+        with mock.patch.object(run_modes, "_run_operations", return_value=results), \
+                mock.patch.object(run_modes, "build_trading_compliance_reports"), \
+                mock.patch.object(run_modes, "build_compliance_reports"), \
+                mock.patch.object(run_modes, "combine_trading_and_compliance_reports"), \
+                mock.patch.object(run_modes, "EmailManager") as email:
+            run_modes.run_trading_mode({}, ex_ante_store=SimpleNamespace(), ex_post_store=SimpleNamespace(),
+                                       params=params, output_dir=Path("."), on_progress=self.seen.append)
+        self.assertEqual([e.stage for e in self.seen], ["process", "process", "reports"])
+        email.assert_not_called()
+
+    def test_trading_parameters_carry_send_email(self):
+        for send_email in (True, False):
+            params = api._trading_parameters(req(operations=("trading_compliance",), send_email=send_email), DAY)
+            self.assertIs(params.send_email, send_email)
+
     def test_trading_mode(self):
         fund = SimpleNamespace(compliance_results={"fund_object": object()})
         results = SimpleNamespace(fund_results={"KNG": fund}, summary={})

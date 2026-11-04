@@ -60,14 +60,16 @@ def build_nav_reconciliation_reports(
         )
 
     nav_report: Optional[GeneratedNAVReconciliationReport] = None
-    # The NAV sheets are appended to the holdings workbook written above.
+    # The NAV sheets are appended to the holdings workbook only when this run just
+    # wrote it; a workbook left by an earlier run is replaced, never appended to.
+    holdings_xlsx = Path(holdings_report.excel_path) if holdings_report and holdings_report.excel_path else None
     if nav:
         nav = convert_nav_results_to_dicts(nav)
         NAVReconciliationExcelReport(
             results=nav,
             report_date=date_str,
             output_path=excel_path,
-            workbook=load_workbook(excel_path) if excel_path.exists() else None,
+            workbook=load_workbook(excel_path) if holdings_xlsx == excel_path else None,
         )
         nav_report = GeneratedNAVReconciliationReport(excel_path=str(excel_path))
 

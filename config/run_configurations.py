@@ -44,6 +44,7 @@ def exclude_funds(base, *exclude_items) -> List[str]:
 
 
 FULL_COMPLIANCE_TESTS: List[str] = [
+    "summary_metrics",  # fund totals for the Summary sheet / PDF section (the checker always runs it)
     "gics_compliance",
     "prospectus_80pct_policy",
     "diversification_40act_check",

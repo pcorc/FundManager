@@ -24,6 +24,10 @@ SCENARIOS = {
     "nav_etf": dict(mode="nav", cohorts=["ETF_FUNDS"], start_date="2026-10-30"),
     "recon_etf": dict(mode="reconciliation", cohorts=["ETF_FUNDS"], start_date="2026-10-30"),
     "trading_etf": dict(mode="trading_compliance", cohorts=["ETF_FUNDS"], start_date="2026-10-30", output_tag="etfs"),
+    # send_email=False: the same reports, and no email.
+    "trading_etf_no_email": dict(
+        mode="trading_compliance", cohorts=["ETF_FUNDS"], start_date="2026-10-30", output_tag="etfs", send_email=False,
+    ),
     "time_series_cef": dict(
         mode="time_series", cohorts=["CLOSED_END_FUNDS"], start_date="2026-10-26", end_date="2026-10-30",
         compliance_tests=["diversification_40act_check", "diversification_IRS_check"], output_tag="cefs_ts",
@@ -33,6 +37,10 @@ SCENARIOS = {
     ),
     "multi_mode_funds": dict(
         mode=["compliance", "nav"], funds=["KNG", "RDVI"], start_date="2026-10-30", output_tag="pair",
+    ),
+    # A VIT fund next to an ETF: the IRC PDF section has a column for a fund the IRC test does not apply to.
+    "compliance_vit_mix": dict(
+        mode="compliance", funds=["FTCSH", "KNG"], start_date="2026-10-30", output_tag="vitmix",
     ),
 }
 

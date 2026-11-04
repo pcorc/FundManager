@@ -232,7 +232,10 @@ class CombinedReconciliationReport:
 
         for fund_name, nav_data in sorted(self.nav.items()):
             nav_diff = num(nav_data, "NAV Diff ($)")
-            ok2 = bool(nav_data.get("NAV Good (2 Digit)"))
+            flag_ok = {
+                "NAV Diff (2-dec)": bool(nav_data.get("NAV Good (2 Digit)")),
+                "NAV Diff (4-dec)": bool(nav_data.get("NAV Good (4 Digit)")),
+            }
             opt_px_diff = num(nav_data, "combined_gl_cust") - num(nav_data, "combined_gl_vest")
 
             self._fund_cell(fund_name, cols[0][1], 7, 8)
@@ -247,13 +250,13 @@ class CombinedReconciliationReport:
                 _fmt(opt_px_diff, 0),
             ]
             for (label, width), value in zip(cols[1:], values, strict=False):
-                # The 4-dec cell is always green by design.
-                if label == "NAV Diff (2-dec)" and not ok2:
-                    self.pdf.set_fill_color(255, 200, 200)
-                elif label in ("NAV Diff (2-dec)", "NAV Diff (4-dec)"):
+                # Each NAV Diff cell is coloured by its own NAV Good flag.
+                if label not in flag_ok:
+                    self.pdf.set_fill_color(255, 255, 255)
+                elif flag_ok[label]:
                     self.pdf.set_fill_color(200, 255, 200)
                 else:
-                    self.pdf.set_fill_color(255, 255, 255)
+                    self.pdf.set_fill_color(255, 200, 200)
                 self.pdf.cell(width, 7, value, border=1, fill=True, align="R")
             self.pdf.ln()
 
@@ -548,7 +551,7 @@ class CombinedReconciliationReport:
         self.pdf.cell(value_w, 7, f"{nav_diff:.4f}   ({nav_diff_pct:.4f}%)", border=1, align="R")
         self.pdf.ln()
 
-        # ===== NAV Good flags — transposed compact row; 4-Dec has a white fill =====
+        # ===== NAV Good flags — transposed compact row, green PASS / red FAIL =====
         flags = [
             (lbl, f)
             for lbl, f in (("2-Dec", nav_data.get("NAV Good (2 Digit)")), ("4-Dec", nav_data.get("NAV Good (4 Digit)")))
@@ -559,11 +562,8 @@ class CombinedReconciliationReport:
             cell_w = (label_w + value_w) / len(flags)
             self._header_row([(f"NAV Good {lbl}", cell_w) for lbl, _ in flags], 6, 8)
             self.pdf.set_font("Arial", "B", 9)
-            for lbl, f in flags:
+            for _, f in flags:
                 passed = bool(f)
-                if lbl == "2-Dec":
-                    self.pdf.set_fill_color(200, 255, 200) if passed else self.pdf.set_fill_color(255, 200, 200)
-                else:
-                    self.pdf.set_fill_color(255, 255, 255)
+                self.pdf.set_fill_color(200, 255, 200) if passed else self.pdf.set_fill_color(255, 200, 200)
                 self.pdf.cell(cell_w, 7, "PASS" if passed else "FAIL", border=1, fill=True, align="C")
             self.pdf.ln()
