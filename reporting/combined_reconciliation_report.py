@@ -2,6 +2,7 @@
 from __future__ import annotations
 import datetime
 import logging
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Sequence
 
@@ -89,6 +90,130 @@ def _summary_count(section: Mapping[str, Any], *keys: str) -> int:
     return 0
 
 
+def nav_summary_cells(nav_data: Mapping[str, Any]) -> list[tuple[str, str, Any]]:
+    """NAV summary row after the Fund column: (column label, text, NAV Good flag or None)."""
+    nav_diff = num(nav_data, "NAV Diff ($)")
+    flag_ok = {
+        "NAV Diff (2-dec)": bool(nav_data.get("NAV Good (2 Digit)")),
+        "NAV Diff (4-dec)": bool(nav_data.get("NAV Good (4 Digit)")),
+    }
+    opt_px_diff = num(nav_data, "combined_gl_cust") - num(nav_data, "combined_gl_vest")
+    values = [
+        _fmt(nav_data.get("Expected TNA"), 0),
+        _fmt(nav_data.get("Custodian TNA"), 0),
+        _fmt(nav_data.get("TNA Diff ($)"), 0),
+        _fmt(nav_data.get("Expected NAV")),
+        _fmt(nav_data.get("Custodian NAV")),
+        _fmt(nav_diff, 2),
+        _fmt(nav_diff, 4),
+        _fmt(opt_px_diff, 0),
+    ]
+    return [(label, value, flag_ok.get(label)) for (label, _), value in zip(NAV_SUMMARY_COLS[1:], values)]
+
+
+def holdings_summary_counts(summary: Mapping[str, Any]) -> list[tuple[str, int]]:
+    """Holdings summary row after the Fund column: (column label, break count)."""
+    sections = {
+        name: summary.get(name, {})
+        for name in ("custodian_equity", "custodian_option", "custodian_flex_option", "index_equity")
+    }
+    if not isinstance(sections["custodian_flex_option"], Mapping):
+        sections["custodian_flex_option"] = {}
+    return [(label, _summary_count(sections[section], *keys)) for label, _, section, keys in HOLDINGS_SUMMARY_COLS]
+
+
+def gl_component_values(nav: Mapping[str, Any]) -> dict[str, float]:
+    """Gain/Loss components row: GL_COLS key -> amount (no "fund"), "gl_today" being their total."""
+    values: dict[str, float] = {}
+    for key, _, _, _, nav_keys in GL_COLS[1:]:
+        values[key] = resolve_number(nav, nav_keys)
+    values["gl_today"] = (
+        values["eqt_gl"] + values["opt_gl"] + values["flex_gl"] + values["tsy_gl"] + values["assign_gl"]
+        - values["accruals"] - abs(values["distributions"]) + values["other"]
+    )
+    return values
+
+
+def _nav_number(nav_data: Mapping[str, Any], *keys: str, default: float = 0.0) -> float:
+    """First present key coerced to float; 0.0 on miss/bad type."""
+    for k in keys:
+        if k in nav_data and nav_data[k] is not None:
+            try:
+                return float(nav_data[k])
+            except (TypeError, ValueError):
+                continue
+    return float(default)
+
+
+def nav_detail_metrics(nav_data: Mapping[str, Any]) -> list[tuple[str, float, int]]:
+    """The fund page's main NAV table: (metric, value, decimals)."""
+    _n = partial(_nav_number, nav_data)
+    return [
+        ("Expected TNA",   _n("Expected TNA"), 0),
+        ("Custodian TNA",  _n("Custodian TNA"), 0),
+        ("TNA Difference", _n("TNA Diff ($)"), 0),
+        ("Option Pricing Diff", _n("combined_gl_cust") - _n("combined_gl_vest"), 0),
+        ("Expected NAV",   _n("Expected NAV"), 4),
+        ("Custodian NAV",  _n("Custodian NAV"), 4),
+        ("NAV Difference", _n("NAV Diff ($)"), 4),
+    ]
+
+
+def nav_detail_sections(nav_data: Mapping[str, Any]) -> list[tuple[str, tuple[tuple[str, float], ...]]]:
+    """The fund page's Gain/Loss Components and Adjustments tables: (title, ((metric, amount), ...))."""
+    _n = partial(_nav_number, nav_data)
+    return [
+        ("Gain/Loss Components", (
+            ("  Equity G/L",      _n("Equity G/L")),
+            ("  Option G/L",      _n("Option G/L")),
+            ("  Flex Option G/L", _n("Flex Option G/L")),
+            ("  Treasury G/L",    _n("Treasury G/L")),
+        )),
+        ("Adjustments", (
+            ("  Assignment G/L", _n("Assignment G/L")),
+            ("  Accruals",       -abs(_n("Accruals"))),
+            ("  Distributions",  -abs(_n("Distributions"))),
+        )),
+    ]
+
+
+# (row label, vest-price key, custodian-price key) of the CEF option price sensitivity matrix.
+OPTION_SENSITIVITY_ROWS = (
+    ("Listed Option G/L",   "listed_gl_vest",   "listed_gl_cust"),
+    ("Flex Option G/L",     "flex_gl_vest",     "flex_gl_cust"),
+    ("Combined Option G/L", "combined_gl_vest", "combined_gl_cust"),
+)
+
+
+def has_option_sensitivity(fund_name: str, nav_data: Mapping[str, Any]) -> bool:
+    """The fund page shows the option price sensitivity matrix (closed-end funds with option G/L only)."""
+    return is_cef(fund_name) and bool(
+        _nav_number(nav_data, "combined_gl_vest") or _nav_number(nav_data, "combined_gl_cust")
+    )
+
+
+def nav_difference_pct(nav_data: Mapping[str, Any]) -> tuple[float, float]:
+    """(NAV difference, NAV difference as % of the custodian NAV)."""
+    nav_diff = _nav_number(nav_data, "NAV Diff ($)")
+    cust_nav = _nav_number(nav_data, "Custodian NAV")
+    return nav_diff, (nav_diff / cust_nav * 100.0) if cust_nav else 0.0
+
+
+def nav_good_flags(nav_data: Mapping[str, Any]) -> list[tuple[str, Any]]:
+    """The NAV Good flags present: (label suffix, flag)."""
+    return [
+        (lbl, f)
+        for lbl, f in (("2-Dec", nav_data.get("NAV Good (2 Digit)")), ("4-Dec", nav_data.get("NAV Good (4 Digit)")))
+        if f is not None
+    ]
+
+
+def is_cef(fund_name: str) -> bool:
+    """True if the fund is a closed-end fund."""
+    from config.fund_definitions import CLOSED_END_FUNDS
+    return fund_name in CLOSED_END_FUNDS
+
+
 class CombinedReconciliationPDF(FPDF, HoldingsReconciliationRenderer):
     """FPDF subclass with navigation helpers for the combined report."""
 
@@ -152,8 +277,7 @@ class CombinedReconciliationReport:
 
     def _is_cef(self, fund_name: str) -> bool:
         """True if the fund is a closed-end fund."""
-        from config.fund_definitions import CLOSED_END_FUNDS
-        return fund_name in CLOSED_END_FUNDS
+        return is_cef(fund_name)
 
     def _generate_report(self) -> None:
         self._add_title_page()
@@ -231,29 +355,12 @@ class CombinedReconciliationReport:
         self.pdf.set_font("Arial", size=8)
 
         for fund_name, nav_data in sorted(self.nav.items()):
-            nav_diff = num(nav_data, "NAV Diff ($)")
-            flag_ok = {
-                "NAV Diff (2-dec)": bool(nav_data.get("NAV Good (2 Digit)")),
-                "NAV Diff (4-dec)": bool(nav_data.get("NAV Good (4 Digit)")),
-            }
-            opt_px_diff = num(nav_data, "combined_gl_cust") - num(nav_data, "combined_gl_vest")
-
             self._fund_cell(fund_name, cols[0][1], 7, 8)
-            values = [
-                _fmt(nav_data.get("Expected TNA"), 0),
-                _fmt(nav_data.get("Custodian TNA"), 0),
-                _fmt(nav_data.get("TNA Diff ($)"), 0),
-                _fmt(nav_data.get("Expected NAV")),
-                _fmt(nav_data.get("Custodian NAV")),
-                _fmt(nav_diff, 2),
-                _fmt(nav_diff, 4),
-                _fmt(opt_px_diff, 0),
-            ]
-            for (label, width), value in zip(cols[1:], values, strict=False):
+            for (label, width), (_, value, ok) in zip(cols[1:], nav_summary_cells(nav_data), strict=False):
                 # Each NAV Diff cell is coloured by its own NAV Good flag.
-                if label not in flag_ok:
+                if ok is None:
                     self.pdf.set_fill_color(255, 255, 255)
-                elif flag_ok[label]:
+                elif ok:
                     self.pdf.set_fill_color(200, 255, 200)
                 else:
                     self.pdf.set_fill_color(255, 200, 200)
@@ -274,13 +381,7 @@ class CombinedReconciliationReport:
 
         for fund_name in sorted(self.holdings):
             summary = self.holdings[fund_name].get("summary", {})
-            sections = {
-                name: summary.get(name, {})
-                for name in ("custodian_equity", "custodian_option", "custodian_flex_option", "index_equity")
-            }
-            if not isinstance(sections["custodian_flex_option"], Mapping):
-                sections["custodian_flex_option"] = {}
-            values = [_summary_count(sections[section], *keys) for _, _, section, keys in HOLDINGS_SUMMARY_COLS]
+            values = [count for _, count in holdings_summary_counts(summary)]
 
             self._fund_cell(fund_name, 26, 6, 7)
             for val, (label, width, _, _) in zip(values, HOLDINGS_SUMMARY_COLS):
@@ -303,13 +404,7 @@ class CombinedReconciliationReport:
         rows: list[dict[str, float | str]] = []
         totals = dict.fromkeys(value_keys, 0.0)
         for fund_name, nav in sorted(self.nav.items()):
-            values: dict[str, float | str] = {"fund": fund_name}
-            for key, _, _, _, nav_keys in GL_COLS[1:]:
-                values[key] = resolve_number(nav, nav_keys)
-            values["gl_today"] = (
-                values["eqt_gl"] + values["opt_gl"] + values["flex_gl"] + values["tsy_gl"] + values["assign_gl"]
-                - values["accruals"] - abs(values["distributions"]) + values["other"]
-            )
+            values: dict[str, float | str] = {"fund": fund_name, **gl_component_values(nav)}
             rows.append(values)
             for key in totals:
                 totals[key] += num(values, key)
@@ -447,15 +542,7 @@ class CombinedReconciliationReport:
 
         log = logging.getLogger("combined_recon")
 
-        def _n(*keys, default=0.0):
-            """First present key coerced to float; 0.0 on miss/bad type."""
-            for k in keys:
-                if k in nav_data and nav_data[k] is not None:
-                    try:
-                        return float(nav_data[k])
-                    except (TypeError, ValueError):
-                        continue
-            return float(default)
+        _n = partial(_nav_number, nav_data)
 
         # Signal if the G/L keys never made it into nav_data (data-path regression).
         if "Equity G/L" not in nav_data:
@@ -465,15 +552,7 @@ class CombinedReconciliationReport:
         label_w, value_w = 70, 60
 
         # ===== Main NAV metrics table (header inherits the banner's 230 fill) =====
-        rows = [
-            ("Expected TNA",   _n("Expected TNA"), 0),
-            ("Custodian TNA",  _n("Custodian TNA"), 0),
-            ("TNA Difference", _n("TNA Diff ($)"), 0),
-            ("Option Pricing Diff", _n("combined_gl_cust") - _n("combined_gl_vest"), 0),
-            ("Expected NAV",   _n("Expected NAV"), 4),
-            ("Custodian NAV",  _n("Custodian NAV"), 4),
-            ("NAV Difference", _n("NAV Diff ($)"), 4),
-        ]
+        rows = nav_detail_metrics(nav_data)
         self.pdf.set_font("Arial", "B", 10)
         for label, width in (("Metric", label_w), ("Value", value_w)):
             self.pdf.cell(width, 8, label, border=1, fill=True, align="C")
@@ -485,19 +564,7 @@ class CombinedReconciliationReport:
             self.pdf.cell(value_w, 7, _format_currency(value, digits=digits), border=1, fill=True, align="R")
             self.pdf.ln()
 
-        for title, items in (
-            ("Gain/Loss Components", (
-                ("  Equity G/L",      _n("Equity G/L")),
-                ("  Option G/L",      _n("Option G/L")),
-                ("  Flex Option G/L", _n("Flex Option G/L")),
-                ("  Treasury G/L",    _n("Treasury G/L")),
-            )),
-            ("Adjustments", (
-                ("  Assignment G/L", _n("Assignment G/L")),
-                ("  Accruals",       -abs(_n("Accruals"))),
-                ("  Distributions",  -abs(_n("Distributions"))),
-            )),
-        ):
+        for title, items in nav_detail_sections(nav_data):
             self.pdf.ln(2)
             self.pdf.set_font("Arial", "B", 10)
             self.pdf.cell(0, 7, title, ln=True)
@@ -508,7 +575,7 @@ class CombinedReconciliationReport:
                 self.pdf.ln()
 
         # ===== Option Price Sensitivity matrix (CEF only) =====
-        if self._is_cef(fund_name) and (_n("combined_gl_vest") or _n("combined_gl_cust")):
+        if has_option_sensitivity(fund_name, nav_data):
             self.pdf.ln(4)
             self.pdf.set_font("Arial", "B", 10)
             self.pdf.cell(0, 7, "Option Price Sensitivity (Vest vs Custodian Pricing)", ln=True)
@@ -517,11 +584,7 @@ class CombinedReconciliationReport:
             self._header_row(list(zip(("", "Vest Prices", "Custodian Prices", "Impact ($)"), col_w)), 6, 8)
 
             self.pdf.set_font("Arial", size=8)
-            for label, kv, kc in (
-                ("Listed Option G/L",   "listed_gl_vest",   "listed_gl_cust"),
-                ("Flex Option G/L",     "flex_gl_vest",     "flex_gl_cust"),
-                ("Combined Option G/L", "combined_gl_vest", "combined_gl_cust"),
-            ):
+            for label, kv, kc in OPTION_SENSITIVITY_ROWS:
                 v, c = _n(kv), _n(kc)
                 self.pdf.cell(col_w[0], 6, label, border=1)
                 for w, amount in zip(col_w[1:], (v, c, c - v)):
@@ -542,9 +605,7 @@ class CombinedReconciliationReport:
 
         # ===== NAV Difference ($ and %) =====
         self.pdf.ln(3)
-        nav_diff = _n("NAV Diff ($)")
-        cust_nav = _n("Custodian NAV")
-        nav_diff_pct = (nav_diff / cust_nav * 100.0) if cust_nav else 0.0
+        nav_diff, nav_diff_pct = nav_difference_pct(nav_data)
         self.pdf.set_font("Arial", "B", 9)
         self.pdf.cell(label_w, 7, "NAV Difference ($ / %)", border=1)
         self.pdf.set_font("Arial", size=9)
@@ -552,11 +613,7 @@ class CombinedReconciliationReport:
         self.pdf.ln()
 
         # ===== NAV Good flags — transposed compact row, green PASS / red FAIL =====
-        flags = [
-            (lbl, f)
-            for lbl, f in (("2-Dec", nav_data.get("NAV Good (2 Digit)")), ("4-Dec", nav_data.get("NAV Good (4 Digit)")))
-            if f is not None
-        ]
+        flags = nav_good_flags(nav_data)
         if flags:
             self.pdf.ln(1)
             cell_w = (label_w + value_w) / len(flags)

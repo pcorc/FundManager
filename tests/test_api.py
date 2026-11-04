@@ -20,6 +20,7 @@ from unittest import mock
 os.environ["DB_CONNECTION_STRING"] = "sqlite:///:memory:"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from config import fund_definitions  # noqa: E402
@@ -476,6 +477,35 @@ class RunTests(CohortPatch):
         with zipfile.ZipFile(api.bundle(result, self.tmp / "out" / "bundle.zip")) as archive:
             self.assertEqual(sorted(archive.namelist()), [self.compliance.name, self.workbook.name])
 
+    def test_views_are_built_per_day(self):
+        request = req(operations=("compliance", "nav_reconciliation"), funds=("KNG",), compliance_tests=("summary",),
+                      start_date=date(2026, 10, 30), end_date=date(2026, 11, 2), output_dir=str(self.tmp))
+        build_view = mock.Mock(side_effect=lambda results, **kw: {"day": kw["day"]})
+        with mock.patch.object(api, "run_eod_mode", side_effect=self.eod_mode), \
+                mock.patch.object(api, "build_day_view", build_view):
+            result = api.run(request)
+        self.assertEqual(result.views, {"2026-10-30": {"day": date(2026, 10, 30)},
+                                        "2026-11-02": {"day": date(2026, 11, 2)}})
+        self.assertEqual(build_view.call_args.kwargs["operations"], ["compliance", "nav_reconciliation"])
+        self.assertEqual(build_view.call_args.kwargs["compliance_tests"], ["summary"])
+        self.assertEqual(result.errors, [])
+
+    def test_real_views_of_a_fake_day_are_empty(self):
+        with mock.patch.object(api, "run_eod_mode", side_effect=self.eod_mode):
+            result = api.run(req(funds=("KNG",), output_dir=str(self.tmp)))
+        self.assertEqual(result.views["2026-10-30"]["compliance"], {})
+        self.assertEqual(result.errors, [])
+
+    def test_a_failing_view_never_fails_the_run(self):
+        with mock.patch.object(api, "run_eod_mode", side_effect=self.eod_mode), \
+                mock.patch.object(api, "build_day_view", side_effect=KeyError("rows")), \
+                self.assertLogs("fund_manager.main", "WARNING"):
+            result = api.run(req(funds=("KNG",), output_dir=str(self.tmp)))
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(result.views, {})
+        self.assertEqual(result.errors, ["2026-10-30: Result views could not be built: KeyError: 'rows'"])
+        self.assertEqual([f.label for f in result.files][:1], ["compliance_excel"])  # the reports are untouched
+
     def test_processing_error_is_recorded(self):
         with mock.patch.object(api, "build_fund_registry", side_effect=RuntimeError("boom")), \
                 self.assertLogs("fund_manager.main", "ERROR"):
@@ -493,9 +523,13 @@ class RunTests(CohortPatch):
             report = SimpleNamespace(excel_path=str(self.compliance), pdf_path=None)
             return (SimpleNamespace(summary={}), SimpleNamespace(summary={}),
                     SimpleNamespace(report=report, ex_post_compliance=None, combined_report=None))
-        with mock.patch.object(api, "run_trading_mode", side_effect=trading_mode):
+        with mock.patch.object(api, "run_trading_mode", side_effect=trading_mode), \
+                mock.patch.object(api, "build_trading_view", return_value={"kind": "trading"}) as view:
             result = api.run(req(operations=("trading_compliance",), funds=("KNG",), output_dir=str(self.tmp)),
                              on_progress=self.seen.append)
+        self.assertEqual(result.views, {"2026-10-30": {"kind": "trading"}})
+        self.assertIsNone(view.call_args.args[2])  # the fake report has no comparison_data
+        self.assertEqual(view.call_args.kwargs["day"], DAY)
         self.assertEqual([(e.stage, e.message) for e in self.seen if e.stage in ("load", "process")],
                          [("load", "ex_ante"), ("load", "ex_post"), ("process", "ex_ante")])
         self.assertEqual(set(result.summaries), {"2026-10-30 ex-ante", "2026-10-30 ex-post"})
@@ -514,9 +548,12 @@ class RunTests(CohortPatch):
         range_results = run_modes.RangeRunResults(
             results_by_date={DAY: SimpleNamespace(summary={"processed_funds": 1})}, daily_artefacts={},
             stacked_compliance=SimpleNamespace(excel_path=str(self.compliance), pdf_path=None))
-        with mock.patch.object(api, "run_eod_range_mode", return_value=range_results) as range_mode:
+        with mock.patch.object(api, "run_eod_range_mode", return_value=range_results) as range_mode, \
+                mock.patch.object(api, "build_day_view", return_value={"kind": "eod"}) as view:
             result = api.run(req(funds=("KNG",), date_mode="stacked", output_dir=str(self.tmp)),
                              on_progress=self.seen.append)
+        self.assertEqual(result.views, {"2026-10-30": {"kind": "eod"}})
+        self.assertIs(view.call_args.args[0], range_results.results_by_date[DAY])
         self.assertEqual(range_mode.call_args.kwargs["operations"], ["compliance"])
         self.assertEqual(result.files, [ReportFile("stacked", "compliance_excel", str(self.compliance), "excel")])
         self.assertEqual([(e.stage, e.day) for e in self.seen], [("db", "stacked"), ("done", "stacked")])
@@ -597,6 +634,7 @@ class JsonAndWorkerTests(unittest.TestCase):
             code = worker.main([str(request_path)])
             self.assertIs(sys.stdout, stdout)
         result = json.loads((Path(tmp.name) / "job.result.json").read_text(encoding="utf-8"))
+        self.views = json.loads((Path(tmp.name) / "job.views.json").read_text(encoding="utf-8"))
         return code, stdout.getvalue(), stderr.getvalue(), result, run
 
     def test_worker_round_trip(self):
@@ -606,7 +644,9 @@ class JsonAndWorkerTests(unittest.TestCase):
             on_progress(ProgressEvent("fund", day="2026-10-30", fund="KNG", index=1, total=1, message="eod"))
             return RunResult(exit_code=0, summaries={"2026-10-30": {"processed_funds": 1, "when": DAY}},
                              paths={"2026-10-30": {"compliance_excel": "c.xlsx"}},
-                             files=[ReportFile("2026-10-30", "compliance_excel", "c.xlsx", "excel")])
+                             files=[ReportFile("2026-10-30", "compliance_excel", "c.xlsx", "excel")],
+                             views={"2026-10-30": {"kind": "eod", "compliance": {"KNG": {"irs": {
+                                 "status": "PASS", "rows": [{"label": "Total", "value": np.float64(1.5)}]}}}}})
         code, out, err, result, run = self.run_worker(api.request_to_json(req(funds=("KNG",))), fake_run)
         self.assertEqual(code, 0)
         self.assertEqual(run.call_args.args[0], req(funds=("KNG",)))
@@ -620,11 +660,14 @@ class JsonAndWorkerTests(unittest.TestCase):
             "paths": {"2026-10-30": {"compliance_excel": "c.xlsx"}},
             "files": [{"day": "2026-10-30", "label": "compliance_excel", "path": "c.xlsx", "kind": "excel"}],
             "errors": [],
-        })
+        })  # result.json stays small: the views are in their own file
+        self.assertEqual(self.views, {"schema_version": 1, "days": {"2026-10-30": {"kind": "eod", "compliance": {
+            "KNG": {"irs": {"status": "PASS", "rows": [{"label": "Total", "value": 1.5}]}}}}}})
 
     def test_worker_invalid_request(self):
         code, out, _, result, run = self.run_worker('{"operations": ["holdings"], "start_date": "2026-10-30"}')
         self.assertEqual((code, out), (2, ""))
+        self.assertEqual(self.views, {"schema_version": 1, "days": {}})
         self.assertIn("'holdings'", result["errors"][0])
         run.assert_not_called()
 
@@ -644,6 +687,29 @@ class JsonAndWorkerTests(unittest.TestCase):
         self.assertEqual(result["errors"], ["Invalid request: Fund selection is empty (cohorts=['ETF_FUNDS'], "
                                             "funds=['FTMIX'], exclude=[])"])
         self.assertNotIn("Traceback", err)
+
+    def test_views_path(self):
+        for result, views in (("result.json", "views.json"), ("job.result.json", "job.views.json"),
+                              ("out.json", "out.views.json")):
+            self.assertEqual(worker.default_views_path(Path("run") / result), Path("run") / views)
+
+    def test_worker_views_option_and_unwritable_views(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            request_path = Path(tmp) / "request.json"
+            request_path.write_text(api.request_to_json(req()), encoding="utf-8")
+            fake = mock.Mock(return_value=RunResult(views={"2026-10-30": {"kind": "eod"}}))
+            with mock.patch.object(worker, "run", fake), mock.patch("sys.stdout", io.StringIO()), \
+                    mock.patch("sys.stderr", io.StringIO()):
+                worker.main([str(request_path), "--result", str(Path(tmp) / "result.json"),
+                             "--views", str(Path(tmp) / "v" / "tables.json")])
+                written = json.loads((Path(tmp) / "v" / "tables.json").read_text(encoding="utf-8"))
+                with mock.patch.object(worker, "views_to_dict", side_effect=TypeError("bad")), \
+                        self.assertLogs("fund_manager.worker", "WARNING"):
+                    code = worker.main([str(request_path), "--result", str(Path(tmp) / "result.json")])
+            result = json.loads((Path(tmp) / "result.json").read_text(encoding="utf-8"))
+        self.assertEqual(written["days"], {"2026-10-30": {"kind": "eod"}})
+        self.assertEqual(code, 0)
+        self.assertEqual(result["errors"], ["Result views could not be written: TypeError: bad"])
 
     def test_worker_run_exception(self):
         def fake_run(request, on_progress):

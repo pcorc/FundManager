@@ -8,6 +8,7 @@ preset modes in ``config.run_configurations.MODES`` into requests, and
 :func:`catalog` lists what a UI can offer. :func:`validate` rejects bad input
 up front, ``run(request, on_progress=...)`` reports :class:`ProgressEvent`s,
 ``RunResult.files`` lists the reports written and :func:`bundle` zips them.
+``RunResult.views`` holds each day's results as display tables (``reporting.result_views``).
 ``processing.worker`` runs a JSON request in its own process.
 """
 from __future__ import annotations
@@ -36,6 +37,7 @@ from processing.run_modes import (
     run_eod_range_mode,
     run_trading_mode,
 )
+from reporting.result_views import build_day_view, build_trading_view
 from services.compliance_checker import RULE_KEYS, RULE_LABELS
 from utilities.workdays import business_date_range, business_day_offset
 
@@ -105,6 +107,8 @@ class RunResult:
     paths: Dict[str, Dict[str, str]] = field(default_factory=dict)  # day -> label -> path, as reported
     files: List[ReportFile] = field(default_factory=list)  # only the paths that exist on disk
     errors: List[str] = field(default_factory=list)
+    # ISO day -> reporting.result_views DayView (per day, each day of a stacked range, trading days).
+    views: Dict[str, Dict[str, object]] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +398,9 @@ def _run_day(req: RunRequest, trade_date: date, result: RunResult,
         result.summaries[f"{day} ex-ante"] = results_ex_ante.summary
         result.summaries[f"{day} ex-post"] = results_ex_post.summary
         _record_paths(result, day, _log_paths(logger, flatten_trading_paths(artefacts)))
+        _add_view(result, day, logger, lambda: build_trading_view(
+            results_ex_ante, results_ex_post, getattr(getattr(artefacts, "report", None), "comparison_data", None),
+            day=trade_date, compliance_tests=params.compliance_tests))
     else:
         logger.info("EOD dates — trade date: %s, previous business date: %s",
                     params.trade_date, params.previous_trade_date)
@@ -404,6 +411,9 @@ def _run_day(req: RunRequest, trade_date: date, result: RunResult,
         _log_summary(logger, "eod", processing_results.summary)
         result.summaries[day] = processing_results.summary
         _record_paths(result, day, _log_paths(logger, flatten_eod_paths(artefacts)))
+        _add_view(result, day, logger, lambda: build_day_view(
+            processing_results, day=trade_date, operations=params.operations,
+            compliance_tests=params.compliance_tests))
     result.errors.extend(f"{day}: {error}" for error in email_errors)
     logger.info("Run completed successfully")
     return 0
@@ -446,6 +456,8 @@ def _run_stacked(req: RunRequest, result: RunResult, on_progress: Optional[Progr
     for trade_date, results in range_results.results_by_date.items():
         _log_summary(logger, trade_date.isoformat(), results.summary)
         result.summaries[trade_date.isoformat()] = results.summary
+        _add_view(result, trade_date.isoformat(), logger, lambda: build_day_view(
+            results, day=trade_date, operations=operations, compliance_tests=_tokens(req.compliance_tests)))
     for date_str, artefacts in range_results.daily_artefacts.items():
         _record_paths(result, date_str, _log_paths(logger, flatten_eod_paths(artefacts)))
     if range_results.stacked_compliance:
@@ -544,6 +556,15 @@ def _log_paths(logger: logging.Logger, paths: Dict[str, str]) -> Dict[str, str]:
     for label, path in sorted(paths.items()):
         logger.info("Generated %s -> %s", label, path)
     return paths
+
+
+def _add_view(result: RunResult, day: str, logger: logging.Logger, build) -> None:
+    """Store ``build()`` as the day's view; a failure is logged and listed in errors, never failing the run."""
+    try:
+        result.views[day] = build()
+    except Exception as exc:
+        logger.warning("Result views for %s could not be built: %s", day, exc, exc_info=True)
+        result.errors.append(f"{day}: Result views could not be built: {type(exc).__name__}: {exc}")
 
 
 def _record_paths(result: RunResult, day: str, paths: Dict[str, str]) -> None:

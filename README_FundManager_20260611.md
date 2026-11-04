@@ -213,11 +213,18 @@ rule, `cohorts=("ETF_FUNDS",)`, and `date_mode="per_day"` or `"stacked"` over
   `RunResult.errors` collects the failures that are otherwise only logged
   (including a failed notification email, which leaves the exit code 0).
   `bundle(result, "reports.zip")` zips each distinct file once.
-- `python -m processing.worker request.json [--result result.json]` runs one
+  `RunResult.views` holds each day's results as display tables
+  (`reporting/result_views.py`: per fund and rule the PDF's own labels,
+  numbers and PASS/FAIL, plus NAV, holdings and trading views); a view that
+  cannot be built is listed in `errors` and never fails the run.
+  `result_views.rule_descriptions()` describes every rule without the DB.
+- `python -m processing.worker request.json [--result result.json] [--views views.json]` runs one
   request (`request_to_json` / `request_from_json` format) in a fresh
   process, prints each `ProgressEvent` as a JSON line on stdout (logs go to
   stderr) and writes the exit code, summaries, paths, files and errors to
-  `result.json` (default `<request>.result.json`). Exit code 2 means the
+  `result.json` (default `<request>.result.json`) and the views to a separate
+  `views.json` beside it (`{"schema_version": 1, "days": {date: DayView}}`,
+  schema in `reporting/result_views.py`). Exit code 2 means the
   request was invalid (`InvalidRequest`).
 - Tests: `python -m unittest discover tests -v` (no DB access).
 
@@ -259,7 +266,7 @@ python -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501 --
 Each run is one `python -m processing.worker` process (cwd = the run folder,
 `PYTHONPATH` = the repo) in `<FUNDMANAGER_UI_OUTPUT_ROOT>/<YYYYMMDD-HHMMSS>-<user>-<tag>/`,
 which holds `request.json`, `progress.jsonl` (the worker's JSON-lines stdout),
-`run.log` (its stderr), `result.json`, `meta.json` (user, start/finish, request
+`run.log` (its stderr), `result.json`, `views.json` (the in-app result tables), `meta.json` (user, start/finish, request
 summary, exit code, cancelled / timed-out flags, publish history), `logs/` and
 `reports/`. Only one run happens per output root at a time (`.run.lock` holds the
 worker PID and its process creation time; a lock whose process is gone, or whose PID

@@ -6,6 +6,8 @@ Each run gets ``<output root>/<YYYYMMDD-HHMMSS>-<user>-<tag>/`` holding:
 - ``progress.jsonl`` the worker's stdout: one ``ProgressEvent`` JSON object per line
 - ``run.log``       the worker's stderr (logging, UTF-8)
 - ``result.json``   written by the worker (or by :func:`_finalize` when it died without one)
+- ``views.json``    written by the worker just before result.json: per-day display tables
+                    (schema in ``reporting.result_views``); absent for a worker that died early
 - ``meta.json``     who, when, request summary, pid (+ creation time), exit code, cancelled / timed-out flags
 - ``reports/``      the report files; ``logs/`` (the worker's cwd-relative log files)
 
@@ -50,6 +52,7 @@ WORKER_COMMAND: List[str] = [sys.executable, "-m", "processing.worker"]  # tests
 LOCK_NAME = ".run.lock"
 REQUEST, RESULT, LOG, META, PROGRESS, REPORTS = (
     "request.json", "result.json", "run.log", "meta.json", "progress.jsonl", "reports")
+VIEWS = "views.json"  # the worker writes it beside RESULT (processing.worker.default_views_path)
 GRACE_SECONDS = 5.0  # between terminate() and kill()
 DEFAULT_TIMEOUT_MINUTES = 120.0
 _STALE_UNREADABLE_LOCK_SECONDS = 30.0  # a lock file that never became valid JSON
