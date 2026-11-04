@@ -49,7 +49,8 @@ return one ``DayView``; ``processing.worker`` writes them to ``views.json``::
       "status": "PASS" | "FAIL" | "WARN",                 # FAIL: holdings/qty breaks; WARN: price/weight only
       "holdings_breaks": int, "price_breaks": int,
       "counts": [{"label", "value": int, "kind": "holdings" | "price"}],   # the Holdings Summary row
-      "sections": [{"key", "title", "tables": [Table]}],  # the fund page's discrepancy tables
+      "sections": [{"key", "title", "tables": [Table],    # the fund page's discrepancy tables
+                    "counts": [{"label", "value": int}]}],  # extra count lines (custodian_option: Regular Options)
     }
     TradingView = {
       "date", "summary": {"total_funds_analyzed", "total_funds_traded"},
@@ -67,6 +68,7 @@ from ``config.constants`` and its footnotes) without the DB, for a configuration
 from __future__ import annotations
 
 import math
+import re
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
@@ -357,8 +359,16 @@ def _pretty_label(header: str) -> str:
     return " ".join(word.capitalize() if word.islower() else word for word in header.split("_") if word)
 
 
+# Fractions the workbook shows as #,##0.00 (its percent-header check has no "exposure" keyword) but that the
+# view shows as percentages, like the PDF's Top 1 / Top 4 Exposure rows (.5%). View only: the workbook is unchanged.
+_VIEW_PERCENT_HEADER = re.compile(r"^Top \d+ Exposure$")
+
+
 def _detail_text(header: str, value: Any) -> str:
-    """A workbook value as the workbook displays it: 0.00% for percentage columns, else #,##0.00."""
+    """A workbook value as the workbook displays it: 0.00% for percentage columns, else #,##0.00.
+
+    The IRC sheet's Top N Exposure fractions are shown as the PDF's .5% percentages instead.
+    """
     if value is None:
         return ""
     if isinstance(value, (bool, np.bool_)):
@@ -368,6 +378,8 @@ def _detail_text(header: str, value: Any) -> str:
     if isinstance(value, (float, np.floating)):
         if math.isnan(value):
             return ""
+        if _VIEW_PERCENT_HEADER.match(str(header)):
+            return f"{float(value):.5%}"
         return f"{float(value):.2%}" if is_percent_header(header) else f"{float(value):,.2f}"
     return str(value)
 
@@ -515,6 +527,11 @@ def holdings_views(reconciliation_results: Mapping[str, Any]) -> Dict[str, Dict[
     return views
 
 
+# The PDF's titles for the main table of each custodian section (holdings_recon_renderer).
+_CUSTODIAN_TITLES = {"custodian_equity": "Holdings Discrepancies", "custodian_option": "Option Discrepancies",
+                     "custodian_treasury": "Treasury Discrepancies"}
+
+
 def _holdings_sections(fund: str, details: Mapping[str, Any]) -> List[Dict[str, Any]]:
     sections = []
     for recon_type, data in sorted(details.items()):
@@ -522,8 +539,8 @@ def _holdings_sections(fund: str, details: Mapping[str, Any]) -> List[Dict[str, 
             continue
         tables = []
         final = data.get("final_recon")
-        custodian = recon_type in ("custodian_equity", "custodian_option", "custodian_treasury")
-        title = "Holdings Discrepancies" if custodian else f"Final Reconciliation - {recon_type}"
+        custodian = recon_type in _CUSTODIAN_TITLES
+        title = _CUSTODIAN_TITLES.get(recon_type) or f"Final Reconciliation - {recon_type}"
         table = _table(title, final)
         if table:
             tables.append(table)
@@ -532,8 +549,13 @@ def _holdings_sections(fund: str, details: Mapping[str, Any]) -> List[Dict[str, 
             table = _table("Custodian Price Breaks T", _RENDERER._filter_option_price_breaks(price_t, fund, recon_type))
             if table:
                 tables.append(table)
+        counts = []
+        regular = data.get("regular_options")
+        if recon_type == "custodian_option" and non_empty(regular):  # the PDF's "Regular Options N" line
+            counts.append({"label": "Regular Options", "value": len(regular)})
         if tables:
-            sections.append({"key": recon_type, "title": recon_type.replace("_", " ").title(), "tables": tables})
+            sections.append({"key": recon_type, "title": recon_type.replace("_", " ").title(), "tables": tables,
+                             "counts": counts})
     return sections
 
 

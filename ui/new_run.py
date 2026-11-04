@@ -1,4 +1,4 @@
-"""The New run page: settings on the left, a live Configuration Preview (then progress, then results) on the right.
+"""The New run page: settings on the left; on the right a live run's progress, the Configuration Preview, then results.
 
 The settings panel (:mod:`ui.settings_panel`) holds plain widgets (not an
 ``st.form``) so the counts and the validation update as you pick.
@@ -351,12 +351,13 @@ def render(catalog: dict, user: str) -> None:
         for key, kind in (("nr_notice", "info"), ("nr_notice_error", "error")):
             if key in st.session_state:
                 preview.notice(kind, st.session_state.pop(key))
+        watch = st.session_state.get("nr_watch")
+        live = bool(watch) and Path(watch).is_dir() and not panels.is_finished(Path(watch))
+        if live:  # first in the pane, so it is in view the moment RUN is pressed
+            panels.progress_panel(watch, user)
         preview.render(catalog, choices, request, None if running else problem,
                        date_notes(choices, request) if request is not None else [])
-        watch = st.session_state.get("nr_watch")
-        if watch and Path(watch).is_dir() and not panels.is_finished(Path(watch)):
-            panels.progress_panel(watch, user)
-        elif watch and Path(watch).is_dir():
+        if not live and watch and Path(watch).is_dir():
             st.session_state.setdefault(PANE_KEY, RESULTS)
             pane = st.segmented_control("Show", [RESULTS, GUIDE], key=PANE_KEY, required=True,
                                         label_visibility="collapsed")
@@ -364,5 +365,5 @@ def render(catalog: dict, user: str) -> None:
                 preview.rule_guide(catalog, choices)
             else:
                 panels.results_panel(Path(watch), user, key="nr")
-        else:
+        elif not live:
             preview.rule_guide(catalog, choices)

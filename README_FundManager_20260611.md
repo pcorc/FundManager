@@ -275,7 +275,8 @@ the output / publish folders and **Reload fund groups** (re-reads the cohorts fr
 - **Run history:** every past run (who, when, what, status, files); open any run to see
   the same results view, or **Re-run** it (loads the request back into the form, email off).
 - **Reports:** finished runs' reports by report date (each day a run wrote reports
-  for; a stacked workbook is listed under its range).
+  for; a stacked workbook is listed under its range). The results shown are those of the
+  picked report date, so they always match its downloads.
 
 Each run is one `python -m processing.worker` process (cwd = the run folder,
 `PYTHONPATH` = the repo) in `<FUNDMANAGER_UI_OUTPUT_ROOT>/<YYYYMMDD-HHMMSS>-<user>-<tag>/`,

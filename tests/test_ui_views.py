@@ -45,7 +45,8 @@ class ComponentsTest(unittest.TestCase):
         html = ui.kv_table([{"label": "A", "value": "FAIL", "status": "FAIL"},
                             {"label": "B", "value": "FAIL", "status": "FAIL", "informational": True},
                             {"label": "C", "value": "N/A", "status": "N/A", "reason": "N/A (no data)"}])
-        self.assertEqual(html.count('class="v-fail"'), 1)
+        self.assertEqual(html.count('class="v-fail nw"'), 1)
+        self.assertNotIn("v-fail", html.split("<th>B</th>")[1].split("</tr>")[0])  # informational: plain
         self.assertIn('<span class="why">N/A (no data)</span>', html)
         self.assertIn('class="long"', ui.kv_table([{"label": "L", "value": "x" * 200}]))
 
@@ -55,13 +56,35 @@ class ComponentsTest(unittest.TestCase):
         self.assertIn('<td class="num">1,000.00</td>', html)
         self.assertNotIn("Showing", ui.data_table(["T"], [["a"]], total=1))
 
-    def test_grid_alternates_columns_and_keeps_order(self) -> None:
-        html = ui.grid(["<i>1</i>", "<i>2</i>", "<i>3</i>"])
-        left, right = html.split('<div class="fm-col">')[1:]
-        self.assertIn("<i>1</i>", left)
-        self.assertIn("<i>3</i>", left)
-        self.assertIn("<i>2</i>", right)
-        self.assertIn('style="order:2"', html)
+    def test_grid_is_rows_of_two_in_order_then_wide_cards(self) -> None:
+        html = ui.grid(["<i>1</i>", "<i>2</i>", "<i>3</i>"], wide=["<i>nav</i>"])
+        self.assertNotIn("fm-col", html)  # one grid: cards line up in rows, never two independent columns
+        self.assertEqual(html.count('<div class="fm-cell">'), 3)
+        self.assertLess(html.index("<i>1</i>"), html.index("<i>2</i>"))
+        self.assertLess(html.index("<i>2</i>"), html.index("<i>3</i>"))
+        self.assertIn('<div class="fm-cell wide"><i>nav</i></div>', html)
+        self.assertGreater(html.index("<i>nav</i>"), html.index("<i>3</i>"))
+
+    def test_cells_numbers_blanks_and_headers(self) -> None:
+        kv = ui.kv_table([{"label": "Option MV", "value": "-846,720"}, {"label": "Reg", "value": "Non-Diversified"},
+                          {"label": "Exceptions", "value": ""}, {"label": "Cash", "value": "$-19,333,331.89"}])
+        self.assertIn('<td class="num nw">−846,720</td>', kv)  # tabular figures and a true minus
+        self.assertIn('<td class="nw">Non-Diversified</td>', kv)  # text keeps its hyphen, no tabular figures
+        self.assertIn("$−19,333,331.89", kv)
+        self.assertIn('<td class="nw"><span class="fm-dash">', kv)  # a blank value is a faint dash
+        table = ui.data_table(["eqy_ticker", "shares_cust", "Fund Weight"], [["None", "nan", "-1.50%"]])
+        self.assertIn(">Ticker</th>", table)
+        self.assertIn(">Shares (Cust)</th>", table)
+        self.assertIn(">Fund Weight</th>", table)
+        self.assertEqual(table.count("fm-dash"), 2)
+        self.assertIn("−1.50%", table)
+        self.assertNotIn(">None<", table)
+        self.assertNotIn(">nan<", table)
+        self.assertEqual(ui.column_label("price_vest"), "Price (Vest)")
+        self.assertEqual(ui.column_label("Status Change"), "Status Change")
+        from ui import history_page  # noqa: PLC0415
+        self.assertEqual(history_page.dates_html("2026-10-29..2026-10-30"),  # wraps at the arrow, never in a date
+                         '<span class="nw">2026-10-29</span> → <span class="nw">2026-10-30</span>')
 
     def test_long_footnotes_fold(self) -> None:
         self.assertIn('<div class="fm-foot">', ui.footnotes("Footnotes", ["short"]))
@@ -82,6 +105,9 @@ class ResultBuildersTest(unittest.TestCase):
         self.assertIn(">Holdings</th>", html)
         self.assertIn('title="1 failed"', html)
         self.assertEqual(html.count("fm-dash"), 2)  # TDVI has no NAV and no holdings view
+        self.assertNotIn(results.IRC_NOTE, html)
+        irc_picked = results.matrix_html(self.day, requested=["gics_compliance", results.IRC_KEY])
+        self.assertIn(results.IRC_NOTE, irc_picked)  # a picked IRC check without a column is explained
 
     def test_fund_cards_start_with_the_summary_and_follow_the_pdf_order(self) -> None:
         cards = results.fund_cards_html(self.day, "KNG")
@@ -101,6 +127,12 @@ class ResultBuildersTest(unittest.TestCase):
         self.assertIn('class="fm-stat bad"', holdings)
         self.assertIn('class="fm-stat warnish"', holdings)
         self.assertIn("Custodian Equity · 80 rows", holdings)
+        self.assertIn(">Ticker</th>", holdings)  # snake_case headers shown as words
+        option = dict(self.day["holdings"]["KNG"], sections=[{"key": "custodian_option", "title": "Custodian Option",
+                                                              "counts": [{"label": "Regular Options", "value": 6}],
+                                                              "tables": []}])
+        self.assertIn("Regular Options<b>6</b>", results.holdings_html(option))
+        self.assertIn('class="fm-split"', nav)  # the wide NAV card: summary beside the G/L sections
 
     def test_trading(self) -> None:
         trading = ui_views_fixture.trading_views()["days"][DAY]["trading"]
@@ -135,6 +167,9 @@ class PreviewTest(unittest.TestCase):
         self.assertIn("372 total operations", html)
         self.assertIn("~ 2–4 minutes (estimate from 6 past runs)", html)
         self.assertIn("Pick the dates", preview.sentence(preview.Counts(0, 1, 4, 0, ("compliance",), False), None))
+        mixed = preview.Counts(funds=3, days=1, checks=11, recons=2,
+                               operations=("compliance", "reconciliation", "nav_reconciliation"), trading=False)
+        self.assertIn("3 funds × 1 day × 13 checks (11 rules + 2 recons)", preview.sentence(mixed, None))
 
     def test_estimate_and_duration(self) -> None:
         self.assertEqual(preview.estimate_seconds(10, 2, [3.0, 5.0, 100.0]), (50.0, True))  # the median rate
@@ -184,6 +219,14 @@ class HistoryViewsTest(unittest.TestCase):
         self.write(runner.VIEWS, {"schema_version": 1, "days": {"2026-10-30": {"kind": "eod"},
                                                                   "2026-10-29": {"kind": "eod"}, "bad": 3}})
         self.assertEqual(list(history.load_views(self.run_dir)["days"]), ["2026-10-29", "2026-10-30"])
+        url = "mysql+pymysql://fmuser:Hunter2Secret@db.internal/fm"
+        self.write(runner.VIEWS, {"schema_version": 1, "days": {"2026-10-30": {
+            "fund_errors": {"KNG": [f"KNG: cannot connect to {url}"]},
+            "compliance": {"KNG": {"r": {"reason": f"ERROR: {url}", "rows": [{"label": "x", "reason": url}],
+                                         "notes": [url]}}}}}})
+        day = history.load_views(self.run_dir)["days"]["2026-10-30"]
+        self.assertNotIn("Hunter2Secret", json.dumps(day))  # exception texts are redacted on load
+        self.assertIn("KNG: cannot connect to", day["fund_errors"]["KNG"][0])
         (self.run_dir / runner.VIEWS).write_text("{not json", encoding="utf-8")
         self.assertIsNone(history.load_views(self.run_dir))
 

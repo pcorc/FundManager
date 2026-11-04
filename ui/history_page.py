@@ -14,11 +14,17 @@ HISTORY_LIMIT = 300
 TABLE_ROWS = 25  # newest runs in the history table; every run stays pickable below it
 
 
+def dates_html(as_of: str) -> str:
+    """``2026-10-29..2026-10-30`` as two unbreakable dates that may wrap at the arrow (narrow screens)."""
+    parts = [f'<span class="nw">{ui.esc(p)}</span>' for p in str(as_of or "").split("..") if p]
+    return " → ".join(parts) or ui.DASH
+
+
 def history_table_html(records: List[RunRecord]) -> str:
-    rows = [[panels.clock(r.started), r.user, panels.status_pill(r.status), r.as_of.replace("..", " → "),
+    rows = [[panels.clock(r.started), r.user, panels.status_pill(r.status), dates_html(r.as_of),
              ui.summary_text(r.summary), r.files, r.published or "", r.name] for r in records]
     return ui.panel(ui.data_table(["Started", "User", "Status", "Dates", "Request", "Files", "Published", "Folder"],
-                                  rows, raw=(2,), css="fm-history"))
+                                  rows, raw=(2, 3), css="fm-history"))
 
 
 def _stats(records: List[RunRecord]) -> str:

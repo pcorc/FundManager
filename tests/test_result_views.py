@@ -170,6 +170,13 @@ class ComplianceViewTests(unittest.TestCase):
         self.assertEqual({row["value"] for row in view["KNG"][IRC]["rows"]}, {"N/A"})
         self.assertNotIn(IRC, rv.compliance_views({"KNG": {IRS: _irs()}}, DAY)["KNG"])
 
+    def test_irc_top_exposures_read_as_percentages_like_the_pdf(self):
+        # The workbook formats these fractions as #,##0.00 (0.08); the view shows the PDF's .5% like Top 1 / Top 4.
+        self.assertEqual(rv._detail_text("Top 2 Exposure", 0.0832), "8.32000%")
+        self.assertEqual(rv._detail_text("Top 3 Exposure", np.float64(0.1226)), "12.26000%")
+        self.assertEqual(rv._detail_text("Total Assets", 0.0832), "0.08")  # other columns as the workbook
+        self.assertFalse(rv.is_percent_header("Top 2 Exposure"))  # the workbook's own check is unchanged
+
     def test_json_safe(self):
         json.dumps(self.view, allow_nan=False)
         self.assertEqual(rv.to_jsonable({"a": (np.float64("nan"), np.bool_(True), pd.Timestamp(DAY).date())}),
@@ -256,6 +263,18 @@ class HoldingsViewTests(unittest.TestCase):
         self.assertEqual((len(holdings["rows"]), holdings["total"]), (10, 12))  # the PDF's first 10
         self.assertEqual(holdings["rows"][0], ["AAPL", "Missing in custodian", "0.00", "100.00", "", ""])
         self.assertEqual(price["rows"], [["MSFT", "1.00", "2.00"]])
+
+    def test_custodian_sections_use_the_pdf_titles(self):
+        payload = self.payload(equity_breaks=2)
+        final = payload["details"]["custodian_equity"]["final_recon"]
+        regular = pd.DataFrame({"ticker": ["A", "B", "C"]})
+        payload["details"] = {"custodian_option": {"final_recon": final, "regular_options": regular},
+                              "custodian_treasury": {"final_recon": final}}
+        sections = {s["key"]: s for s in rv.holdings_views({"C": payload})["C"]["sections"]}
+        self.assertEqual(sections["custodian_option"]["tables"][0]["title"], "Option Discrepancies")
+        self.assertEqual(sections["custodian_treasury"]["tables"][0]["title"], "Treasury Discrepancies")
+        self.assertEqual(sections["custodian_option"]["counts"], [{"label": "Regular Options", "value": 3}])
+        self.assertEqual(sections["custodian_treasury"]["counts"], [])
 
 
 class TradingViewTests(unittest.TestCase):

@@ -226,9 +226,37 @@ def load_views(run_dir: Path) -> Optional[dict]:
     data = runner.read_json(Path(run_dir) / runner.VIEWS)
     if not data or data.get("schema_version") != VIEWS_SCHEMA or not isinstance(data.get("days"), dict):
         return None
-    days = {str(k): v for k, v in data["days"].items() if isinstance(v, dict)}
+    days = {str(k): _redact_day(v) for k, v in data["days"].items() if isinstance(v, dict)}
     return {"schema_version": VIEWS_SCHEMA, "days": dict(sorted(days.items()))}
 
+
+def _redact_day(day: dict) -> dict:
+    """The day's free texts that can carry exception messages, redacted in place (``fund_errors``, reasons, notes).
+
+    A fund's error is the text of whatever exception stopped it (a DB error quotes its URL), and a rule's
+    ERROR reason is its exception text.
+    """
+    errors = day.get("fund_errors")
+    if isinstance(errors, dict):
+        day["fund_errors"] = {fund: [runner.redact(m) for m in messages or [] if m] if isinstance(messages, list)
+                              else [runner.redact(messages)] for fund, messages in errors.items()}
+    for side in ("compliance", "compliance_ex_ante"):
+        for rules in (day.get(side) or {}).values() if isinstance(day.get(side), dict) else ():
+            for view in (rules or {}).values() if isinstance(rules, dict) else ():
+                if isinstance(view, dict):
+                    _redact_view(view)
+    return day
+
+
+def _redact_view(view: dict) -> None:
+    if view.get("reason"):
+        view["reason"] = runner.redact(view["reason"])
+    for name in ("rows", "details"):
+        for row in view.get(name) or []:
+            if isinstance(row, dict) and row.get("reason"):
+                row["reason"] = runner.redact(row["reason"])
+    if isinstance(view.get("notes"), list):
+        view["notes"] = [runner.redact(n) for n in view["notes"]]
 
 
 def _seconds_between(start: Optional[str], end: Optional[str]) -> Optional[float]:

@@ -218,11 +218,13 @@ def run_label(c: "nr.Choices") -> str:
 
 
 def buttons(catalog: dict, c: "nr.Choices", *, can_run: bool, locked: bool) -> bool:
-    """RUN (primary) and RESET; returns whether RUN was clicked."""
-    st.html(ui.divider())
-    run, reset = st.columns([2.3, 1], gap="small")
-    clicked = run.button(run_label(c).upper(), type="primary", disabled=not can_run, key="nr_run", width="stretch",
-                         icon=":material/play_arrow:")
-    reset.button("RESET", key="nr_reset", disabled=locked, width="stretch", on_click=nr.reset_form, args=(catalog,),
-                 help="Back to the defaults: no fund, every check, Compliance, the previous business day.")
+    """RUN (primary) and RESET, pinned at the foot of the panel (``nr_actions``); returns whether RUN was clicked."""
+    with st.container(key="nr_actions"):
+        st.html(ui.divider())
+        run, reset = st.columns([2.3, 1], gap="small")
+        clicked = run.button(run_label(c).upper(), type="primary", disabled=not can_run, key="nr_run",
+                             width="stretch", icon=":material/play_arrow:")
+        reset.button("RESET", key="nr_reset", disabled=locked, width="stretch", on_click=nr.reset_form,
+                     args=(catalog,), help="Back to the defaults: no fund, every check, Compliance, the previous "
+                                           "business day.")
     return clicked

@@ -127,7 +127,10 @@ def sentence(c: Counts, estimate: Optional[Tuple[float, bool, int]]) -> str:
     if c.days is None or not c.funds or not c.per_fund_day:
         return ('<div class="fm-sentence">Pick the dates, at least one fund and what to run; '
                 "the preview updates as you go.</div>")
-    parts = [_plural(c.funds, "fund"), _plural(c.days, "day"), _plural(c.per_fund_day, "check")]
+    checks = _plural(c.per_fund_day, "check")
+    if c.checks and c.recons:  # the card counts the rules; say where the other checks come from
+        checks += f" ({_plural(c.checks, 'rule')} + {_plural(c.recons, 'recon')})"
+    parts = [_plural(c.funds, "fund"), _plural(c.days, "day"), checks]
     if c.trading:
         parts.append("2 passes")
     what = []

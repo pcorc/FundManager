@@ -38,8 +38,15 @@ def rule_keys(day: Mapping) -> List[str]:
 # Builders
 # ---------------------------------------------------------------------------
 
-def matrix_html(day: Mapping) -> str:
-    """Funds × checks with status pills (overall first; NAV and holdings when they ran)."""
+IRC_KEY = "diversification_IRC_check"
+IRC_NOTE = "IRC diversification applies to VIT funds only; no fund in this run is one, so it has no column."
+
+
+def matrix_html(day: Mapping, requested: Sequence[str] = ()) -> str:
+    """Funds × checks with status pills (overall first; NAV and holdings when they ran).
+
+    ``requested`` (the run's compliance tests) explains a picked IRC check that has no column.
+    """
     compliance = day.get("compliance") or {}
     summary = day.get("compliance_summary") or {}
     nav, holdings = day.get("nav") or {}, day.get("holdings") or {}
@@ -63,7 +70,8 @@ def matrix_html(day: Mapping) -> str:
         rows.append(row)
     if not rows:
         return ui.empty("No funds", "This day has no fund results.")
-    return ui.panel(ui.data_table(columns, rows, raw=range(1, len(columns)), css="fm-matrix"))
+    caption = IRC_NOTE if compliance and IRC_KEY in requested and IRC_KEY not in keys else ""
+    return ui.panel(ui.data_table(columns, rows, raw=range(1, len(columns)), css="fm-matrix", caption=caption))
 
 
 def rule_card_html(view: Mapping, footnotes: Sequence[str] = ()) -> str:
@@ -86,17 +94,22 @@ def rule_card_html(view: Mapping, footnotes: Sequence[str] = ()) -> str:
 
 
 def nav_card_html(nav: Mapping) -> str:
-    body = ui.kv_table(nav.get("summary") or [])
+    """The NAV card, shown across the grid: summary and checks beside the G/L sections, then the tables."""
+    left = ui.kv_table(nav.get("summary") or [])
     checks = nav.get("checks") or []
     if checks:
-        body += ui.subhead("Checks") + ui.kv_table(
+        left += ui.subhead("Checks") + ui.kv_table(
             [{"label": c.get("label"), "value": c.get("status"), "status": c.get("status")} for c in checks])
-    for section in nav.get("sections") or []:
-        body += ui.subhead(section.get("title") or "") + ui.kv_table(section.get("rows") or [])
     if nav.get("rows"):
-        body += ui.details("Reconciliation detail", ui.kv_table(nav["rows"]))
+        left += ui.details("Reconciliation detail", ui.kv_table(nav["rows"]))
+    right = ""
+    for n, section in enumerate(nav.get("sections") or []):
+        head = ui.subhead(section.get("title") or "")
+        right += (head.replace('class="fm-sub"', 'class="fm-sub first"', 1) if n == 0 else head)
+        right += ui.kv_table(section.get("rows") or [])
     if nav.get("gl"):
-        body += ui.details("G/L walk", ui.kv_table(nav["gl"]))
+        right += ui.details("G/L walk", ui.kv_table(nav["gl"]))
+    body = ui.split(left, right) if right else left
     for table in nav.get("tables") or []:
         body += ui.data_table(table.get("columns") or [], table.get("rows") or [], total=table.get("total"),
                               title=table.get("title") or "")
@@ -114,8 +127,10 @@ def holdings_html(holdings: Mapping) -> str:
     for section in holdings.get("sections") or []:
         tables = section.get("tables") or []
         rows = sum(t.get("total") or len(t.get("rows") or []) for t in tables)
-        inner = "".join(ui.data_table(t.get("columns") or [], t.get("rows") or [], total=t.get("total"),
-                                      title=t.get("title") or "") for t in tables)
+        extra = [(c.get("label") or "", c.get("value"), "") for c in section.get("counts") or []]
+        inner = ui.stats(extra) if extra else ""
+        inner += "".join(ui.data_table(t.get("columns") or [], t.get("rows") or [], total=t.get("total"),
+                                       title=t.get("title") or "") for t in tables)
         body += ui.details(f"{section.get('title') or section.get('key')} · {rows} row{'s' if rows != 1 else ''}",
                            inner, open_=True)
     subtitle = (f"{holdings.get('holdings_breaks', 0)} holdings breaks · "
@@ -208,17 +223,23 @@ def _first_failing(day: Mapping) -> Optional[str]:
     return None
 
 
-def render_views(views: Mapping, *, key: str, run: str, day: Optional[str] = None) -> bool:
-    """The results of one run; ``False`` when ``views`` holds no day (the caller then shows the downloads only)."""
+def render_views(views: Mapping, *, key: str, run: str, day: Optional[str] = None,
+                 requested: Sequence[str] = ()) -> bool:
+    """The results of one run; ``False`` when ``views`` holds no day (the caller then shows the downloads only).
+
+    ``day`` (the Reports page's Report date) pins the tables to that day, so they always match the downloads
+    filtered to it; without it (or for a day the views do not hold) a Report date picker chooses.
+    """
     days: Dict[str, Mapping] = dict(views.get("days") or {})
     if not days:
         return False
     names = list(days)
-    day_key = f"{key}-day-{run}"
-    if day in days and day_key not in st.session_state:
-        st.session_state[day_key] = day
-    picked = names[0] if len(names) == 1 else _pick("Report date", names[::-1], day_key, pills=len(names) <= 10,
-                                                    show_label=True)
+    if day in days:
+        picked = day
+    elif len(names) == 1:
+        picked = names[0]
+    else:
+        picked = _pick("Report date", names[::-1], f"{key}-day-{run}", pills=len(names) <= 10, show_label=True)
     view = days[picked]
     trading = view.get("kind") == "trading"
     funds = list(view.get("funds") or [])
@@ -227,7 +248,7 @@ def render_views(views: Mapping, *, key: str, run: str, day: Optional[str] = Non
     if trading and view.get("trading"):
         ui.show(trading_overview_html(view["trading"]))
     if view.get("compliance") or view.get("nav") or view.get("holdings"):
-        ui.show(matrix_html(view))
+        ui.show(matrix_html(view, requested))
     if not funds:
         return True
     fund_key = f"{key}-fund-{run}"
@@ -242,17 +263,17 @@ def render_views(views: Mapping, *, key: str, run: str, day: Optional[str] = Non
         choice = st.segmented_control("Holdings", [EX_POST, EX_ANTE], key=f"{key}-side-{run}", required=True,
                                       default=EX_POST, label_visibility="collapsed")
         side = "compliance_ex_ante" if choice == EX_ANTE else "compliance"
-    cards = []
+    cards, wide = [], []  # rule cards in rows of two; the activity and NAV cards across both columns
     if trading and view.get("trading"):
         checks = (view["trading"].get("checks") or {}).get(fund) or []
         if checks:
             cards.append(trading_checks_html(checks))
-        cards.append(trading_activity_html(view["trading"], fund))
+        wide.append(trading_activity_html(view["trading"], fund))
     cards += fund_cards_html(view, fund, side)
     if (view.get("nav") or {}).get(fund):
-        cards.append(nav_card_html(view["nav"][fund]))
-    if cards:
-        ui.show(ui.grid(cards))
+        wide.append(nav_card_html(view["nav"][fund]))
+    if cards or wide:
+        ui.show(ui.grid(cards, wide))
     if (view.get("holdings") or {}).get(fund):
         ui.show(holdings_html(view["holdings"][fund]))
     return True

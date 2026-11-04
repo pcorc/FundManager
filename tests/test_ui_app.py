@@ -348,7 +348,7 @@ class NewRunPageTest(AppTestCase):
         self.assertFalse((run_dir / f"{run_dir.name}.zip").exists())  # built only when downloaded
         self.assertTrue(history.zip_bytes(run_dir).startswith(b"PK"))
         self.assertIn("Summary per day", page)  # no views.json from the fake worker: the summary table
-        self.assertIn("processed_funds", page)
+        self.assertIn("Processed Funds", page)  # snake_case summary keys shown as words
         self.assertIn("Publishing is off", self.texts(at.caption))
         self.assertEqual(at.button_group(key="nr_pane").value, new_run.RESULTS)
         self.ok(at.button_group(key="nr_pane").set_value(new_run.GUIDE).run())
@@ -366,7 +366,7 @@ class NewRunPageTest(AppTestCase):
             self.assertIn(f">{label}</th>", page)
         self.assertEqual(at.button_group(key=f"nr-fund-{run_dir.name}").value, "KNG")  # the first failing fund
         self.assertIn("IRS Diversification", page)
-        self.assertIn('<td class="v-fail">FAIL</td>', page)  # FAIL rows in soft red
+        self.assertIn('<td class="v-fail nw">FAIL</td>', page)  # FAIL rows in soft red
         self.assertIn("N/A (not evaluated)", page)  # a row's reason under its value
         self.assertIn("&lt;META&gt;", page)  # values are escaped
         self.assertIn("IRS Condition 1: 90% of income qualifying.", page)  # the rule's footnotes
@@ -397,7 +397,7 @@ class NewRunPageTest(AppTestCase):
         side = at.button_group(key=f"nr-side-{run_dir.name}")
         self.assertEqual(side.value, "After trades (ex-post)")
         self.ok(side.set_value("Before trades (ex-ante)").run())
-        self.assertIn('<td class="v-pass">PASS</td>', self.shown(at))
+        self.assertIn('<td class="v-pass nw">PASS</td>', self.shown(at))
 
     def test_blank_tag_uses_the_cli_name(self) -> None:
         at = self.pick(self.app(), "KNG")
@@ -440,6 +440,8 @@ class NewRunPageTest(AppTestCase):
         self.assertTrue(fresh.button(key="nr_reset").disabled)
         self.assertEqual(fresh.session_state["nr_watch"], str(run_dir))
         self.assertIn("Run in progress", self.shown(fresh))
+        shown = self.shown(fresh)  # the progress comes first in the right pane, so RUN never leaves it off screen
+        self.assertLess(shown.index("Run in progress"), shown.index("Configuration Preview"))
         self.assertNotIn("Pick at least one fund", self.shown(fresh))  # no validation noise while locked
         self.ok(fresh.button(key=f"cancel-{run_dir.name}").click().run())
         self.assertTrue(runner.wait(run_dir, timeout=TIMEOUT))
@@ -570,6 +572,63 @@ class OtherPagesTest(AppTestCase):
             self.ok(at.selectbox(key="hist_pick").set_value(first.name).run())
             self.assertFalse(at.checkbox(key=f"hist-publish-sure-{first.name}").value)
             self.assertTrue(at.button(key=f"hist-publish-{first.name}").disabled)
+
+    def finished_run(self, name: str, days, fund_errors=None) -> Path:
+        """A finished compliance run folder by hand: one Excel per day and a views.json day per day."""
+        run_dir = self.root.resolve() / name
+        (run_dir / runner.REPORTS).mkdir(parents=True)
+        request = api.RunRequest(operations=("compliance",), start_date=date.fromisoformat(days[0]),
+                                 end_date=date.fromisoformat(days[-1]), funds=("KNG", "TDVI"))
+        (run_dir / runner.REQUEST).write_text(api.request_to_json(request), encoding="utf-8")
+        files = []
+        for day in days:
+            path = run_dir / runner.REPORTS / f"compliance_report_{day}.xlsx"
+            path.write_bytes(b"PK test")
+            files.append({"day": day, "label": "compliance_excel", "path": str(path), "kind": "excel"})
+        (run_dir / runner.RESULT).write_text(json.dumps({
+            "exit_code": 0, "summaries": {d: {"total_funds": 2} for d in days}, "paths": {}, "files": files,
+            "errors": []}), encoding="utf-8")
+        (run_dir / runner.META).write_text(json.dumps({
+            "user": "u", "started": "2026-11-03T10:00:00", "finished": "2026-11-03T10:00:20", "exit_code": 0,
+            "summary": "compliance | KNG, TDVI"}), encoding="utf-8")
+        base = ui_views_fixture.eod_views()["days"][ui_views_fixture.DAY]
+        views = {}
+        for day in days:
+            views[day] = dict(json.loads(json.dumps(base)), date=day, fund_errors=(fund_errors or {}).get(day, {}))
+        (run_dir / runner.VIEWS).write_text(json.dumps({"schema_version": 1, "days": views}), encoding="utf-8")
+        return run_dir
+
+    def test_reports_tables_follow_the_report_date(self) -> None:
+        self.finished_run("20261103-100000-u-compliance", ["2026-10-29", "2026-10-30"])
+        at = self.app()
+        self.go(at, "Reports")
+        heading = lambda: [h for h in self.shown(at).splitlines() if '<div class="fm-h2"><h2>Results' in h][0]  # noqa: E731
+        self.assertEqual(at.selectbox(key="rep_day").value, "2026-10-30")
+        self.assertIn("2026-10-30 · 2 funds", heading())
+        self.ok(at.selectbox(key="rep_day").set_value("2026-10-29").run())
+        self.assertIn("2026-10-29 · 2 funds", heading())  # the tables match the date picked ...
+        labels = [b.proto.label for b in at.download_button][1:]
+        self.assertTrue(labels and all(label.startswith("2026-10-29") for label in labels))  # ... and the downloads
+        self.ok(at.selectbox(key="rep_day").set_value("2026-10-30").run())
+        self.assertIn("2026-10-30 · 2 funds", heading())
+        self.assertFalse([b for b in at.button_group if str(b.key).startswith("rep-day-")])  # one date picker only
+
+    def test_fund_errors_and_reasons_from_views_are_redacted(self) -> None:
+        secret = "mysql+pymysql://fmuser:Hunter2Secret@db.internal/fm"
+        with mock.patch.dict(os.environ, {"DB_CONNECTION_STRING": secret}):
+            run_dir = self.finished_run("20261103-100000-u-compliance", ["2026-10-30"],
+                                        {"2026-10-30": {"KNG": [f"KNG: OperationalError connecting to {secret}"]}})
+            views = json.loads((run_dir / runner.VIEWS).read_text(encoding="utf-8"))
+            irs = views["days"]["2026-10-30"]["compliance"]["KNG"]["diversification_IRS_check"]
+            irs.update(status="ERROR", reason=f"ERROR: could not reach {secret}")
+            irs["rows"][0]["reason"] = f"password=Hunter2Secret at {secret}"
+            (run_dir / runner.VIEWS).write_text(json.dumps(views), encoding="utf-8")
+            at = self.app()
+            self.go(at, "Run history")
+            shown = self.shown(at)
+        self.assertIn("OperationalError connecting to", shown)
+        self.assertIn("could not reach", shown)
+        self.assertNotIn("Hunter2Secret", shown)
 
     def test_password_gate(self) -> None:
         with mock.patch.dict(os.environ, {"FUNDMANAGER_UI_PASSWORD": "s3cret"}):

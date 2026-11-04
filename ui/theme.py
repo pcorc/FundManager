@@ -24,8 +24,10 @@ SURFACE_2 = "#2C3446"
 SURFACE_3 = "#333C50"
 BORDER = "#363F52"
 TEXT = "#E3E7EF"
-MUTED = "#9AA4B8"
-FAINT = "#6F7A90"
+# Text tiers: TEXT for values, MUTED for secondary text people read (labels, footnotes, reasons), FAINT for
+# hints and meta lines. Each clears the 4.5:1 body-text minimum on BG, SURFACE and SURFACE_2.
+MUTED = "#B0B9CA"
+FAINT = "#929CB0"
 ACCENT = "#7C9CF5"
 ACCENT_TEXT = "#A9BDF8"
 BAND = "#3A4A75"  # rule-card header band (a soft blue)
@@ -74,7 +76,23 @@ hr {{ border-color: var(--fm-border) !important; opacity: .7; }}
 [data-testid="stVerticalBlockBorderWrapper"], div[data-testid="stVerticalBlock"][class*="st-key-"][style*="border"] {{
   border-radius: var(--fm-radius); }}
 .st-key-nr_settings {{ background: var(--fm-surface); border: 1px solid var(--fm-border) !important;
-  border-radius: 16px; padding: 1.1rem 1.15rem 1.2rem; box-shadow: var(--fm-shadow); }}
+  border-radius: 16px; padding: 1.1rem 1.15rem 0; box-shadow: var(--fm-shadow); }}
+/* The settings column stays in view with its own scroll, and RUN / RESET stay pinned at its foot, so the progress
+   and results that appear at the top of the right pane are on screen when RUN is pressed. */
+[data-testid="stColumn"]:has(.st-key-nr_settings) {{ position: sticky; top: 3rem; align-self: flex-start; }}
+.st-key-nr_settings {{ max-height: calc(100vh - 4rem); overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: var(--fm-surface-3) transparent; }}
+[data-testid="stLayoutWrapper"]:has(> .st-key-nr_actions) {{ position: sticky; bottom: 0; z-index: 3;
+  background: var(--fm-surface); padding: 0 0 1rem; }}
+.st-key-nr_actions .fm-rule {{ margin-top: 0; }}
+/* Below 1200px the settings and the preview stack (Streamlit itself stacks columns only below 640px). */
+@media (max-width: 1200px) {{
+  [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-nr_settings) {{ flex-direction: column; }}
+  [data-testid="stHorizontalBlock"]:has(> [data-testid="stColumn"] .st-key-nr_settings) > [data-testid="stColumn"] {{
+    width: 100% !important; flex: 1 1 100% !important; }}
+  [data-testid="stColumn"]:has(.st-key-nr_settings) {{ position: static; align-self: stretch; }}
+  .st-key-nr_settings {{ max-height: none; overflow: visible; }}
+}}
 .st-key-nr_preview {{ padding: 0 .2rem; }}
 [data-baseweb="input"], [data-baseweb="select"] > div, [data-baseweb="textarea"] {{
   background: var(--fm-surface-2) !important; border-color: var(--fm-border) !important; border-radius: 9px !important; }}
@@ -94,6 +112,15 @@ hr {{ border-color: var(--fm-border) !important; opacity: .7; }}
   border-color: var(--fm-accent-line) !important; box-shadow: none; letter-spacing: 0; }}
 .stButton button[kind="secondary"]:hover:not(:disabled) {{ border-color: var(--fm-accent-line); color: var(--fm-accent-text); }}
 [data-testid="stButtonGroup"] button {{ border-color: var(--fm-border); }}
+/* Segmented controls and pills (Streamlit 1.66 marks them data-variant / aria-checked): unselected segments sit on
+   SURFACE_2 like the tiles and inputs beside them, the selected one is tinted like a ticked tile. */
+.st-key-nr_settings [data-testid="stButtonGroup"] button[data-variant="segmented_control"] {{ background: var(--fm-surface-2) !important; }}
+[data-testid="stButtonGroup"] button[data-variant][aria-checked="true"] {{ background: var(--fm-accent-soft) !important;
+  color: var(--fm-accent-text) !important; border-color: var(--fm-accent-line) !important; }}
+.st-key-nr_settings [data-testid="stButtonGroup"] > div {{ flex-wrap: nowrap; }}
+.st-key-nr_settings [data-testid="stButtonGroup"] button p {{ white-space: nowrap; }}
+.stDownloadButton button {{ height: auto; min-height: 2.5rem; }}
+.stDownloadButton button p {{ white-space: normal; text-align: left; line-height: 1.3; }}
 [data-testid="stExpander"] details {{ border-color: var(--fm-border); border-radius: var(--fm-radius); background: var(--fm-surface); }}
 [data-testid="stExpander"] summary {{ color: var(--fm-muted); }}
 [data-testid="stAlert"] {{ border-radius: var(--fm-radius); }}
@@ -115,8 +142,9 @@ hr {{ border-color: var(--fm-border) !important; opacity: .7; }}
 .st-key-nr_chips button {{ padding: .1rem .7rem; min-height: 1.9rem; font-size: .8rem; border-radius: 999px; }}
 
 /* ---- section headings inside the settings panel ------------------------------------------------------ */
-.fm-sec {{ display: flex; align-items: baseline; justify-content: space-between; margin: .35rem 0 .15rem; }}
-.fm-sec h3 {{ font-size: 1.02rem; font-weight: 640; margin: 0; padding: 0; color: var(--fm-text); }}
+.fm-sec {{ display: flex; flex-wrap: wrap; gap: .2rem .6rem; align-items: baseline; justify-content: space-between;
+  margin: .35rem 0 .15rem; }}
+.fm-sec h3 {{ font-size: 1.02rem; font-weight: 640; margin: 0; padding: 0; color: var(--fm-text); white-space: nowrap; }}
 .fm-sec .fm-count {{ display: inline-block; margin-left: .45rem; padding: 0 .5rem; border-radius: 999px; font-size: .75rem;
   background: var(--fm-accent-soft); color: var(--fm-accent-text); font-weight: 600; vertical-align: 2px; }}
 .fm-sec small {{ color: var(--fm-faint); font-size: .76rem; }}
@@ -124,24 +152,26 @@ hr {{ border-color: var(--fm-border) !important; opacity: .7; }}
 .fm-hint {{ color: var(--fm-faint); font-size: .78rem; margin: .1rem 0 .2rem; }}
 
 /* ---- pills ------------------------------------------------------------------------------------------- */
-.fm-pill.sm {{ min-width: 2.5rem; padding: 0 .4rem; font-size: .66rem; line-height: 1.3rem; }}
 .fm-pill {{ display: inline-block; min-width: 2.9rem; text-align: center; padding: .08rem .55rem; border-radius: 999px;
-  font-size: .72rem; font-weight: 650; letter-spacing: .05em; line-height: 1.45rem; border: 1px solid transparent; }}
+  font-size: .72rem; font-weight: 650; letter-spacing: .05em; line-height: 1.45rem; border: 1px solid transparent;
+  white-space: nowrap; }}
 .fm-pass {{ color: var(--fm-pass); background: var(--fm-pass-soft); border-color: rgba(127,203,155,.28); }}
 .fm-fail {{ color: var(--fm-fail); background: var(--fm-fail-soft); border-color: rgba(238,142,142,.3); }}
 .fm-warn {{ color: var(--fm-warn); background: var(--fm-warn-soft); border-color: rgba(230,192,123,.3); }}
 .fm-err {{ color: #F2A7C0; background: rgba(242,167,192,.13); border-color: rgba(242,167,192,.3); }}
 .fm-na, .fm-none {{ color: var(--fm-na); background: var(--fm-na-soft); border-color: rgba(163,172,189,.2); }}
 .fm-run {{ color: var(--fm-accent-text); background: var(--fm-accent-soft); border-color: var(--fm-accent-line); }}
+.fm-pill.sm {{ min-width: 2.5rem; padding: 0 .4rem; font-size: .7rem; line-height: 1.3rem; }}
 .fm-dash {{ color: var(--fm-faint); }}
 
 /* ---- metric cards and the preview sentence ----------------------------------------------------------- */
-.fm-metrics {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .9rem; margin: .2rem 0 1rem; }}
+.fm-metrics {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: .9rem; margin: .2rem 0 1rem; }}
 .fm-metric {{ background: var(--fm-surface); border: 1px solid var(--fm-border); border-radius: 14px; padding: .95rem 1rem .85rem;
   text-align: center; box-shadow: var(--fm-shadow); }}
 .fm-metric .v {{ font-size: 1.85rem; font-weight: 650; color: var(--fm-text); line-height: 1.1; font-variant-numeric: tabular-nums; }}
 .fm-metric .l {{ color: var(--fm-muted); font-size: .8rem; margin-top: .3rem; letter-spacing: .02em; }}
-.fm-metric .s {{ color: var(--fm-faint); font-size: .72rem; margin-top: .15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.fm-metric .s {{ color: var(--fm-faint); font-size: .74rem; margin-top: .15rem; line-height: 1.35; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }}
 .fm-metric.accent .v {{ color: var(--fm-accent-text); }}
 .fm-sentence {{ text-align: center; color: var(--fm-muted); font-size: .92rem; line-height: 1.6; margin: .2rem 0 1.2rem; }}
 .fm-sentence b {{ color: var(--fm-text); font-weight: 650; }}
@@ -167,35 +197,46 @@ hr {{ border-color: var(--fm-border) !important; opacity: .7; }}
 .fm-h2 {{ display: flex; align-items: baseline; gap: .6rem; margin: 1.4rem 0 .7rem; }}
 .fm-h2 h2 {{ font-size: 1.12rem; font-weight: 640; margin: 0; padding: 0; color: var(--fm-text); }}
 .fm-h2 span {{ color: var(--fm-faint); font-size: .82rem; }}
-.fm-grid {{ display: flex; gap: 1.1rem; align-items: flex-start; }}
-.fm-col {{ flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 1.1rem; }}
-@media (max-width: 1100px) {{ .fm-grid {{ flex-direction: column; align-items: stretch; }} .fm-col {{ display: contents; }} }}
+.fm-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.1rem; align-items: start; }}
+.fm-cell {{ min-width: 0; }}
+.fm-cell.wide {{ grid-column: 1 / -1; }}
+@media (max-width: 1100px) {{ .fm-grid {{ grid-template-columns: minmax(0, 1fr); }} }}
+.fm-split {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }}
+.fm-split > div + div {{ border-left: 1px solid var(--fm-border); }}
+@media (max-width: 900px) {{ .fm-split {{ grid-template-columns: minmax(0, 1fr); }} .fm-split > div + div {{ border-left: none; }} }}
 .fm-card {{ background: var(--fm-surface); border: 1px solid var(--fm-border); border-radius: 14px; overflow: hidden;
   box-shadow: var(--fm-shadow); }}
-.fm-band {{ background: linear-gradient(180deg, #3E4F7D, var(--fm-band)); color: #EEF2FB; padding: .62rem 1rem;
-  display: flex; align-items: center; justify-content: space-between; gap: .6rem; font-weight: 620; font-size: .93rem; }}
+.fm-band {{ background: linear-gradient(180deg, #3E4F7D, var(--fm-band)); color: #EEF2FB; padding: .5rem 1rem;
+  display: flex; align-items: center; justify-content: space-between; gap: .6rem; font-weight: 620; font-size: .93rem;
+  min-height: 2.85rem; box-sizing: border-box; }}
+.fm-band .fm-pill {{ background: var(--fm-surface); font-size: .7rem; line-height: 1.25rem; flex: none; }}
 .fm-band .sub {{ color: #C3CEEA; font-weight: 450; font-size: .78rem; }}
 .fm-band.plain {{ background: var(--fm-surface-2); color: var(--fm-text); border-bottom: 1px solid var(--fm-border); }}
 .fm-body {{ padding: .3rem 0 .2rem; }}
 .fm-card p.fm-desc {{ color: var(--fm-muted); font-size: .86rem; margin: .7rem 1rem .4rem; line-height: 1.5; }}
 .fm-card ul.fm-conds {{ margin: .2rem 1rem .6rem 1.1rem; padding: 0 0 0 .8rem; color: var(--fm-text); font-size: .84rem; line-height: 1.55; }}
 .fm-card ul.fm-conds li::marker {{ color: var(--fm-accent); }}
-.fm-card .fm-applies {{ margin: 0 1rem .85rem; color: var(--fm-faint); font-size: .78rem; }}
+.fm-card .fm-applies {{ margin: 0 1rem .85rem; color: var(--fm-muted); font-size: .8rem; }}
 table.fm-kv {{ width: 100%; border-collapse: collapse; font-size: .85rem; }}
-table.fm-kv th {{ text-align: left; font-weight: 560; color: var(--fm-accent-text); padding: .45rem 1rem; width: 52%;
+table.fm-kv th {{ text-align: left; font-weight: 560; color: var(--fm-accent-text); padding: .45rem 1rem; width: auto;
   border-bottom: 1px solid rgba(54,63,82,.7); vertical-align: top; }}
 table.fm-kv td {{ text-align: right; padding: .45rem 1rem; color: var(--fm-text); border-bottom: 1px solid rgba(54,63,82,.7);
-  font-variant-numeric: tabular-nums; word-break: break-word; }}
+  overflow-wrap: anywhere; }}
+table.fm-kv td.nw {{ white-space: nowrap; overflow-wrap: normal; }}
+table.fm-kv th {{ min-width: 7rem; }}
+table.fm-kv td:has(> .long) {{ width: 58%; }}
+table.fm-kv td.num, table.fm-table td.num {{ font-variant-numeric: tabular-nums; }}
 table.fm-kv tr:last-child th, table.fm-kv tr:last-child td {{ border-bottom: none; }}
 table.fm-kv tr:hover td, table.fm-kv tr:hover th {{ background: rgba(124,156,245,.04); }}
 table.fm-kv td.v-pass {{ color: var(--fm-pass); font-weight: 600; }}
 table.fm-kv td.v-fail {{ color: var(--fm-fail); font-weight: 600; }}
 table.fm-kv td.v-warn {{ color: var(--fm-warn); font-weight: 600; }}
 table.fm-kv td.v-na {{ color: var(--fm-na); }}
-table.fm-kv td .why {{ display: block; color: var(--fm-faint); font-size: .72rem; font-weight: 400; }}
+table.fm-kv td .why {{ display: block; color: var(--fm-muted); font-size: .76rem; font-weight: 400; }}
 table.fm-kv td .long {{ display: block; max-height: 7.5em; overflow: auto; text-align: left; font-size: .78rem; color: var(--fm-muted); }}
 .fm-sub {{ padding: .55rem 1rem .25rem; color: var(--fm-muted); font-size: .74rem; font-weight: 650; letter-spacing: .07em;
   text-transform: uppercase; border-top: 1px solid var(--fm-border); }}
+.fm-sub.first {{ border-top: none; }}
 .fm-card details {{ border-top: 1px solid var(--fm-border); }}
 .fm-card details > summary {{ cursor: pointer; padding: .5rem 1rem; color: var(--fm-muted); font-size: .8rem; list-style: none; }}
 .fm-card details > summary::-webkit-details-marker {{ display: none; }}
@@ -208,7 +249,7 @@ table.fm-kv td .long {{ display: block; max-height: 7.5em; overflow: auto; text-
 .fm-card details.fm-foot {{ padding: 0 1rem .1rem; }}
 .fm-card details.fm-foot > summary.t {{ padding: .55rem 0; margin: 0; font-size: .76rem; }}
 .fm-card details.fm-foot[open] {{ padding-bottom: .8rem; }}
-.fm-foot p {{ margin: .12rem 0; color: var(--fm-faint); font-size: .72rem; line-height: 1.45; }}
+.fm-foot p {{ margin: .15rem 0; color: var(--fm-muted); font-size: .78rem; line-height: 1.5; }}
 .fm-reason {{ margin: .7rem 1rem; color: var(--fm-muted); font-size: .84rem; }}
 .fm-stats {{ display: flex; flex-wrap: wrap; gap: .45rem; padding: .7rem 1rem .4rem; }}
 .fm-stat {{ background: var(--fm-surface-2); border: 1px solid var(--fm-border); border-radius: 9px; padding: .3rem .6rem; font-size: .78rem; color: var(--fm-muted); }}
@@ -216,12 +257,18 @@ table.fm-kv td .long {{ display: block; max-height: 7.5em; overflow: auto; text-
 .fm-stat.bad b {{ color: var(--fm-fail); }} .fm-stat.warnish b {{ color: var(--fm-warn); }}
 
 /* ---- data tables (matrix, history, GICS, discrepancies, trading) ------------------------------------- */
-.fm-tablewrap {{ overflow-x: auto; }}
+/* A wide table scrolls sideways; a soft shadow at the right edge says there is more (it is covered once the
+   table is scrolled to its end: the cover scrolls with the content, the shadow stays with the box). */
+.fm-tablewrap {{ overflow-x: auto;
+  background: linear-gradient(to left, var(--fm-surface) 40%, rgba(38,45,59,0)) right center / 2.5rem 100% no-repeat local,
+              radial-gradient(farthest-side at 100% 50%, rgba(8,10,16,.55), rgba(8,10,16,0)) right center / .9rem 100% no-repeat scroll; }}
 table.fm-table {{ width: 100%; border-collapse: separate; border-spacing: 0; font-size: .82rem; }}
 table.fm-table th {{ text-align: left; color: var(--fm-muted); font-weight: 600; font-size: .74rem; letter-spacing: .04em;
   padding: .5rem .75rem; background: var(--fm-surface-2); border-bottom: 1px solid var(--fm-border); white-space: nowrap; }}
 table.fm-table td {{ padding: .42rem .75rem; border-bottom: 1px solid rgba(54,63,82,.6); color: var(--fm-text);
-  font-variant-numeric: tabular-nums; vertical-align: middle; }}
+  vertical-align: middle; }}
+.fm-card table.fm-table th:first-child, .fm-card table.fm-table td:first-child {{ padding-left: 1rem; }}
+.fm-card table.fm-table th:last-child, .fm-card table.fm-table td:last-child {{ padding-right: 1rem; }}
 table.fm-table tr:last-child td {{ border-bottom: none; }}
 table.fm-table tbody tr:hover td {{ background: rgba(124,156,245,.05); }}
 table.fm-table td.num, table.fm-table th.num {{ text-align: right; }}
@@ -229,10 +276,17 @@ table.fm-table td.c, table.fm-table th.c {{ text-align: center; }}
 table.fm-matrix th {{ white-space: normal; text-align: center; padding: .5rem .2rem; line-height: 1.2; font-size: .7rem; }}
 table.fm-matrix th:first-child {{ text-align: left; padding-left: .9rem; }}
 table.fm-matrix td {{ padding: .38rem .15rem; }}
-@media (max-width: 1440px) {{ table.fm-matrix .fm-pill.sm {{ min-width: 2.2rem; padding: 0 .28rem; font-size: .62rem; }} }}
+table.fm-matrix th:first-child, table.fm-matrix td:first-child {{ position: sticky; left: 0; z-index: 1;
+  background: var(--fm-surface); box-shadow: inset -1px 0 0 var(--fm-border); }}
+table.fm-matrix th:first-child {{ background: var(--fm-surface-2); }}
 table.fm-history td {{ font-size: .8rem; }}
 table.fm-history td:nth-child(1), table.fm-history td:nth-child(3) {{ white-space: nowrap; }}
-table.fm-history td:nth-child(8) {{ color: var(--fm-faint); font-size: .74rem; word-break: break-all; }}
+table.fm-history td:nth-child(4), table.fm-history th:nth-child(4) {{ text-align: left; }}
+table.fm-history .nw {{ white-space: nowrap; }}
+table.fm-history td:nth-child(8) {{ color: var(--fm-faint); font-size: .76rem; overflow-wrap: anywhere; }}
+@media (max-width: 1100px) {{ table.fm-history th:nth-child(8), table.fm-history td:nth-child(8) {{ display: none; }}
+  table.fm-history th, table.fm-history td {{ padding-left: .5rem; padding-right: .5rem; }}
+  table.fm-history td:nth-child(5) {{ min-width: 11rem; }} }}
 table.fm-matrix td:first-child {{ font-weight: 650; letter-spacing: .03em; padding-left: .9rem; }}
 table.fm-table td.fund {{ font-weight: 650; letter-spacing: .03em; }}
 table.fm-table tr.hl-bad td {{ background: var(--fm-fail-soft); }}
@@ -249,8 +303,7 @@ table.fm-table td .sub {{ display: block; color: var(--fm-faint); font-size: .72
 /* ---- run banner, stepper, progress ------------------------------------------------------------------- */
 .fm-banner {{ display: flex; align-items: center; gap: 1rem; padding: .9rem 1.1rem; border-radius: 14px; margin: .2rem 0 1rem;
   background: var(--fm-surface); border: 1px solid var(--fm-border); box-shadow: var(--fm-shadow); }}
-.fm-banner .fm-pill.sm {{ min-width: 2.5rem; padding: 0 .4rem; font-size: .66rem; line-height: 1.3rem; }}
-.fm-pill {{ font-size: .8rem; padding: .15rem .8rem; }}
+.fm-banner > .fm-pill {{ font-size: .8rem; padding: .15rem .8rem; }}
 .fm-banner .t {{ font-weight: 620; color: var(--fm-text); }}
 .fm-banner .m {{ color: var(--fm-faint); font-size: .8rem; margin-top: .1rem; }}
 .fm-steps {{ display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; margin: .6rem 0 .4rem; }}

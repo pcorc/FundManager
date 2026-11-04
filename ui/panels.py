@@ -124,7 +124,9 @@ def results_panel(run_dir: Path, user: str, key: str, day: Optional[str] = None)
         ui.show(ui.callout("error", f"{len(record.errors)} error{'s' if len(record.errors) != 1 else ''} in this run:",
                            record.errors))
     views = history.load_views(run_dir)
-    shown = bool(views) and results.render_views(views, key=key, run=run_dir.name, day=None if day == "stacked" else day)
+    requested = record_tests(run_dir)
+    shown = bool(views) and results.render_views(views, key=key, run=run_dir.name,
+                                                 day=None if day == "stacked" else day, requested=requested)
     if not shown and result.summaries:
         rows = summary_rows(result.summaries)
         columns = list(dict.fromkeys(k for row in rows for k in row))
@@ -133,6 +135,14 @@ def results_panel(run_dir: Path, user: str, key: str, day: Optional[str] = None)
     _downloads(run_dir, record, result, user, key, day)
     with st.expander("Run log (tail)"):
         st.code(runner.redact(runner.tail(run_dir / runner.LOG, lines=60)) or "(empty)", language="log")
+
+
+def record_tests(run_dir: Path) -> List[str]:
+    """The compliance tests the run asked for ([] when its request is unreadable)."""
+    try:
+        return list(history.load_request(run_dir).compliance_tests)
+    except (OSError, ValueError, TypeError, KeyError):
+        return []
 
 
 def _downloads(run_dir: Path, record: history.RunRecord, result, user: str, key: str, day: Optional[str]) -> None:
@@ -171,12 +181,14 @@ def _zip_reader(run_dir: Path) -> Callable[[], bytes]:
 
 
 def summary_rows(summaries: Dict[str, dict]) -> List[dict]:
-    """One row per day; list values (operations, errors) shown as text."""
+    """One row per day; list values (operations, errors) shown as text, the errors redacted."""
     rows: List[dict] = []
     for day, summary in summaries.items():
         row = {"day": day}
         for name, value in summary.items():
-            row[name] = "; ".join(map(str, value)) if isinstance(value, (list, tuple)) else value
+            if isinstance(value, (list, tuple)):
+                value = "; ".join(map(str, value))
+            row[name] = runner.redact(value) if name == "errors" else value
         rows.append(row)
     return rows
 
