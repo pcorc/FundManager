@@ -15,8 +15,11 @@ table view).
 Colours (validated with the dataviz skill's ``validate_palette.js`` against
 the card surface ``#262D3B``, dark mode, all pairs: lightness band, chroma,
 CVD and normal-vision separation, 3:1 contrast): asset classes are
-categorical slots blue / orange / aqua. Totals (current and post-trade cash)
-are a neutral slate. Text always uses the theme's text tokens.
+categorical slots blue / orange / aqua, and those hues mean an asset class
+only. Totals (current and post-trade cash, all-asset traded %) use
+non-categorical inks: a neutral slate (:data:`TOTAL`, 4.6:1 on the card) and
+the text ink for the filled post-trade dot (:data:`POST`). Text always uses
+the theme's text tokens.
 """
 from __future__ import annotations
 
@@ -29,8 +32,8 @@ ASSET_COLORS = {"equity": "#6C8BE6", "options": "#D2774A", "treasury": "#31A27F"
 ASSET_LABELS = {"equity": "Equity", "options": "Options", "treasury": "Treasury"}
 ASSET_UNITS = {"equity": "shares", "options": "contracts", "treasury": "face"}
 ASSETS = ("equity", "options", "treasury")
-SINGLE = ASSET_COLORS["equity"]  # a one-series chart takes slot 1
-TOTAL = "#8C96AA"  # start / end bars of the waterfall
+TOTAL = "#8C96AA"  # start / end bars of the waterfall, all-asset traded % bars (not an asset-class hue)
+POST = "#E3E7EF"  # the filled "post-trade cash" dot (theme TEXT ink: not an asset-class hue)
 BEFORE = "#A3ACBD"  # the hollow "current cash" dot
 SURFACE = "#262D3B"  # the card surface: gaps and rings
 GRID = "#353E51"
@@ -43,6 +46,7 @@ ROW = 22  # px per fund row
 BAR = 12  # px bar thickness (<= 24)
 AXIS_BAND = 20  # px for the tick labels above the plot
 PLOT_LEFT, PLOT_RIGHT = 4.0, 96.0  # % of the SVG width the data may use
+LEFT_OUT_SHOWN = 5  # funds named in a chart's "not plotted" note (largest first)
 
 
 def esc(value: object) -> str:
@@ -135,20 +139,26 @@ def _figure(title: str, subtitle: str, body: str, *, legend_html: str = "", note
             label: str = "") -> str:
     sub = f"<span>{esc(subtitle)}</span>" if subtitle else ""
     foot = f'<div class="fm-chart-note">{esc(note)}</div>' if note else ""
+    # Every per-fund chart keeps a legend row (an empty one when it needs none), so their plots start at the same
+    # height and the fund rows line up across the small multiples.
+    legend_html = legend_html or '<div class="fm-legend" aria-hidden="true">&nbsp;</div>'
     return (f'<figure class="fm-chart" aria-label="{esc(label or title)}"><figcaption><b>{esc(title)}</b>{sub}'
             f"</figcaption>{legend_html}{body}{foot}</figure>")
 
 
 def labelled_ticks(ticks: Sequence[float]) -> List[float]:
-    """The ticks that get a label: the two ends and zero (an end too close to zero is dropped), so labels never
-    collide however narrow the card; every tick keeps its gridline."""
+    """The ticks that get a label: the two ends and zero, so labels never collide however narrow the card; every
+    tick keeps its gridline. A positive end too close to zero is dropped; a negative low end is always labelled
+    (then zero gives way when the two would collide), so a below-zero zone is never unlabelled."""
     if len(ticks) <= 2:
         return list(ticks)
     low, high = ticks[0], ticks[-1]
     span = (high - low) or 1.0
     keep = [t for t in (low, 0.0, high) if low <= t <= high]
     if 0.0 in keep:
-        keep = [t for t in keep if t == 0.0 or abs(t) / span >= 0.3]
+        keep = [t for t in keep if t == 0.0 or abs(t) / span >= 0.3 or t == low < 0]
+        if low < 0 and abs(low) / span < 0.18:
+            keep = [t for t in keep if t != 0.0]
     return sorted(set(keep))
 
 
@@ -223,15 +233,34 @@ def priced_net(asset: Mapping) -> float:
     return -effect if effect is not None else (_num(asset.get("net_value")) or 0.0)
 
 
+def left_out_note(funds: Sequence[Mapping], *, table_pct: bool = False) -> str:
+    """The trades the priced charts leave out (as the cash estimate does), per fund; '' when none.
+
+    ``table_pct`` adds each fund's all-trades % of TNA, as the summary table shows it.
+    """
+    left_out = sorted(((_num((fund.get("cash") or {}).get("excluded_value")) or 0.0, fund) for fund in funds),
+                      key=lambda item: -item[0])
+    left_out = [(value, fund) for value, fund in left_out if value]
+    if not left_out:
+        return ""
+    parts = []
+    for value, fund in left_out[:LEFT_OUT_SHOWN]:
+        text = f"{fund.get('fund')} {ui.money(value)}"
+        if table_pct and _num(fund.get("gross_pct_tna")) is not None:
+            text += f" (table: {ui.pct(fund.get('gross_pct_tna'))})"
+        parts.append(text)
+    more = len(left_out) - LEFT_OUT_SHOWN
+    tail = f" and {more} more (each fund's drill-down lists them)" if more > 0 else ""
+    return ("Not plotted: trades without a usable price, that restate the position held, or that repeat another "
+            "row: " + ", ".join(parts) + tail + ".")
+
+
 def net_by_asset_chart(funds: Sequence[Mapping]) -> str:
     """Net trade value (buys − sells) per fund, split by asset class: net buying right of zero, selling left."""
-    rows, left_out = [], []
+    rows = []
     for fund in funds:
         nets = [(a, priced_net(((fund.get("assets") or {}).get(a) or {}))) for a in ASSETS]
         rows.append((str(fund.get("fund") or ""), nets))
-        excluded = _num((fund.get("cash") or {}).get("excluded_value"))
-        if excluded:
-            left_out.append(f"{fund.get('fund')} {ui.money(excluded)}")
     if not rows:
         return ""
     low, high, ticks = nice_domain([sum(v for _, v in nets if v < 0) for _, nets in rows]
@@ -259,21 +288,30 @@ def net_by_asset_chart(funds: Sequence[Mapping]) -> str:
     marks.append(f'<line x1="{scale(0)}%" x2="{scale(0)}%" y1="{AXIS_BAND - 4}" y2="{height}" stroke="{AXIS}"/>')
     svg = _svg(height, "Net trade value per fund by asset class", "".join(marks))
     used = [a for a in ASSETS if any(dict(nets)[a] for _, nets in rows)] or ["equity"]
-    note = ("Not plotted (no usable price, or a staged quantity that restates the position): "
-            + ", ".join(left_out) + ".") if left_out else ""
+    note = left_out_note(funds)
     return _figure("Net trade value by asset class", "priced buys − sells; buying right of zero",
                    _rows_frame([r[0] for r in rows], values, svg, classes),
                    legend_html=legend([(ASSET_COLORS[a], ASSET_LABELS[a]) for a in used]), note=note,
                    label="Net trade value per fund by asset class")
 
 
+def _cash_pct(cash: Mapping, side: str, tna: Optional[float]) -> Optional[float]:
+    value = _num(cash.get(f"{side}_pct_tna"))
+    if value is None and tna:
+        amount = _num(cash.get(side))
+        value = None if amount is None else amount / tna
+    return value
+
+
 def cash_dumbbell_chart(funds: Sequence[Mapping]) -> str:
-    """Current cash (hollow dot) → estimated post-trade cash (filled dot) per fund; below zero is washed red."""
+    """Current cash (hollow dot) → estimated post-trade cash (filled dot) per fund, as % of TNA so small and large
+    funds compare; below zero is washed red. The value column gives the post-trade dollars."""
     rows = []
     for fund in funds:
         cash = fund.get("cash") or {}
-        rows.append((str(fund.get("fund") or ""), _num(cash.get("current")), _num(cash.get("post")),
-                     bool(cash.get("negative"))))
+        tna = _num(fund.get("tna")) or None
+        rows.append((str(fund.get("fund") or ""), _cash_pct(cash, "current", tna), _cash_pct(cash, "post", tna),
+                     cash))
     if not rows:
         return ""
     known = [v for _, a, b, _ in rows for v in (a, b) if v is not None]
@@ -285,40 +323,50 @@ def cash_dumbbell_chart(funds: Sequence[Mapping]) -> str:
     marks = []
     if low < 0:
         marks.append(f'<rect x="{scale(low)}%" y="{AXIS_BAND - 4}" width="{round(scale(0) - scale(low), 3)}%" '
-                     f'height="{height - AXIS_BAND + 4}" fill="{NEG_WASH}"><title>Below zero: the buys exceed the '
-                     "opening cash</title></rect>")
-    marks.append(_grid_lines(scale, ticks, height, "money"))
+                     f'height="{height - AXIS_BAND + 4}" fill="{NEG_WASH}"><title>Below zero cash</title></rect>')
+    marks.append(_grid_lines(scale, ticks, height, "pct"))
     values, classes, missing = [], [], []
-    for i, (name, current, post, negative) in enumerate(rows):
+    for i, (name, current, post, cash) in enumerate(rows):
         cy = AXIS_BAND + i * ROW + ROW / 2
+        negative = bool(cash.get("negative"))
         if current is None or post is None:
-            values.append('<span class="none">no cash</span>')
+            values.append('<span class="none">no cash</span>' if cash.get("current") is None
+                          else '<span class="none">no TNA</span>')
             classes.append("")
             missing.append(name)
             continue
-        title = (f"{name} · current cash {ui.money(current, compact=False)} → post-trade "
-                 f"{ui.money(post, compact=False)} (est.)")
+        why = (" · the trades take cash below zero" if cash.get("goes_negative")
+               else " · already below zero before the trades" if cash.get("negative_before") else "")
+        title = (f"{name} · current cash {ui.money(cash.get('current'), compact=False)} ({ui.pct(current)} of TNA) → "
+                 f"post-trade {ui.money(cash.get('post'), compact=False)} ({ui.pct(post)}) (est.){why}")
         marks.append(f'<g><title>{esc(title)}</title>'
                      f'<line x1="{scale(current)}%" x2="{scale(post)}%" y1="{cy}" y2="{cy}" stroke="{INK}" '
                      f'stroke-width="2" stroke-opacity=".55"/>'
                      f'<circle cx="{scale(current)}%" cy="{cy}" r="4.5" fill="{SURFACE}" stroke="{BEFORE}" stroke-width="2"/>'
-                     f'<circle cx="{scale(post)}%" cy="{cy}" r="5" fill="{SINGLE}" stroke="{SURFACE}" stroke-width="2"/>'
+                     f'<circle cx="{scale(post)}%" cy="{cy}" r="5" fill="{POST}" stroke="{SURFACE}" stroke-width="2"/>'
                      f'<rect x="{min(scale(current), scale(post))}%" y="{cy - ROW / 2}" height="{ROW}" '
                      f'width="{max(abs(scale(post) - scale(current)), 1.5)}%" fill="transparent"/></g>')
-        values.append(("⚠ " if negative else "") + esc(ui.money(post)))
+        values.append(("⚠ " if negative else "") + esc(ui.money(cash.get("post"))))
         classes.append("neg" if negative else "")
-    svg = _svg(height, "Cash before and after the proposed trades per fund", "".join(marks))
-    note = f"No custodian cash for {', '.join(missing)}: not estimated." if missing else ""
-    return _figure("Cash before → after", "T-1 custodian cash → estimated post-trade",
+    svg = _svg(height, "Cash as a share of TNA before and after the proposed trades per fund", "".join(marks))
+    note = f"Not plotted (no custodian cash or TNA): {', '.join(missing)}." if missing else ""
+    return _figure("Cash before → after", "% of TNA: T-1 custodian cash → estimated post-trade; $ post-trade at right",
                    _rows_frame([r[0] for r in rows], values, svg, classes),
-                   legend_html=legend([(BEFORE, "Current cash", "ring"), (SINGLE, "Post-trade (est.)", "dot")]),
-                   note=note, label="Cash before and after the proposed trades per fund")
+                   legend_html=legend([(BEFORE, "Current cash", "ring"), (POST, "Post-trade (est.)", "dot")]),
+                   note=note, label="Cash as a share of TNA before and after the proposed trades per fund")
 
 
 def priced_gross_pct(fund: Mapping) -> Optional[float]:
-    """Buys + sells as a share of TNA, less the trades left out of the cash estimate (see :func:`priced_net`)."""
-    tna, gross = _num(fund.get("tna")), _num(fund.get("gross_value"))
-    if not tna or gross is None:
+    """Buys + sells as a share of TNA, less the trades left out of the cash estimate (see :func:`priced_net`);
+    None without a TNA."""
+    tna = _num(fund.get("tna"))
+    if not tna:
+        return None
+    priced = _num((fund.get("priced") or {}).get("gross_value"))
+    if priced is not None:
+        return priced / tna
+    gross = _num(fund.get("gross_value"))
+    if gross is None:
         return _num(fund.get("gross_pct_tna"))
     excluded = _num((fund.get("cash") or {}).get("excluded_value")) or 0.0
     return max(gross - excluded, 0.0) / tna
@@ -338,11 +386,13 @@ def pct_tna_chart(funds: Sequence[Mapping]) -> str:
         if value is None:
             values.append('<span class="none">no TNA</span>')
             continue
-        marks.append(_bar(scale(0), scale(value), _row_y(i), SINGLE, f"{name} · traded {ui.pct(value)} of TNA"))
+        marks.append(_bar(scale(0), scale(value), _row_y(i), TOTAL, f"{name} · traded {ui.pct(value)} of TNA"))
         values.append(esc(ui.pct(value)))
     svg = _svg(height, "Share of TNA traded per fund", "".join(marks))
-    return _figure("Traded % of TNA", "priced buys + sells over net assets",
-                   _rows_frame([r[0] for r in rows], values, svg), label="Share of TNA traded per fund")
+    return _figure("Traded % of TNA", "priced buys + sells over net assets, all asset classes",
+                   _rows_frame([r[0] for r in rows], values, svg),
+                   note=left_out_note(funds, table_pct=True),
+                   label="Share of TNA traded per fund")
 
 
 # ---------------------------------------------------------------------------
@@ -384,9 +434,8 @@ def waterfall_chart(steps: Sequence[Mapping], *, title: str = "Cash waterfall", 
     count = len(steps)
     slot = 100.0 / count
     marks = []
-    for tick in ticks:
-        color = AXIS if tick == 0 else GRID
-        marks.append(f'<line x1="0" x2="100%" y1="{y(tick)}" y2="{y(tick)}" stroke="{color}" stroke-width="1"/>')
+    # Only the zero line: every column is direct-labelled, so unlabelled gridlines would carry nothing.
+    marks.append(f'<line x1="0" x2="100%" y1="{y(0.0)}" y2="{y(0.0)}" stroke="{AXIS}" stroke-width="1"/>')
     previous = 0.0
     for i, step in enumerate(steps):
         kind = step.get("kind")
@@ -394,7 +443,7 @@ def waterfall_chart(steps: Sequence[Mapping], *, title: str = "Cash waterfall", 
         running = _num(step.get("running")) or 0.0
         center = round(slot * (i + 0.5), 3)
         start, end = (0.0, running) if kind in ("start", "end") else (previous, running)
-        color = TOTAL if kind in ("start", "end") else _STEP_COLORS.get(str(step.get("key")), SINGLE)
+        color = TOTAL if kind in ("start", "end") else _STEP_COLORS.get(str(step.get("key")), TOTAL)
         y0, y1 = y(start), y(end)
         top_y, bottom_y = min(y0, y1), max(y0, y1)
         label = str(step.get("label") or "")

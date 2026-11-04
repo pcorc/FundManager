@@ -177,14 +177,26 @@ class ExcludedTradeTests(unittest.TestCase):
         self.assertEqual(groups["options"][0]["value"], 400.0)  # the analyzer's quantity x multiplier fallback
         self.assertEqual(groups["treasury"][0]["flags"], ["restates_position"])
         cash = fund["cash"]
-        # Duplicates stay in (as in the report, with a warning); unpriced / unchanged-position trades are left out.
-        self.assertEqual(cash["post"], 100.0 + 800.0)
+        # Duplicate rows count once; unpriced / unchanged-position trades are left out (all still in the report).
+        self.assertEqual(cash["post"], 100.0 + 400.0)
         self.assertEqual(sorted((e["asset_class"], e["reason"]) for e in cash["excluded"]),
-                         [("options", "no_price"), ("treasury", "restates_position")])
-        self.assertEqual(cash["excluded_value"], 400.0 + 990.0)
+                         [("equity", "duplicate"), ("options", "no_price"), ("treasury", "restates_position")])
+        self.assertEqual(cash["excluded_value"], 400.0 + 400.0 + 990.0)
         self.assertEqual(fund["assets"]["treasury"]["buy_value"], 990.0)  # still in the trade stats
+        self.assertEqual(fund["assets"]["equity"]["sell_value"], 800.0)
+        self.assertEqual((fund["assets"]["equity"]["priced_sell_value"], fund["assets"]["options"]["unpriced_value"]),
+                         (400.0, 400.0))
+        self.assertEqual(fund["priced"], {"buy_value": 0.0, "sell_value": 400.0, "net_value": -400.0,
+                                          "gross_value": 400.0, "gross_pct_tna": 0.04})
         self.assertEqual(len(fund["warnings"]), 3)
         self.assertIn("duplicate", fund["warnings"][0])
+        dash = _dashboard({"DOGG": (ante, post)})
+        kpis = dash["kpis"]
+        self.assertEqual((kpis["sell_value"], kpis["priced_sell_value"], kpis["priced_net_value"]), (1200.0, 400.0, -400.0))
+        self.assertEqual(kpis["flagged_value"], kpis["gross_value"] - 400.0)
+        notes = kpis["data_notes"]
+        self.assertEqual((notes["duplicate"], notes["no_price"]["count"], notes["restates_position"]["value"]),
+                         ({"count": 1, "value": 400.0, "funds": ["DOGG"]}, 1, 990.0))
 
     def test_a_buy_with_an_unchanged_ex_post_share_column_stays_in(self):
         # Real data: ex-post iiv_shares need not equal nav_shares + trade_rebal (PD227 buys 100 MA, 403 -> 403).
@@ -306,7 +318,8 @@ class TransitionTests(unittest.TestCase):
         self.assertEqual([(r["key"], r["changes_or_fails"]) for r in matrix["rules"]],
                          [(GICS, False), (ACT40, True), (IRS, True)])  # the DayView's rule order
         self.assertEqual([r["fund"] for r in matrix["rows"]], ["A", "C", "B", "D"])
-        self.assertEqual(matrix["rows"][0]["cells"][IRS], {"before": "PASS", "after": "FAIL", "transition": "BREAKS"})
+        self.assertEqual(matrix["rows"][0]["cells"][IRS], {"before": "PASS", "after": "FAIL", "transition": "BREAKS",
+                                                           "changed": 2})
         self.assertNotIn("summary_metrics", matrix["rows"][0]["cells"])
 
     def test_rules_at_risk(self):
@@ -326,6 +339,105 @@ class TransitionTests(unittest.TestCase):
         self.assertEqual(diffs[0]["rows"][1]["status_before"], "PASS")
         self.assertEqual(diffs[0]["changed_rows"], 2)
         self.assertEqual(fund["metrics"], [{"label": "Cash", "before": "2", "after": "1", "changed": True}])
+
+
+class RoundOneTests(unittest.TestCase):
+    """Negative-cash flags, failing-rule trends, GICS table diffs, report-only position changes, missing data."""
+
+    def _trade(self):
+        return _frame("eqyticker", [("AAA", 0.0, 10.0, 10.0, 10.0)])
+
+    def test_negative_before_versus_going_negative(self):
+        dash = _dashboard({"A": (_fund("A", prev_cash=50.0, prev_tna=1000.0), _fund("A", equity=self._trade())),
+                           "B": (_fund("B", prev_cash=-20.0, prev_tna=1000.0), _fund("B", equity=self._trade()))})
+        cash = {f["fund"]: f["cash"] for f in dash["funds"]}
+        self.assertEqual((cash["A"]["negative"], cash["A"]["negative_before"], cash["A"]["goes_negative"]),
+                         (True, False, True))
+        self.assertEqual((cash["B"]["negative"], cash["B"]["negative_before"], cash["B"]["goes_negative"]),
+                         (True, True, False))
+        self.assertAlmostEqual(cash["A"]["current_pct_tna"], 0.05)
+        warnings = {f["fund"]: f["warnings"][0] for f in dash["funds"]}
+        self.assertIn("take estimated cash below zero", warnings["A"])
+        self.assertIn("already below zero", warnings["B"])
+        kpis = dash["kpis"]
+        self.assertEqual((kpis["funds_negative_cash"], kpis["funds_going_negative"], kpis["funds_negative_before"]),
+                         (2, 1, 1))
+
+    def _still_fails(self, before_rows, after_rows, rule=IRS, tables=((), ())):
+        funds = {"F": (_fund("F"), _fund("F", equity=self._trade()))}
+        ante = {"F": {rule: dict(_rule("FAIL", before_rows), tables=list(tables[0]))}}
+        post = {"F": {rule: dict(_rule("FAIL", after_rows), tables=list(tables[1]))}}
+        return _dashboard(funds, ante, post)
+
+    def test_still_failing_trend(self):
+        key = "Sum Large Securities %"
+        worse = self._still_fails([{"label": key, "value": "60.0%"}], [{"label": key, "value": "61.5%"}])
+        cell = worse["funds"][0]["transitions"][IRS]
+        self.assertEqual((cell["trend"], cell["key"]), ("worse", {"label": key, "before": "60.0%", "after": "61.5%"}))
+        self.assertTrue(worse["funds"][0]["worsens"])
+        self.assertEqual((worse["kpis"]["funds_worsening"], worse["kpis"]["rule_worsens"]), (1, 1))
+        self.assertEqual(worse["rules_at_risk"][0]["worsens"], ["F"])
+        better = self._still_fails([{"label": key, "value": "60.0%"}], [{"label": key, "value": "59.0%"}])
+        self.assertEqual(better["funds"][0]["transitions"][IRS]["trend"], "better")
+        # More failing sub-checks is worse whatever the key figure does.
+        sub = [{"label": "Condition 2a 5%", "value": "PASS", "status": "PASS"}]
+        failing = [{"label": "Condition 2a 5%", "value": "FAIL", "status": "FAIL"}]
+        self.assertEqual(self._still_fails(sub, failing)["funds"][0]["transitions"][IRS]["trend"], "worse")
+        self.assertEqual(self._still_fails([{"label": "X", "value": "1"}], [{"label": "X", "value": "2"}],
+                                           rule=ACT40)["funds"][0]["transitions"][ACT40]["trend"], "moves")
+        self.assertEqual(self._still_fails([], [])["funds"][0]["transitions"][IRS]["trend"], "same")
+        # A lower value is worse for the 80% policy.
+        policy = "prospectus_80pct_policy"
+        dash = self._still_fails([{"label": "Result (DAN)", "value": "79.0%"}],
+                                 [{"label": "Result (DAN)", "value": "78.0%"}], rule=policy)
+        self.assertEqual(dash["funds"][0]["transitions"][policy]["trend"], "worse")
+
+    def test_table_rows_are_diffed(self):
+        columns = ["Category", "Fund Weight", "Index Weight", "Fund > 25%", "Index > 25%"]
+        before = [{"title": "Industry exposure", "columns": columns,
+                   "rows": [["Media", "34.07%", "27.37%", "Yes", "Yes"], ["Software", "18.75%", "14.82%", "", ""],
+                            ["Retail", "5.00%", "4.00%", "", ""]]}]
+        after = [{"title": "Industry exposure", "columns": columns,
+                  "rows": [["Media", "33.83%", "27.37%", "Yes", "Yes"], ["Software", "18.75%", "14.82%", "", ""],
+                           ["Retail", "5.10%", "4.00%", "", ""]]}]
+        dash = self._still_fails([], [], rule=GICS, tables=(before, after))
+        diff = dash["funds"][0]["rules"][0]
+        self.assertEqual(diff["changed_rows"], 2)
+        self.assertFalse(diff["unchanged"])
+        self.assertEqual(diff["tables"], [{"title": "Industry exposure", "columns": columns, "total": 3, "rows": [
+            {"key": "Media", "before": ["34.07%", "27.37%", "Yes", "Yes"], "after": ["33.83%", "27.37%", "Yes", "Yes"]},
+            {"key": "Retail", "before": ["5.00%", "4.00%", "", ""], "after": ["5.10%", "4.00%", "", ""]}]}])
+        self.assertEqual(diff["key"], {"label": "Largest fund weight", "before": "34.07%", "after": "33.83%"})
+        self.assertEqual(diff["trend"], "better")
+        # A passing rule whose tables move is no longer "unchanged".
+        funds = {"F": (_fund("F"), _fund("F", equity=self._trade()))}
+        ok = _dashboard(funds, {"F": {GICS: dict(_rule("PASS"), tables=before)}},
+                        {"F": {GICS: dict(_rule("PASS"), tables=after)}})
+        self.assertEqual((ok["funds"][0]["rules"][0]["changed_rows"], ok["funds"][0]["rules"][0]["unchanged"]),
+                         (2, False))
+
+    def test_report_only_option_changes_are_listed(self):
+        options = pd.DataFrame({"optticker": ["X 12/18/26 P100", "Y 12/18/26 C200"], "nav_shares": [-10.0, 5.0],
+                                "iiv_shares": [-12.0, 5.0], "price": [2.5, 1.0]})
+        post = _fund("HE3B1", equity=self._trade(), options=options)
+        fund = _dashboard({"HE3B1": (_fund("HE3B1", prev_cash=1.0, prev_tna=1000.0), post)})["funds"][0]
+        self.assertFalse(fund["assets"]["options"]["staged"])
+        self.assertEqual(fund["unstaged"], [{"asset_class": "options", "label": "Options", "unit": "contracts",
+                                             "value": 500.0, "changes": [
+            {"ticker": "X 12/18/26 P100", "before_qty": -10.0, "after_qty": -12.0, "change": -2.0, "price": 2.5,
+             "multiplier": 100.0, "value": 500.0, "rows": 1}]}])
+        self.assertEqual(fund["cash"]["post"], 1.0 - 100.0)  # not in the cash estimate
+
+    def test_missing_tna_and_cash_are_flagged(self):
+        dash = _dashboard({"PD227": (_fund("PD227"), _fund("PD227", equity=self._trade())),
+                           "KNG": (_fund("KNG", prev_cash=500.0, prev_tna=1000.0), _fund("KNG", equity=self._trade()))})
+        funds = {f["fund"]: f for f in dash["funds"]}
+        self.assertEqual((funds["PD227"]["data_missing"], funds["KNG"]["data_missing"]), (["tna", "cash"], []))
+        self.assertTrue(any("No custodian TNA" in w for w in funds["PD227"]["warnings"]))
+        self.assertEqual(dash["kpis"]["data_notes"]["data_missing"], ["PD227"])
+        totals = dash["totals"]
+        self.assertEqual((totals["tna"], totals["tna_funds"]), (1000.0, 1))
+        self.assertAlmostEqual(totals["gross_pct_tna"], 0.1)  # KNG's 100 over KNG's TNA only
 
 
 class TradingViewIntegrationTests(unittest.TestCase):

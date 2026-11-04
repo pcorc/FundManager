@@ -236,6 +236,7 @@ KEYS = {"kind": "nr_kind", "date_kind": "nr_date_kind", "as_of": "nr_as_of", "da
         "email_confirmed": "nr_email_ok", "tag": "nr_tag"}
 FUNDS_KEY, RULES_KEY, START_KEY, END_KEY, FILTER_KEY = "nr_funds", "nr_rules", "nr_start", "nr_end", "nr_fund_filter"
 OP_KEYS = tuple(f"nr_op_{op}" for op in EOD_OPS)
+WATCH_KEY = "nr_watch"  # the run this page shows (started here, or reattached by ui.app.reattach_active_run)
 CONFIRM_KEYS = ("nr_email_ok",)  # never kept: a confirmation lasts only while it is on screen
 KEPT_KEYS = (tuple(k for k in KEYS.values() if k not in CONFIRM_KEYS) + OP_KEYS
              + (FUNDS_KEY, RULES_KEY, START_KEY, END_KEY, FILTER_KEY))
@@ -325,7 +326,7 @@ def _apply_prefill(catalog: dict) -> None:
 
 def _start(request: RunRequest, user: str, root: Path) -> None:
     try:
-        st.session_state["nr_watch"] = str(runner.start_run(request, user=user, root=root))
+        st.session_state[WATCH_KEY] = str(runner.start_run(request, user=user, root=root))
     except runner.RunLocked as exc:
         st.session_state["nr_notice_error"] = str(exc)
     except OSError as exc:
@@ -343,7 +344,7 @@ def render(catalog: dict, user: str) -> None:
     running = active is not None and not panels.is_finished(active)
     foreign = running and history.is_trading(active)  # a trading run (Trading Compliance page) holds the lock
     if running and not foreign:
-        st.session_state["nr_watch"] = str(active)  # reattach after a refresh, or show another user's run
+        st.session_state[WATCH_KEY] = str(active)  # reattach after a refresh, or show another user's run
     if st.session_state.pop("nr_started", False):
         clear_email()  # each emailing run needs its own confirmation
         st.session_state[PANE_KEY] = RESULTS
@@ -365,7 +366,7 @@ def render(catalog: dict, user: str) -> None:
             preview.notice("info", "A trading compliance run is in progress (Trading Compliance page); the form is "
                                    "locked until it finishes.")
             panels.progress_panel(str(active), user)
-        watch = st.session_state.get("nr_watch")
+        watch = st.session_state.get(WATCH_KEY)
         live = bool(watch) and Path(watch).is_dir() and not panels.is_finished(Path(watch))
         if live:  # first in the pane, so it is in view the moment RUN is pressed
             panels.progress_panel(watch, user)

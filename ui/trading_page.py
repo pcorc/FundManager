@@ -48,8 +48,11 @@ KEYS = sp.FormKeys(funds="tc_funds", rules="tc_rules", filter="tc_fund_filter", 
 CONFIRM_KEYS = (KEYS.email_ok,)  # never kept: a confirmation lasts only while it is on screen
 KEPT_KEYS = (DATE_KEY, KEYS.funds, KEYS.rules, KEYS.filter, KEYS.pdf, KEYS.email, KEYS.tag)
 STAGED_RETRY_SECONDS = 60
-EX_ANTE_TEXT = ("Ex-ante: the holdings as they stand, before the trades (custodian cash and TNA at the "
-                "previous business day's close).")
+STAGED_KEY = "tc_staged"  # {date: lookup}: this session's copy, so a dashboard click never waits on the DB
+STAGED_TTL = 300
+EX_ANTE_TEXT = ("Ex-ante: the holdings as they stand on the trade date, before the trades (the checks use the "
+                "trade-date holdings and custodian data; the dashboard's cash estimate starts from the previous "
+                "business day's close).")
 EX_POST_TEXT = "Ex-post: the same holdings assuming the staged but unexecuted trades execute."
 
 
@@ -117,15 +120,18 @@ def apply_prefill(catalog: dict) -> None:
     st.session_state[KEYS.tag] = request.output_tag if request.output_tag != "trading_compliance" else ""
     st.session_state[KEYS.filter] = ""
     clear_email()
-    st.session_state[NOTICE_KEY] = (f"Loaded the settings of {Path(run_dir).name}. Email is off; check the picks "
-                                    "and press Run.")
+    notice = f"Loaded the settings of {Path(run_dir).name}. Email is off; check the picks and press Run."
+    if request.end_date and request.end_date > request.start_date:
+        notice += (f" The original run covered {request.start_date} to {request.end_date}; this page checks one "
+                   f"trade date at a time, so {request.start_date} is loaded.")
+    st.session_state[NOTICE_KEY] = notice
 
 
 # ---------------------------------------------------------------------------
 # Staged trades (read-only DB lookup, cached per date)
 # ---------------------------------------------------------------------------
 
-@st.cache_data(ttl=300, show_spinner="Looking up the staged trades…")
+@st.cache_data(ttl=STAGED_TTL, show_spinner=False)
 def _load_staged(day: str) -> dict:
     try:
         return {"funds": api.staged_trades(date.fromisoformat(day)), "error": None, "at": time.time()}
@@ -134,12 +140,22 @@ def _load_staged(day: str) -> dict:
         return {"funds": {}, "error": type(exc).__name__, "at": time.time()}
 
 
-def staged_trades(day: date) -> dict:
-    """``{"funds": {fund: counts}, "error": name | None}``; a failure is retried after a minute."""
+def staged_trades(day: date, *, keep: bool = False) -> dict:
+    """``{"funds": {fund: counts}, "error": name | None}``; a failure is retried after a minute.
+
+    The session keeps its own copy per date: with ``keep`` (a finished run's dashboard is on screen, so a click on
+    it must not wait on the DB) that copy is reused however old; otherwise it is refreshed after
+    :data:`STAGED_TTL` seconds. The lookup itself runs without a page-wide spinner.
+    """
+    memo = st.session_state.setdefault(STAGED_KEY, {})
+    found = memo.get(day.isoformat())
+    if found is not None and not found.get("error") and (keep or time.time() - found.get("at", 0) < STAGED_TTL):
+        return found
     found = _load_staged(day.isoformat())
     if found.get("error") and time.time() - found.get("at", 0) > STAGED_RETRY_SECONDS:
         _load_staged.clear()
         found = _load_staged(day.isoformat())
+    memo[day.isoformat()] = found
     return found
 
 
@@ -159,7 +175,7 @@ def staged_note(day: date, found: dict, catalog: dict) -> Tuple[List[str], str]:
 # Form
 # ---------------------------------------------------------------------------
 
-def form(catalog: dict, locked: bool) -> Tuple["nr.Choices", List[str]]:
+def form(catalog: dict, locked: bool, keep_staged: bool = False) -> Tuple["nr.Choices", List[str]]:
     """The settings panel; returns the picks and the funds with staged trades on the date."""
     today = date.today()
     st.html(ui.section("Trade Date", aside="proposed trades are checked on their trade date"))
@@ -171,7 +187,7 @@ def form(catalog: dict, locked: bool) -> Tuple["nr.Choices", List[str]]:
     st.html(f'<p class="fm-hint">Cash and TNA from the {business_day_offset(run_day, -1)} close · '
             f"ex-ante vs ex-post on {run_day}</p>")
     st.html(ui.divider())
-    staged, note = staged_note(run_day, staged_trades(run_day), catalog)
+    staged, note = staged_note(run_day, staged_trades(run_day, keep=keep_staged), catalog)
     c = nr.Choices(cohorts=[], exclude=[], kind=nr.KIND_TRADING, date_kind=nr.AS_OF, as_of=day)
     chips = [("Staged trades", staged, f"Tick the {len(staged)} funds with staged trades on {run_day}")] if staged else []
     sp.funds_section(catalog, c, locked, KEYS, extra_chips=chips, marked=staged, note=note)
@@ -272,10 +288,12 @@ def render(catalog: dict, user: str) -> None:
     set_defaults(catalog)
     apply_prefill(catalog)
 
+    watch = st.session_state.get(WATCH_KEY)
+    showing = bool(watch) and Path(watch).is_dir() and panels.is_finished(Path(watch))  # a dashboard is on screen
     left, right = st.columns([0.36, 0.64], gap="large")
     with left:
         with st.container(key="tc_settings"):
-            choices, staged = form(catalog, locked=running)
+            choices, staged = form(catalog, locked=running, keep_staged=showing)
             request, problem = nr.evaluate(catalog, choices)
             if sp.buttons(catalog, choices, can_run=not running and request is not None, locked=running, prefix="tc",
                           reset=reset_form, reset_help="Back to the defaults: today's trades, no fund, every check, "

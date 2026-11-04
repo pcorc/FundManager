@@ -125,8 +125,8 @@ def _plural(n: int, word: str) -> str:
 def sentence(c: Counts, estimate: Optional[Tuple[float, bool, int]]) -> str:
     """The 'Your checks will run for: …' HTML."""
     if c.days is None or not c.funds or not c.per_fund_day:
-        return ('<div class="fm-sentence">Pick the dates, at least one fund and what to run; '
-                "the preview updates as you go.</div>")
+        what = "the trade date, at least one fund and the checks" if c.trading else             "the dates, at least one fund and what to run"
+        return f'<div class="fm-sentence">Pick {what}; the preview updates as you go.</div>'
     checks = _plural(c.per_fund_day, "check")
     if c.checks and c.recons:  # the card counts the rules; say where the other checks come from
         checks += f" ({_plural(c.checks, 'rule')} + {_plural(c.recons, 'recon')})"

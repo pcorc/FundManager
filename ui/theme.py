@@ -359,6 +359,8 @@ TRADING_CSS = """
 .fm-kpi-group { color: var(--fm-muted); font-size: .7rem; font-weight: 650; letter-spacing: .08em; text-transform: uppercase;
   margin: .4rem 0 .45rem; }
 .fm-kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(122px, 1fr)); gap: .7rem; margin-bottom: .7rem; }
+/* Both rows share one five-column grid when wide, so the tile edges line up (an error tile wraps to a new row). */
+@media (min-width: 1200px) { .fm-kpi-row { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
 .fm-kpi { background: var(--fm-surface); border: 1px solid var(--fm-border); border-radius: 14px; padding: .75rem .9rem .7rem;
   box-shadow: var(--fm-shadow); border-top: 3px solid var(--fm-border); min-width: 0; }
 .fm-kpi .l { color: var(--fm-muted); font-size: .78rem; font-weight: 550; display: flex; align-items: center; gap: .4rem; }
@@ -370,7 +372,14 @@ TRADING_CSS = """
 .fm-kpi.cures { border-top-color: var(--fm-pass); } .fm-kpi.cures .ic { background: var(--fm-pass); color: #17261D; }
 .fm-kpi.breaks { border-top-color: var(--fm-fail); background: linear-gradient(0deg, var(--fm-fail-soft), var(--fm-fail-soft)), var(--fm-surface); }
 .fm-kpi.breaks .ic { background: var(--fm-fail); color: #2A1E22; }
-.fm-kpi.still, .fm-kpi.warn { border-top-color: var(--fm-warn); } .fm-kpi.still .ic { background: var(--fm-warn); color: #2A2517; }
+.fm-kpi.breaks .s { color: var(--fm-muted); }  /* FAINT on the red tint is under 4.5:1 */
+.fm-kpi.worse { border-top-color: var(--fm-fail); } .fm-kpi.worse .ic { background: var(--fm-warn); color: #2A2517; }
+/* Negative cash is red everywhere (table, charts, header); amber stays for STILL FAILS. */
+.fm-kpi.neg { border-top-color: var(--fm-fail); } .fm-kpi.neg .ic { background: var(--fm-fail-soft); color: var(--fm-fail); }
+.fm-dq .fm-callout, .fm-dq .fm-callout ul, .fm-dq .fm-callout li { font-size: .84rem !important; line-height: 1.45; }
+.fm-dq .fm-callout li { margin: .1rem 0; }
+.fm-beforeafter { margin: -.45rem 0 .7rem; color: var(--fm-muted); font-size: .8rem; }
+.fm-kpi.still { border-top-color: var(--fm-warn); } .fm-kpi.still .ic { background: var(--fm-warn); color: #2A2517; }
 .fm-kpi.error { border-top-color: #F2A7C0; } .fm-kpi.error .ic { background: #F2A7C0; color: #2A1E25; }
 @media (max-width: 1500px) { .fm-kpi .l { min-height: 2.5em; align-items: flex-start; } .fm-kpi .v { font-size: 1.25rem; }
   .fm-kpi { padding: .7rem .75rem .65rem; } }
@@ -383,6 +392,12 @@ TRADING_CSS = """
 .fm-tx.fails { color: var(--fm-fail); background: var(--fm-fail-soft); border-color: rgba(238,142,142,.32); }
 .fm-tx.cures { color: var(--fm-pass); background: var(--fm-pass-soft); border-color: rgba(127,203,155,.45); }
 .fm-tx.still { color: var(--fm-warn); background: var(--fm-warn-soft); border-color: rgba(230,192,123,.32); }
+.fm-tx .tr { font-style: normal; font-weight: 650; letter-spacing: .02em; margin-left: .1rem; text-transform: none; }
+.fm-tx.still.worse { border-color: rgba(238,142,142,.75); box-shadow: inset 3px 0 0 var(--fm-fail); }
+.fm-tx.still.worse .tr { color: var(--fm-fail); }
+.fm-tx.still.better .tr { color: var(--fm-pass); }
+.fm-tx.still.moves .tr { color: var(--fm-muted); }
+.fm-tx.still.same { opacity: .82; }
 .fm-tx.error { color: #F2A7C0; background: rgba(242,167,192,.13); border-color: rgba(242,167,192,.3); }
 .fm-tx.ok { color: var(--fm-pass); background: var(--fm-pass-soft); border-color: rgba(127,203,155,.22); }
 .fm-tx.na { color: var(--fm-na); background: var(--fm-na-soft); border-color: rgba(163,172,189,.2); }
@@ -396,6 +411,13 @@ table.fm-impact th:nth-child(2), table.fm-impact td:nth-child(2) { padding-right
 .fm-txlegend { display: flex; flex-wrap: wrap; gap: .45rem 1.1rem; padding: .7rem 1rem .5rem; border-top: 1px solid var(--fm-border); }
 .fm-txlegend > span { display: inline-flex; align-items: center; gap: .45rem; }
 .fm-txlegend em { font-style: normal; color: var(--fm-muted); font-size: .76rem; }
+.fm-txlegend .hint { flex-basis: 100%; color: var(--fm-muted); font-size: .74rem; }
+/* Clickable cells and chips open the fund (and rule) in the drill-down tab. */
+table.fm-impact td.jump { cursor: pointer; }
+table.fm-impact tbody td.jump:hover { background: rgba(124,156,245,.12) !important; }
+table.fm-impact td.jump:focus-visible, .fm-risk .funds span:focus-visible { outline: 2px solid var(--fm-accent); outline-offset: -2px; }
+table.fm-impact td.fund.jump:hover { color: var(--fm-accent-text); text-decoration: underline; text-underline-offset: 3px; }
+[class*="st-key-tcjump"] { display: none !important; }
 
 /* ---- rules at risk ------------------------------------------------------------------------------------ */
 .fm-risks { display: grid; grid-template-columns: minmax(0, 1fr); }
@@ -410,12 +432,18 @@ table.fm-impact th:nth-child(2), table.fm-impact td:nth-child(2) { padding-right
 .fm-risk .bar i.breaks, .fm-risk .bar i.fails { background: var(--fm-fail); }
 .fm-risk .bar i.still { background: var(--fm-warn); } .fm-risk .bar i.cures { background: var(--fm-pass); }
 .fm-risk .bar i.error { background: #F2A7C0; }
+.fm-risk .bar i.worse { background: repeating-linear-gradient(135deg, var(--fm-warn) 0 3px, var(--fm-fail) 3px 6px); }
 .fm-risk .body { display: grid; gap: .35rem; align-content: center; }
 .fm-risk .grp { display: flex; gap: .55rem; align-items: flex-start; }
 .fm-risk .grp em { font-style: normal; flex: none; min-width: 6.4rem; }
 .fm-risk .funds { display: flex; flex-wrap: wrap; gap: .3rem; }
 .fm-risk .funds span { font-size: .74rem; font-weight: 600; letter-spacing: .03em; color: var(--fm-text); padding: .05rem .45rem;
-  border-radius: 6px; background: var(--fm-surface-2); border: 1px solid var(--fm-border); }
+  border-radius: 6px; background: var(--fm-surface-2); border: 1px solid var(--fm-border); cursor: pointer;
+  transition: border-color .12s ease, background .12s ease; }
+.fm-risk .funds span:hover { border-color: var(--fm-accent-line); background: var(--fm-accent-soft); }
+.fm-risk .funds span b { color: var(--fm-fail); font-size: .62rem; margin-right: .25rem; }
+.fm-risk .funds span.worse { border-color: rgba(238,142,142,.55); }
+.fm-risk .funds span .miss { font-style: normal; color: var(--fm-muted); margin-left: .2rem; }
 .fm-risk .grp.breaks .funds span { border-color: rgba(238,142,142,.5); }
 .fm-risk .grp.cures .funds span { border-color: rgba(127,203,155,.45); }
 @media (max-width: 900px) { .fm-risk { grid-template-columns: minmax(0, 1fr); } }
@@ -425,13 +453,26 @@ table.fm-summary { font-size: .78rem; }
 table.fm-summary th { font-size: .7rem; padding: .4rem .5rem; text-align: right; line-height: 1.25; }
 table.fm-summary th span { color: var(--fm-faint); font-weight: 500; letter-spacing: 0; }
 table.fm-summary thead tr.top th { border-bottom: none; padding-bottom: .1rem; }
-table.fm-summary th:first-child, table.fm-summary td:first-child { text-align: left; position: sticky; left: 0; z-index: 1;
-  background: var(--fm-surface); box-shadow: inset -1px 0 0 var(--fm-border); }
-table.fm-summary thead th:first-child { background: var(--fm-surface-2); }
+/* Only the real first column is sticky (not the first cell of the second header row). */
+table.fm-summary thead tr.top th:first-child, table.fm-summary tbody td:first-child { position: sticky; left: 0; z-index: 1;
+  text-align: left; background: var(--fm-surface); box-shadow: inset -1px 0 0 var(--fm-border); }
+table.fm-summary thead tr.top th:first-child { background: var(--fm-surface-2); z-index: 4; }
+table.fm-summary thead tr:not(.top) th { text-align: right; }
+/* The BREAKS tint over an opaque surface, so scrolled cells never show through the sticky fund name. */
+table.fm-matrix tbody tr:hover td:first-child, table.fm-summary tbody tr:hover td:first-child {
+  background: linear-gradient(rgba(124,156,245,.05), rgba(124,156,245,.05)), var(--fm-surface); }
+table.fm-matrix tr.hl-bad td:first-child,
+table.fm-summary tr.hl-bad td:first-child { background: linear-gradient(var(--fm-fail-soft), var(--fm-fail-soft)), var(--fm-surface); }
+/* The table scrolls inside a capped box (header pinned), so its sideways scrollbar is on screen. */
+.fm-sumwrap { max-height: 34rem; overflow: auto; }
+.fm-sumwrap thead { position: sticky; top: 0; z-index: 3; }
+.fm-sumwrap thead th { background: var(--fm-surface-2) !important; }
 table.fm-summary th.c { text-align: center; }
 table.fm-summary td { padding: .38rem .5rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 table.fm-summary td.num { text-align: right; }
 table.fm-summary td .sub { display: block; color: var(--fm-faint); font-size: .68rem; }
+table.fm-table tr.hl-bad td .sub, table.fm-cmp tr.chg .sub { color: var(--fm-muted); }  /* FAINT on tints < 4.5:1 */
+table.fm-summary td.muted .sub { color: var(--fm-muted); }
 table.fm-summary .grp { border-left: 1px solid rgba(54,63,82,.85); }
 table.fm-summary td.neg { color: var(--fm-fail); font-weight: 600; }
 table.fm-summary tr.total td { border-top: 1px solid var(--fm-border); }
@@ -440,6 +481,7 @@ table.fm-summary tr.total td:first-child { background: var(--fm-surface-2); }
   border-radius: 999px; font-size: .64rem; font-weight: 750; vertical-align: 1px; cursor: default; letter-spacing: 0; }
 .fm-ico.bad { color: var(--fm-fail); background: var(--fm-fail-soft); border: 1px solid rgba(238,142,142,.35); }
 .fm-ico.warn { color: var(--fm-warn); background: var(--fm-warn-soft); border: 1px solid rgba(230,192,123,.35); }
+.fm-ico.na { color: var(--fm-muted); background: var(--fm-na-soft); border: 1px solid rgba(163,172,189,.3); }
 .fm-flag { display: inline-block; font-size: .68rem; font-weight: 600; padding: .02rem .45rem; border-radius: 999px; margin-right: .25rem;
   border: 1px solid transparent; white-space: nowrap; cursor: default; }
 .fm-flag.bad { color: var(--fm-fail); background: var(--fm-fail-soft); border-color: rgba(238,142,142,.3); }
@@ -504,6 +546,15 @@ table.fm-cmp i { font-style: normal; font-size: .62rem; margin-right: .35rem; co
 .fm-cmpcard.t-breaks { border-color: rgba(238,142,142,.6); box-shadow: 0 0 0 3px rgba(238,142,142,.1), var(--fm-shadow); }
 .fm-cmpcard.t-cures { border-color: rgba(127,203,155,.5); }
 .fm-cmpcard.t-still { border-color: rgba(230,192,123,.4); }
+.fm-cmpcard.focus { border-color: var(--fm-accent); box-shadow: 0 0 0 3px rgba(124,156,245,.18), var(--fm-shadow); }
+.fm-cmpcard .fm-band > span:first-child { min-width: 0; }
+.fm-cmpcard .fm-band .sub { white-space: nowrap; }
+.fm-keyfig { display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem .6rem; margin: .5rem 1rem .35rem;
+  padding: .4rem .65rem; border-radius: 8px; background: var(--fm-surface-2); font-size: .8rem; color: var(--fm-muted); }
+.fm-keyfig b { color: var(--fm-text); font-variant-numeric: tabular-nums; font-weight: 650; }
+.fm-keyfig em { font-style: normal; color: var(--fm-muted); }
+.fm-keyfig.worse { box-shadow: inset 3px 0 0 var(--fm-fail); } .fm-keyfig.worse em { color: var(--fm-fail); }
+.fm-keyfig.better { box-shadow: inset 3px 0 0 var(--fm-pass); } .fm-keyfig.better em { color: var(--fm-pass); }
 .fm-folded { margin-top: 1.1rem; }
 .fm-folded details { border-top: none !important; }
 .fm-blot { margin-bottom: 1rem; }

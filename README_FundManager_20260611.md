@@ -277,16 +277,20 @@ the output / publish folders and **Reload fund groups** (re-reads the cohorts fr
   assuming the staged trades execute. Same settings panel as New run, with a trade date,
   a *Staged trades* chip (and a dot on those funds' tiles) from a read-only DB lookup, the
   checks and the options (email off by default, confirmation required). After the run, a
-  dashboard: KPIs (funds trading, buys / sells / net, estimated post-trade cash; funds
-  staying compliant, going out of compliance, coming into compliance, still failing); a
-  funds × rules matrix of before → after transitions (BREAKS, CURES, STILL FAILS) with an
-  "only rules that change or fail" toggle; the rules at risk; a trading summary table per
-  fund with totals (equity, options premium and treasury buys / sells / net, % of TNA,
-  current cash at the T-1 close, estimated post-trade cash; definitions in its footnote);
-  three charts (net trades by asset class, cash before → after, % of TNA traded); and a
-  fund drill-down (cash waterfall, each rule before / after side by side with the changed
-  values highlighted, the trade blotter). Post-trade cash is an estimate: current cash −
-  buys + sells, options at premium, treasuries at price per 100 face.
+  dashboard: KPIs (funds trading, priced buys / sells / net, estimated post-trade cash;
+  funds staying compliant, going out of compliance, whose breach deepens, coming into
+  compliance, still failing) and one data-quality note; then three tabs. *Compliance
+  impact*: a funds × rules matrix of before → after transitions (BREAKS, CURES, STILL
+  FAILS with worse / better) with an "only rules that change or fail" toggle, and the
+  rules at risk; click a fund or cell to open it in the drill-down. *Trading summary*: a
+  table per fund with totals (equity, options premium and treasury buys / sells / net, %
+  of TNA, current cash at the T-1 close, estimated post-trade cash; definitions in its
+  footnote) and three charts (net trades by asset class, cash as % of TNA before → after,
+  % of TNA traded). *Fund drill-down*: cash waterfall, each rule before / after side by
+  side with its key figure and the changed values highlighted, the trade blotter and the
+  ex-post position changes without staged rows. Post-trade cash is an estimate: current
+  cash − buys + sells, options at premium, treasuries at price per 100 face; unpriced,
+  restated and duplicate trade rows are left out.
 - **Run history:** every past run (who, when, what, status, files); open any run to see
   the same results view (the dashboard for a trading run), or **Re-run** it (loads the
   request back into its form, New run or Trading Compliance, email off).

@@ -21,6 +21,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import test_trading_dashboard as tdt  # noqa: E402  (hand-built funds through the real data layer)
 import ui_views_fixture as fx  # noqa: E402
 from processing import api  # noqa: E402
 from test_ui_app import CATALOG, AppTestCase  # noqa: E402
@@ -98,7 +99,9 @@ class ChartsTest(unittest.TestCase):
         self.assertIn("Below zero", markup)  # the washed negative region
         self.assertIn('class="neg"', markup)
         self.assertIn("⚠ −$2.00M", markup)  # TDVI
-        self.assertIn("No custodian cash for NOCASH", markup)
+        self.assertIn("Not plotted (no custodian cash or TNA): NOCASH", markup)
+        self.assertIn(charts.POST, markup)  # the post-trade dot is a neutral ink, not the equity hue
+        self.assertNotIn(charts.ASSET_COLORS["equity"], markup)
 
     def test_waterfall_runs_from_current_to_post_cash(self) -> None:
         markup = charts.waterfall_chart(dashboard()["funds"][2]["waterfall"])
@@ -115,7 +118,7 @@ class DashboardBuildersTest(unittest.TestCase):
         self.assertIn("of 4 selected · 1 without trades", html)
         self.assertIn('class="fm-kpi breaks"', html)  # one fund goes out of compliance
         self.assertIn('class="fm-kpi cures"', html)
-        self.assertIn('class="fm-kpi warn"', html)  # a fund below zero after the trades
+        self.assertIn('class="fm-kpi neg"', html)  # a fund below zero after the trades: red, as everywhere
         self.assertIn("1 fund(s) below zero", html)
         self.assertIn("Still failing", html)
 
@@ -125,7 +128,7 @@ class DashboardBuildersTest(unittest.TestCase):
         self.assertIn('class="fm-tx breaks"', html)
         self.assertIn('class="fm-tx cures"', html)
         self.assertIn("DOGG · IRS Diversification: PASS before → FAIL after", html)
-        self.assertIn('<tr class="hl-bad"><td class="fund">DOGG</td>', html)
+        self.assertIn('<tr class="hl-bad"><td class="fund jump" data-fm-jump="DOGG"', html)
         self.assertNotIn(">GICS</th>", html)  # no change, no failure: hidden by the toggle
         self.assertIn(">GICS</th>", tr.matrix_html(d, only_changes=False))
         self.assertIn("No proposed trades:</b> RDVI", html)
@@ -141,8 +144,8 @@ class DashboardBuildersTest(unittest.TestCase):
         html = tr.rules_at_risk_html(dashboard())
         self.assertIn("IRS Diversification", html)
         self.assertIn("1 of 3 fail after", html)
-        self.assertRegex(html, r'class="grp breaks">.*?<span>DOGG</span>')
-        self.assertRegex(html, r'class="grp cures">.*?<span>KNG</span>')
+        self.assertRegex(html, r'class="grp breaks">.*?<span data-fm-jump="DOGG" data-fm-rule="1"[^>]*>DOGG</span>')
+        self.assertRegex(html, r'class="grp cures">.*?data-fm-jump="KNG"[^>]*>KNG</span>')
 
     def test_summary_table(self) -> None:
         html = tr.summary_table_html(dashboard())
@@ -182,8 +185,10 @@ class DashboardBuildersTest(unittest.TestCase):
         self.assertIn("Cash waterfall", dd.waterfall_html(dogg))
         self.assertIn("No custodian cash", dd.waterfall_html(dict(dogg, cash={"current": None})))
         options = dd.rule_filter_options(d)
-        self.assertEqual(options, [dd.ALL_FUNDS, "IRS Diversification · 1", "Real Estate · 1"])
-        self.assertEqual(dd.funds_for_filter(d, "Real Estate · 1"), ["KNG"])
+        self.assertEqual(options, [dd.ALL_FUNDS, "diversification_IRS_check", "real_estate_check"])
+        self.assertEqual([dd.rule_filter_label(d, o) for o in options],
+                         [dd.ALL_FUNDS_LABEL, "IRS Diversification · 1", "Real Estate Exposure · 1"])
+        self.assertEqual(dd.funds_for_filter(d, "real_estate_check"), ["KNG"])
         self.assertEqual(dd.funds_for_filter(d, dd.ALL_FUNDS), ["DOGG", "KNG", "TDVI"])
 
     def test_staged_note_and_dates(self) -> None:
@@ -205,6 +210,177 @@ class DashboardBuildersTest(unittest.TestCase):
             (Path(tmp) / runner.VIEWS).write_text(json.dumps(views), encoding="utf-8")
             text = json.dumps(history.load_views(Path(tmp)))
         self.assertNotIn("Hunter2Secret", text)
+
+
+def real_dashboard() -> dict:
+    """A schema-2 dashboard from :mod:`reporting.trading_dashboard` on hand-built funds.
+
+    BRK: passes before, IRS fails after; WRS: still fails and gets worse, its cash goes below zero; NEG: already
+    negative cash; HE3: duplicate rows and report-only option changes; PD2: no custodian TNA or cash.
+    """
+    irs = tdt.IRS
+    key = "Sum Large Securities %"
+    trade = tdt._frame("eqyticker", [("AAA", 0.0, 10.0, 10.0, 10.0)])
+    options = tdt.pd.DataFrame({"optticker": ["X 12/18/26 P1"], "nav_shares": [-1.0], "iiv_shares": [-3.0],
+                                "price": [2.0]})
+    funds = {
+        "BRK": (tdt._fund("BRK", prev_cash=1000.0, prev_tna=10_000.0), tdt._fund("BRK", equity=trade)),
+        "WRS": (tdt._fund("WRS", prev_cash=50.0, prev_tna=10_000.0), tdt._fund("WRS", equity=trade)),
+        "NEG": (tdt._fund("NEG", prev_cash=-20.0, prev_tna=10_000.0), tdt._fund("NEG", equity=trade)),
+        "HE3": (tdt._fund("HE3", equity=tdt._frame("eqyticker", [("MRK", 100.0, 100.0, 0.0, 10.0)] * 2),
+                          prev_cash=500.0, prev_tna=10_000.0),
+                tdt._fund("HE3", equity=tdt._frame("eqyticker", [("MRK", 100.0, 60.0, -40.0, 10.0)] * 2),
+                          options=options)),
+        "PD2": (tdt._fund("PD2"), tdt._fund("PD2", equity=trade)),
+    }
+    ante = {"BRK": {irs: tdt._rule("PASS")}, "WRS": {irs: tdt._rule("FAIL", [{"label": key, "value": "60.0%"}])},
+            "NEG": {irs: tdt._rule("PASS")}, "HE3": {irs: tdt._rule("PASS")}, "PD2": {irs: tdt._rule("FAIL")}}
+    post = {"BRK": {irs: tdt._rule("FAIL")}, "WRS": {irs: tdt._rule("FAIL", [{"label": key, "value": "61.5%"}])},
+            "NEG": {irs: tdt._rule("PASS")}, "HE3": {irs: tdt._rule("PASS")}, "PD2": {irs: tdt._rule("FAIL")}}
+    return tdt._dashboard(funds, ante, post, rules={irs: {"title": "IRS", "label": "IRS Diversification"}})
+
+
+class RoundOneBuildersTest(unittest.TestCase):
+    """The repair-round fixes on a schema-2 dashboard built by the real data layer."""
+
+    def setUp(self) -> None:
+        self.d = real_dashboard()
+        self.funds = {f["fund"]: f for f in self.d["funds"]}
+
+    def test_kpis_use_the_priced_basis_and_red_for_negative_cash(self) -> None:
+        html = tr.kpi_html(self.d)
+        k = self.d["kpis"]
+        self.assertIn(f'<div class="v">{ui.money(k["priced_sell_value"])}</div>', html)
+        self.assertIn("incl. flagged rows", html)  # HE3: 2 duplicate sells, the report counts both
+        self.assertIn('class="fm-kpi neg"', html)
+        self.assertIn("go below zero", html)
+        self.assertIn("1 already negative", html)
+        self.assertIn("at the 2026-10-29 close", html)
+        self.assertNotIn("today", html)
+        self.assertIn('class="fm-kpi worse"', html)  # WRS: still failing and worse
+        self.assertEqual(html.count('class="fm-kpi-row"'), 2)
+
+    def test_kpi_notes_guard_missing_figures(self) -> None:
+        html = tr.kpi_html({"kpis": {"funds_with_trades": 1}, "totals": {}})
+        self.assertNotIn("gross — of TNA", html)
+        self.assertNotIn("from —", html)
+
+    def test_data_notes_callout(self) -> None:
+        html = tr.data_notes_html(self.d)
+        self.assertIn('class="fm-callout warn"', html)
+        self.assertIn("1 duplicate trade row(s) worth $400 in 1 fund(s), counted once", html)
+        self.assertIn("no custodian TNA or cash for PD2", html)
+        self.assertIn("without staged rows in 1 fund(s)", html)
+        self.assertEqual(tr.data_notes_html(fx.trading_dashboard()), "")  # schema 1: no notes block
+
+    def test_matrix_trend_and_jump_targets(self) -> None:
+        html = tr.matrix_html(self.d, only_changes=False)
+        self.assertIn('class="fm-tx still worse"', html)
+        self.assertIn('<i class="tr">· worse</i>', html)
+        self.assertIn("Sum Large Securities % 60.0% → 61.5%", html)  # the key figure in the hover
+        self.assertIn('data-fm-jump="WRS" data-fm-rule="0"', html)
+        self.assertIn('aria-label="missing data">∅</span>', html)  # PD2
+        self.assertIn("Worsens", html)
+        self.assertEqual([r["fund"] for r in self.d["matrix"]["rows"]][:2], ["BRK", "WRS"])
+        self.assertIn("the trades make it worse", tr.legend_html(self.d))
+        risk = tr.rules_at_risk_html(self.d)
+        self.assertRegex(risk, r'class="worse" data-fm-jump="WRS" data-fm-rule="0"')
+        self.assertIn("· 1 worse", risk)
+
+    def test_jump_options_and_callback(self) -> None:
+        options = tr.jump_options(self.d)
+        self.assertIn("WRS", options)
+        self.assertIn("WRS #0", options)
+        names = tr.keys("tc", "run1")
+        state = {names["jump"]: "WRS #0"}
+        with mock.patch.object(tr.st, "session_state", state):
+            tr.apply_jump(self.d, names)
+        self.assertEqual((state[names["fund"]], state[names["focus"]], state[names["rule"]], state[names["tabs"]]),
+                         ("WRS", tdt.IRS, tdt.IRS, tr.DRILL_TAB))
+        self.assertIsNone(state[names["jump"]])
+        state = {names["jump"]: "NEG #0"}  # NEG passes IRS: the filter shows every fund
+        with mock.patch.object(tr.st, "session_state", state):
+            tr.apply_jump(self.d, names)
+        self.assertEqual((state[names["fund"]], state[names["rule"]]), ("NEG", dd.ALL_FUNDS))
+        self.assertIn("data-fm-jump", tr.JUMP_SCRIPT)
+
+    def test_summary_table_marks_missing_unpriced_and_report_only(self) -> None:
+        html = tr.summary_table_html(self.d)
+        self.assertIn('title="No custodian TNA for the T-1 close', html)
+        self.assertIn(">no data</td>", html)
+        self.assertIn("in report · not staged", html)  # HE3's option changes
+        self.assertIn("2026-10-29 close", html)
+        self.assertIn("The trades take estimated cash below zero", html)
+        self.assertIn("Cash is already below zero before the trades", html)
+        unpriced = dict(self.funds["BRK"]["assets"]["options"], unpriced_sell_value=400.0, sell_value=400.0,
+                        staged=True)
+        self.assertIn(">unpriced</span>", "".join(tr._class_cells(unpriced, "options")))
+
+    def test_empty_state_has_no_kpis(self) -> None:
+        d = tdt._dashboard({"FTMIX": (tdt._fund("FTMIX"), tdt._fund("FTMIX"))},
+                           {"FTMIX": {tdt.IRS: tdt._rule("FAIL")}}, {"FTMIX": {tdt.IRS: tdt._rule("FAIL")}})
+        html = tr.no_trades_html(d)
+        self.assertIn("No proposed trades", html)
+        self.assertIn("FTMIX", html)
+        self.assertNotIn("fm-kpi", html)
+
+    def test_drilldown_labels_cash_bases(self) -> None:
+        head = dd.fund_header_html(self.funds["PD2"])
+        self.assertIn("TNA<b>no data</b>", head)
+        self.assertIn("not estimated (no custodian cash)", head)
+        self.assertNotIn("Traded<b>", head)
+        self.assertIn("Cash (2026-10-29 close)", dd.fund_header_html(self.funds["WRS"]))
+        card = dd.metrics_card_html(dict(self.funds["WRS"], metrics=[{"label": "Cash", "before": "1", "after": "1",
+                                                                       "changed": False}]))
+        self.assertIn("compliance inputs", card)
+        self.assertIn("not adjusted for the trades", card)
+        self.assertIn('<div class="fm-reason">No custodian cash', dd.waterfall_html(self.funds["PD2"]))
+        self.assertIn("position changes without staged rows", "".join(dd.unstaged_html(self.funds["HE3"])))
+        wrs = dd.rule_compare_html(self.funds["WRS"]["rules"][0], focus=True)
+        self.assertIn("t-still focus", wrs)
+        self.assertIn('class="fm-keyfig worse"', wrs)
+        self.assertNotIn("fm-pill", wrs.split("fm-band-tx")[1].split("</div>")[0])  # no FAIL → FAIL pills
+        shown, _ = dd.split_rules(self.funds["NEG"]["rules"], focus=tdt.IRS)
+        self.assertEqual(shown[0]["rule"], tdt.IRS)
+
+    def test_table_diff_card(self) -> None:
+        rule = {"rule": "gics_compliance", "label": "GICS Concentration", "transition": "OK", "changed_rows": 1,
+                "rows": [], "details": [], "tables": [{"title": "Industry exposure",
+                                                       "columns": ["Category", "Fund Weight", "Index Weight"],
+                                                       "total": 3, "rows": [{"key": "Media",
+                                                                             "before": ["34.07%", "27.37%"],
+                                                                             "after": ["33.83%", "27.37%"]}]}]}
+        html = dd.rule_compare_html(rule)
+        self.assertIn("Industry exposure: 1 of 3 rows change", html)
+        self.assertIn("<th>Media · Fund Weight</th>", html)
+        self.assertIn("33.83%", html)
+
+    def test_charts_line_up_and_explain_left_out_trades(self) -> None:
+        funds = self.d["funds"]
+        pct = charts.pct_tna_chart(funds)
+        self.assertIn('<div class="fm-legend" aria-hidden="true">&nbsp;</div>', pct)  # same header height
+        self.assertIn("Not plotted", pct)
+        self.assertIn("(table:", pct)
+        self.assertIn(charts.TOTAL, pct)
+        self.assertNotIn(charts.ASSET_COLORS["equity"], pct)
+        self.assertIn("Not plotted", charts.net_by_asset_chart(funds))
+        self.assertEqual(charts.labelled_ticks([-0.2, 0.0, 0.2, 0.4, 0.6]), [-0.2, 0.0, 0.6])
+        self.assertIn(-0.05, charts.labelled_ticks([-0.05, 0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3]))
+        dumbbell = charts.cash_dumbbell_chart(funds)
+        self.assertIn("% of TNA", dumbbell)
+        self.assertIn("the trades take cash below zero", dumbbell)
+        waterfall = charts.waterfall_chart(self.funds["BRK"]["waterfall"])
+        self.assertEqual(waterfall.count('<line x1="0"'), 1)  # only the zero line
+
+    def test_summary_css_sticks_only_the_first_column(self) -> None:
+        from ui import theme
+
+        css = theme.TRADING_CSS
+        self.assertIn("table.fm-summary thead tr.top th:first-child, table.fm-summary tbody td:first-child", css)
+        self.assertNotIn("table.fm-summary th:first-child, table.fm-summary td:first-child", css)
+        self.assertIn("table.fm-summary tr.hl-bad td:first-child { background: linear-gradient", css)
+        self.assertIn(".fm-kpi.breaks .s { color: var(--fm-muted); }", css)
+        self.assertIn('[class*="st-key-tcjump"] { display: none !important; }', css)
 
 
 class TradingPageTest(AppTestCase):
@@ -309,7 +485,7 @@ class TradingPageTest(AppTestCase):
         self.assertIn("Data notes for DOGG", page)
         self.ok(fund.set_value("TDVI").run())
         self.assertIn("Estimated post-trade cash is negative.", self.shown(at))
-        self.ok(at.selectbox(key=f"tc-tcrule-{run_dir.name}").set_value("Real Estate · 1").run())
+        self.ok(at.selectbox(key=f"tc-tcrule-{run_dir.name}").set_value("real_estate_check").run())
         self.assertEqual(at.button_group(key=f"tc-tcfund-{run_dir.name}").value, "KNG")
         self.ok(at.toggle(key=f"tc-tc-only-{run_dir.name}").set_value(False).run())
         self.assertIn(">GICS</th>", self.shown(at))
@@ -344,6 +520,45 @@ class TradingPageTest(AppTestCase):
         page = self.shown(at)
         self.assertIn("The trading dashboard could not be built", page)
         self.assertIn("Out Of Compliance", page)  # the report's overview
+
+    def test_jump_opens_the_drilldown_tab(self) -> None:
+        at = self.pick_tc(self.trading(), "DOGG", "KNG")
+        run_dir = self.run_trading(at)
+        (run_dir / runner.VIEWS).write_text(json.dumps(fx.trading_dashboard_views()), encoding="utf-8")
+        self.ok(at.run())
+        names = tr.keys("tc", run_dir.name)
+        self.assertEqual(at.session_state[names["tabs"]], tr.TABS[0])
+        self.ok(at.button_group(key=names["jump"]).set_value("KNG #2").run())  # what a click on a cell does
+        self.assertEqual(at.session_state[names["tabs"]], tr.DRILL_TAB)
+        self.assertEqual(at.button_group(key=names["fund"]).value, "KNG")
+        self.assertEqual(at.selectbox(key=names["rule"]).value, "real_estate_check")
+        self.assertIn("t-cures focus", self.shown(at))
+
+    def test_refreshed_session_reattaches_a_trading_run_to_its_page(self) -> None:
+        at = self.pick_tc(self.trading(), "KNG")
+        self.ok(at.text_input(key="tc_tag").input("slow").run())
+        self.ok(at.button(key="tc_run").click().run())
+        run_dir = Path(at.session_state["tc_watch"])
+        fresh = self.app()  # a refresh lands on New run
+        self.assertEqual(fresh.session_state["tc_watch"], str(run_dir))
+        self.assertNotIn("nr_watch", fresh.session_state)
+        runner.cancel(run_dir, by="test")
+        self.assertTrue(runner.wait(run_dir, timeout=30))
+        self.go(fresh, trading_page.PAGE)
+        page = self.shown(fresh)
+        self.assertNotIn("Trading check preview", page)  # the finished run, not the empty preview
+        self.assertIn("Next check", page)
+
+    def test_rerun_of_a_range_says_which_date_is_loaded(self) -> None:
+        at = self.pick_tc(self.trading(), "KNG")
+        run_dir = self.run_trading(at)
+        request = json.loads((run_dir / "request.json").read_text(encoding="utf-8"))
+        request.update(start_date="2026-10-28", end_date="2026-10-30")
+        (run_dir / "request.json").write_text(json.dumps(request), encoding="utf-8")
+        self.go(at, "Run history")
+        self.ok(at.button(key="hist_rerun").click().run())
+        self.assertEqual(at.session_state["tc_date"], date(2026, 10, 28))
+        self.assertIn("The original run covered 2026-10-28 to 2026-10-30", self.shown(at))
 
     def test_new_run_shows_a_trading_run_in_progress_but_keeps_its_form(self) -> None:
         at = self.pick_tc(self.trading(), "KNG")

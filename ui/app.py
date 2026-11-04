@@ -39,7 +39,7 @@ import streamlit as st  # noqa: E402
 from config import fund_definitions  # noqa: E402
 from processing import api  # noqa: E402
 from ui import components as ui  # noqa: E402
-from ui import history_page, new_run, runner, theme, trading_page  # noqa: E402
+from ui import history, history_page, new_run, panels, runner, theme, trading_page  # noqa: E402
 
 _log = logging.getLogger("fundmanager.ui")
 CATALOG_RETRY_SECONDS = 60  # how long a failed catalog load is cached before the DB is tried again
@@ -148,6 +148,16 @@ def top_bar(user: str) -> str:
     return page or "New run"
 
 
+def reattach_active_run() -> None:
+    """Point the page that owns the active run (New run or Trading Compliance) at it, whichever page this session
+    is on, so a refreshed session finds that run's progress and, once it finishes, its results on the owner page."""
+    active = runner.active_run(runner.output_root())
+    if active is None or panels.is_finished(active):
+        return
+    key = trading_page.WATCH_KEY if history.is_trading(active) else new_run.WATCH_KEY
+    st.session_state[key] = str(active)
+
+
 def main() -> None:
     st.set_page_config(page_title="FundManager", page_icon=":material/fact_check:", layout="wide")
     theme.inject()
@@ -160,6 +170,7 @@ def main() -> None:
     st.session_state.setdefault("page", "New run")
     new_run.keep_form_state()  # the New run and Trading picks survive visits to the other pages
     trading_page.keep_form_state()
+    reattach_active_run()
     page = top_bar(user)
     PAGES[page](user)
 
