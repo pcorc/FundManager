@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -211,3 +212,46 @@ def zip_bytes(run_dir: Path) -> bytes:
         raise FileNotFoundError(f"{Path(run_dir).name} has no reports")
     with _zip_lock(Path(run_dir)):
         return runner.retry(zip_path.read_bytes)
+
+
+VIEWS_SCHEMA = 1  # reporting.result_views schema_version this UI reads
+
+
+def load_views(run_dir: Path) -> Optional[dict]:
+    """``views.json`` (the per-day display tables, schema in ``reporting.result_views``), or ``None``.
+
+    ``None`` when the file is missing (an older run, or a worker that died early), unreadable or of an
+    unknown schema version, so the results view falls back to the downloads.
+    """
+    data = runner.read_json(Path(run_dir) / runner.VIEWS)
+    if not data or data.get("schema_version") != VIEWS_SCHEMA or not isinstance(data.get("days"), dict):
+        return None
+    days = {str(k): v for k, v in data["days"].items() if isinstance(v, dict)}
+    return {"schema_version": VIEWS_SCHEMA, "days": dict(sorted(days.items()))}
+
+
+
+def _seconds_between(start: Optional[str], end: Optional[str]) -> Optional[float]:
+    try:
+        return (datetime.fromisoformat(str(end)) - datetime.fromisoformat(str(start))).total_seconds()
+    except (TypeError, ValueError):
+        return None
+
+
+def fund_day_seconds(records: List[RunRecord]) -> List[float]:
+    """Seconds per fund-day of the successful runs in ``records`` (for the New run time estimate).
+
+    A run's fund-days are the ``total_funds`` of its per-day summaries (a trading day counts its ex-ante
+    and ex-post passes); runs without a duration or a fund count are left out.
+    """
+    rates = []
+    for record in records:
+        if record.status not in ("ok", "ok with errors"):
+            continue
+        seconds = _seconds_between(record.started, record.finished)
+        summaries = (runner.read_json(record.run_dir / runner.RESULT) or {}).get("summaries") or {}
+        fund_days = sum(s.get("total_funds") or s.get("processed_funds") or 0
+                        for s in summaries.values() if isinstance(s, dict))
+        if seconds and seconds > 0 and isinstance(fund_days, int) and fund_days > 0:
+            rates.append(seconds / fund_days)
+    return rates

@@ -20,10 +20,12 @@ from unittest import mock
 os.environ["DB_CONNECTION_STRING"] = "sqlite:///:memory:"  # nothing here may reach the real DB
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import streamlit as st  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
+import ui_views_fixture  # noqa: E402
 from config import fund_definitions  # noqa: E402
 from config.run_configurations import FULL_COMPLIANCE_TESTS  # noqa: E402
 from processing import api  # noqa: E402
@@ -36,6 +38,7 @@ CATALOG = {"cohorts": {"ALL_FUNDS": FUNDS, "ETF_FUNDS": ["KNG", "RDVI", "TDVI"],
                        "PRIVATE_FUNDS": [], "VIT_AND_MUTUAL_FUNDS": []},
            "funds": FUNDS, "operations": list(api.OPERATIONS), "compliance_rules": [],
            "rule_catalog": api.rule_catalog(), "date_modes": list(api.DATE_MODES)}
+CHECKS = [key for key, _ in new_run.check_rules(CATALOG)]
 TIMEOUT = 30
 FRIDAY, SATURDAY = date(2026, 10, 30), date(2026, 10, 31)
 
@@ -69,6 +72,12 @@ class AppTestCase(unittest.TestCase):
         at = AppTest.from_file(APP, default_timeout=TIMEOUT)
         return self.ok(at.run())
 
+    def pick(self, at: AppTest, *tickers: str) -> AppTest:
+        """Tick fund tiles."""
+        for ticker in tickers:
+            self.ok(at.checkbox(key=f"nrf_{ticker}").check().run())
+        return at
+
     def run_once(self, at: AppTest) -> Path:
         """Click Run, wait for the fake worker, rerun to show the results; return the run folder."""
         self.ok(at.button(key="nr_run").click().run())
@@ -77,93 +86,180 @@ class AppTestCase(unittest.TestCase):
         self.ok(at.run())
         return run_dir
 
+    def go(self, at: AppTest, page: str) -> AppTest:
+        """Switch page with the top navigation."""
+        return self.ok(at.button_group(key="page").set_value(page).run())
+
+    @staticmethod
+    def run_label(at: AppTest) -> str:
+        return [b.label for b in at.button if b.key == "nr_run"][0]
+
     @staticmethod
     def texts(elements) -> str:
         return "\n".join(str(e.value) for e in elements)
+
+    @staticmethod
+    def shown(at: AppTest) -> str:
+        """Every text the page shows: HTML pieces, markdown, alerts, captions and code."""
+        parts = []
+        for kind in ("html", "markdown", "error", "warning", "info", "success", "caption", "code", "title"):
+            parts += [str(e.value) for e in at.get(kind)]
+        return "\n".join(parts)
 
 
 class NewRunPageTest(AppTestCase):
     def test_page_renders_with_defaults(self) -> None:
         at = self.app()
         self.assertEqual(at.title[0].value, "New run")
-        self.assertIn(f"{len(FUNDS)} funds selected", self.texts(at.markdown))
-        self.assertEqual(at.multiselect(key="nr_cohorts").options,
-                         [f"{name} ({len(CATALOG['cohorts'][name])})" for name in sorted(CATALOG["cohorts"])])
+        page = self.shown(at)
+        self.assertIn("Configuration Preview", page)
+        self.assertIn("Select Fund", page)
+        self.assertIn("Pick at least one fund", page)  # nothing is ticked on a fresh form
+        self.assertTrue(at.button(key="nr_run").disabled)
+        self.assertEqual([b.key for b in at.button if (b.key or "").startswith("nr_chip_") and b.key != "nr_chip__clear"],
+                         ["nr_chip_ALL_FUNDS", "nr_chip_CLOSED_END_FUNDS", "nr_chip_ETF_FUNDS"])  # empty groups hidden
+        self.assertEqual(len([c for c in at.checkbox if c.key.startswith("nrf_")]), len(FUNDS))
+        self.assertTrue(all(at.checkbox(key=f"nrr_{key}").value for key in CHECKS))  # every check ticked
+        self.assertTrue(at.checkbox(key="nr_rules_all").value)
         self.assertTrue(at.checkbox(key="nr_op_compliance").value)
         self.assertFalse(at.checkbox(key="nr_email").value)  # email is off by default
         self.assertTrue(at.checkbox(key="nr_pdf").value)
         self.assertEqual(at.date_input(key="nr_as_of").value, new_run.default_as_of())
+        self.assertIn("What will be checked", page)  # the check guide before any run
+        self.assertIn("RUN COMPLIANCE CHECKS", self.run_label(at))
+        self.pick(at, "KNG")
         self.assertFalse(at.button(key="nr_run").disabled)
-        self.assertFalse(at.error)
+        self.assertNotIn("Pick at least one fund", self.shown(at))
 
-    def test_groups_narrow_the_funds_and_update_the_count(self) -> None:
+    def test_group_chip_ticks_its_funds_and_toggles(self) -> None:
         at = self.app()
-        self.ok(at.multiselect(key="nr_cohorts").set_value(["ETF_FUNDS"]).run())
-        self.assertEqual(at.multiselect(key="nr_funds").options, ["KNG", "RDVI", "TDVI"])
-        self.ok(at.multiselect(key="nr_exclude").set_value(["KNG"]).run())
-        self.assertIn("2 funds selected", self.texts(at.markdown))
+        self.ok(at.button(key="nr_chip_ETF_FUNDS").click().run())
+        self.assertEqual(at.session_state["nr_funds"], ["KNG", "RDVI", "TDVI"])
+        self.assertTrue(at.checkbox(key="nrf_KNG").value)
+        self.assertFalse(at.checkbox(key="nrf_DOGG").value)
+        self.ok(at.checkbox(key="nrf_RDVI").uncheck().run())  # untick one: the chip ticks it again
+        self.assertEqual(at.session_state["nr_funds"], ["KNG", "TDVI"])
+        self.ok(at.button(key="nr_chip_ETF_FUNDS").click().run())
+        self.assertEqual(sorted(at.session_state["nr_funds"]), ["KNG", "RDVI", "TDVI"])
+        self.ok(at.button(key="nr_chip_ETF_FUNDS").click().run())  # all ticked: the chip unticks them
+        self.assertEqual(at.session_state["nr_funds"], [])
+        self.ok(at.button(key="nr_chip_CLOSED_END_FUNDS").click().run())
+        self.pick(at, "KNG")
+        self.assertIn("2 funds", self.shown(at))
+        self.ok(at.button(key="nr_chip__clear").click().run())
+        self.assertEqual(at.session_state["nr_funds"], [])
+
+    def test_filter_hides_tiles_but_keeps_the_picks(self) -> None:
+        at = self.pick(self.app(), "DOGG")
+        self.ok(at.text_input(key="nr_fund_filter").input("kn").run())
+        self.assertEqual([c.key for c in at.checkbox if c.key.startswith("nrf_")], ["nrf_KNG", "nrf_KNGIX"])
+        self.pick(at, "KNG")
+        self.assertEqual(at.session_state["nr_funds"], ["DOGG", "KNG"])  # DOGG is hidden, still picked
+        request = new_run.build_request(CATALOG, new_run.Choices(funds=at.session_state["nr_funds"]))
+        self.assertEqual(request.funds, ("DOGG", "KNG"))
+        self.ok(at.text_input(key="nr_fund_filter").input("zzz").run())
+        self.assertIn("No ticker matches", self.shown(at))
+
+    def test_select_all_and_single_checks(self) -> None:
+        at = self.pick(self.app(), "KNG")
+        self.ok(at.checkbox(key="nr_rules_all").uncheck().run())
+        self.assertEqual(at.session_state["nr_rules"], [])
+        self.assertFalse(any(at.checkbox(key=f"nrr_{key}").value for key in CHECKS))
+        self.assertIn("Pick at least one compliance check", self.shown(at))
+        self.assertTrue(at.button(key="nr_run").disabled)
+        self.ok(at.checkbox(key="nrr_real_estate_check").check().run())
+        self.ok(at.checkbox(key="nrr_gics_compliance").check().run())
+        self.assertFalse(at.checkbox(key="nr_rules_all").value)
+        self.assertFalse(at.button(key="nr_run").disabled)
+        run_dir = self.run_once(at)
+        self.assertEqual(history.load_request(run_dir).compliance_tests, ("gics_compliance", "real_estate_check"))
+        self.ok(at.checkbox(key="nr_rules_all").check().run())
+        self.assertEqual(sorted(at.session_state["nr_rules"]), sorted(CHECKS))
+        self.assertTrue(all(at.checkbox(key=f"nrr_{key}").value for key in CHECKS))
+        self.assertEqual(new_run.rules_choice(CATALOG, at.session_state["nr_rules"]), (new_run.ALL_RULES, []))
+
+    def test_preview_counts_and_sentence(self) -> None:
+        at = self.pick(self.app(), "KNG", "TDVI", "SDVD")
+        self.ok(at.button_group(key="nr_date_kind").set_value(new_run.RANGE).run())
+        self.ok(at.date_input(key="nr_start").set_value(date(2026, 10, 1)).run())
+        self.ok(at.date_input(key="nr_end").set_value(date(2026, 10, 31)).run())  # 22 weekdays (31st is a Saturday)
+        self.ok(at.checkbox(key="nr_rules_all").uncheck().run())
+        for key in CHECKS[:4]:
+            self.ok(at.checkbox(key=f"nrr_{key}").check().run())
+        page = self.shown(at)
+        self.assertIn('<div class="v">22</div><div class="l">Days Selected</div>', page)
+        self.assertIn('<div class="v">3</div><div class="l">Funds Selected</div>', page)
+        self.assertIn('<div class="v">4</div><div class="l">Checks Selected</div>', page)
+        self.assertIn("3 funds × 22 days × 4 checks", page)
+        self.assertIn("264 total operations", page)
+        self.assertIn("Estimated completion time", page)
+        self.assertIn("rough estimate", page)  # no past runs yet
+        self.ok(at.checkbox(key="nr_op_nav_reconciliation").check().run())
+        page = self.shown(at)
+        self.assertIn("3 funds × 22 days × 5 checks", page)
+        self.assertIn("4 compliance rules + NAV recon", page)
+        self.assertIn("RUN CHECKS & RECONS", self.run_label(at))
 
     def test_validation_errors_block_the_run(self) -> None:
-        at = self.app()
+        at = self.pick(self.app(), "KNG")
         self.ok(at.checkbox(key="nr_op_compliance").uncheck().run())
-        self.assertIn("Pick at least one operation", self.texts(at.error))
+        self.assertIn("Pick at least one operation", self.shown(at))
         self.assertTrue(at.button(key="nr_run").disabled)
         self.ok(at.checkbox(key="nr_op_compliance").check().run())
-        self.ok(at.multiselect(key="nr_cohorts").set_value(["ETF_FUNDS"]).run())
-        self.ok(at.multiselect(key="nr_exclude").set_value(["KNG", "RDVI", "TDVI"]).run())
-        self.assertIn("fund selection is empty", self.texts(at.error))
+        self.ok(at.checkbox(key="nrf_KNG").uncheck().run())
+        self.assertIn("Pick at least one fund", self.shown(at))
         self.assertTrue(at.button(key="nr_run").disabled)
-        self.ok(at.multiselect(key="nr_exclude").set_value([]).run())
-        self.ok(at.radio(key="nr_rules_mode").set_value(new_run.CHOOSE_RULES).run())
-        self.assertIn("Pick at least one compliance rule", self.texts(at.error))
-        self.ok(at.multiselect(key="nr_rules").set_value(["gics_compliance"]).run())
-        self.assertFalse(at.error)
+        self.pick(at, "KNG")
         self.ok(at.checkbox(key="nr_email").check().run())
-        self.assertIn("confirmation to send notification emails", self.texts(at.error))
+        self.assertIn("confirmation to send notification emails", self.shown(at))
         self.assertTrue(at.button(key="nr_run").disabled)
         self.ok(at.checkbox(key="nr_email_ok").check().run())
-        self.assertFalse(at.error)
+        self.assertNotIn("fm-callout error", self.shown(at))
         self.assertFalse(at.button(key="nr_run").disabled)
 
     def test_range_and_trading_rules(self) -> None:
-        at = self.app()
-        self.ok(at.radio(key="nr_date_kind").set_value(new_run.RANGE).run())
-        self.ok(at.date_input(key="nr_range").set_value((SATURDAY, date(2026, 11, 1))).run())  # a weekend
-        self.assertIn("no business days", self.texts(at.error))  # per day: no longer runs Friday silently
-        self.ok(at.radio(key="nr_date_mode").set_value(new_run.STACKED).run())
-        self.assertIn("no business days", self.texts(at.error))
+        at = self.pick(self.app(), "KNG")
+        self.ok(at.button_group(key="nr_date_kind").set_value(new_run.RANGE).run())
+        self.ok(at.date_input(key="nr_start").set_value(SATURDAY).run())
+        self.ok(at.date_input(key="nr_end").set_value(date(2026, 11, 1)).run())  # a weekend
+        self.assertIn("no business days", self.shown(at))  # per day: no longer runs Friday silently
+        self.ok(at.button_group(key="nr_date_mode").set_value(new_run.STACKED).run())
+        self.assertIn("no business days", self.shown(at))
         self.assertFalse(at.checkbox(key="nr_pdf").value)  # stacked defaults to no PDF, like time_series
-        self.ok(at.radio(key="nr_kind").set_value(new_run.KIND_TRADING).run())
-        self.assertTrue(at.radio(key="nr_date_mode").disabled)  # stacked is EOD only
-        self.assertEqual(at.radio(key="nr_date_mode").value, new_run.PER_DAY)  # and shows what will run
+        self.ok(at.button_group(key="nr_kind").set_value(new_run.KIND_TRADING).run())
+        self.assertTrue(at.button_group(key="nr_date_mode").proto.disabled)  # stacked is EOD only
+        self.assertEqual(at.button_group(key="nr_date_mode").value, new_run.PER_DAY)  # and shows what will run
+        self.assertIn("RUN TRADING COMPLIANCE", self.run_label(at))
+        self.assertFalse([c for c in at.checkbox if c.key.startswith("nr_op_")])  # trading runs on its own
+        self.assertTrue(at.checkbox(key="nrr_gics_compliance").value)  # ... with the checks
 
     def test_stacked_recon_without_daily_reports_is_refused(self) -> None:
-        at = self.app()
+        at = self.pick(self.app(), "KNG")
         self.ok(at.checkbox(key="nr_op_reconciliation").check().run())
-        self.ok(at.radio(key="nr_date_kind").set_value(new_run.RANGE).run())
-        self.ok(at.date_input(key="nr_range").set_value((date(2026, 10, 29), FRIDAY)).run())
-        self.ok(at.radio(key="nr_date_mode").set_value(new_run.STACKED).run())
-        self.assertIn("recon reports would be lost", self.texts(at.error))
+        self.ok(at.button_group(key="nr_date_kind").set_value(new_run.RANGE).run())
+        self.ok(at.date_input(key="nr_start").set_value(date(2026, 10, 29)).run())
+        self.ok(at.date_input(key="nr_end").set_value(FRIDAY).run())
+        self.ok(at.button_group(key="nr_date_mode").set_value(new_run.STACKED).run())
+        self.assertIn("recon reports would be lost", self.shown(at))
         self.assertTrue(at.button(key="nr_run").disabled)
         self.ok(at.checkbox(key="nr_daily").check().run())
-        self.assertFalse(at.error)
+        self.assertNotIn("fm-callout error", self.shown(at))
         self.assertFalse(at.button(key="nr_run").disabled)
 
     def test_weekend_as_of_runs_and_says_friday(self) -> None:
-        at = self.app()
+        at = self.pick(self.app(), "KNG")
         self.ok(at.date_input(key="nr_as_of").set_value(SATURDAY).run())
-        self.assertIn("Saturday 2026-10-31 is not a business day: the run uses 2026-10-30", self.texts(at.info))
-        caption = self.texts(at.caption)
-        self.assertIn("| 2026-10-30 |", caption)
-        self.assertIn("1 business day(s): 2026-10-30", caption)
-        self.assertNotIn("2026-10-31", caption)
+        page = self.shown(at)
+        self.assertIn("Saturday 2026-10-31 is not a business day: the run uses 2026-10-30", page)
+        self.assertIn("compliance  ·  KNG  ·  2026-10-30  ·  all rules", page)
+        self.assertIn('title="2026-10-30">2026-10-30</div>', page)  # the Days Selected card names the day run
 
     def test_trading_email_is_off_by_default_and_needs_the_confirmation(self) -> None:
-        at = self.app()
-        self.ok(at.radio(key="nr_kind").set_value(new_run.KIND_TRADING).run())
+        at = self.pick(self.app(), "KNG")
+        self.ok(at.button_group(key="nr_kind").set_value(new_run.KIND_TRADING).run())
         self.assertFalse(at.checkbox(key="nr_email").value)
         self.assertFalse(at.checkbox(key="nr_email").disabled)
-        self.assertFalse(at.error)
+        self.assertNotIn("fm-callout error", self.shown(at))
         self.assertFalse(at.button(key="nr_run").disabled)
         self.ok(at.checkbox(key="nr_email").check().run())
         self.assertTrue(at.button(key="nr_run").disabled)  # emailing needs the second tick
@@ -177,8 +273,7 @@ class NewRunPageTest(AppTestCase):
         self.assertTrue(new_run.build_request(CATALOG, choices).send_email)
 
     def test_email_confirmation_is_cleared_after_a_run(self) -> None:
-        at = self.app()
-        self.ok(at.multiselect(key="nr_funds").set_value(["KNG"]).run())
+        at = self.pick(self.app(), "KNG")
         self.ok(at.checkbox(key="nr_email").check().run())
         self.ok(at.checkbox(key="nr_email_ok").check().run())
         self.ok(at.checkbox(key="nr_email").uncheck().run())  # launched with email off (safety rule)
@@ -198,30 +293,44 @@ class NewRunPageTest(AppTestCase):
         self.assertFalse(at.checkbox(key="nr_email").value)  # each emailing run needs its own confirmation
         self.assertNotIn("nr_email_ok", [c.key for c in at.checkbox])
 
-    def test_picks_survive_other_pages_and_hidden_widgets(self) -> None:
-        at = self.app()
-        self.ok(at.multiselect(key="nr_funds").set_value(["KNG"]).run())
+    def test_reset_restores_the_defaults(self) -> None:
+        at = self.pick(self.app(), "KNG", "TDVI")
         self.ok(at.checkbox(key="nr_op_reconciliation").check().run())
-        self.ok(at.radio(key="nr_date_kind").set_value(new_run.RANGE).run())
-        self.ok(at.date_input(key="nr_range").set_value((date(2026, 10, 1), FRIDAY)).run())
-        self.ok(at.radio(key="nr_rules_mode").set_value(new_run.CHOOSE_RULES).run())
-        self.ok(at.multiselect(key="nr_rules").set_value(["gics_compliance"]).run())
-        self.ok(at.sidebar.radio(key="page").set_value("Run history").run())
-        self.ok(at.sidebar.radio(key="page").set_value("New run").run())
-        self.ok(at.radio(key="nr_kind").set_value(new_run.KIND_TRADING).run())
-        self.ok(at.radio(key="nr_kind").set_value(new_run.KIND_EOD).run())
-        self.ok(at.radio(key="nr_date_kind").set_value(new_run.AS_OF).run())
-        self.ok(at.radio(key="nr_rules_mode").set_value(new_run.ALL_RULES).run())
-        self.ok(at.radio(key="nr_date_kind").set_value(new_run.RANGE).run())
-        self.ok(at.radio(key="nr_rules_mode").set_value(new_run.CHOOSE_RULES).run())
-        self.assertEqual(at.multiselect(key="nr_funds").value, ["KNG"])
+        self.ok(at.checkbox(key="nr_rules_all").uncheck().run())
+        self.ok(at.checkbox(key="nr_email").check().run())
+        self.ok(at.button(key="nr_reset").click().run())
+        self.assertEqual(at.session_state["nr_funds"], [])
+        self.assertEqual(sorted(at.session_state["nr_rules"]), sorted(CHECKS))
+        self.assertFalse(at.checkbox(key="nr_op_reconciliation").value)
+        self.assertFalse(at.checkbox(key="nr_email").value)
+        self.assertFalse(at.checkbox(key="nrf_KNG").value)
+
+    def test_picks_survive_other_pages_and_hidden_widgets(self) -> None:
+        at = self.pick(self.app(), "KNG")
+        self.ok(at.checkbox(key="nr_op_reconciliation").check().run())
+        self.ok(at.button_group(key="nr_date_kind").set_value(new_run.RANGE).run())
+        self.ok(at.date_input(key="nr_start").set_value(date(2026, 10, 1)).run())
+        self.ok(at.date_input(key="nr_end").set_value(FRIDAY).run())
+        self.ok(at.checkbox(key="nr_rules_all").uncheck().run())
+        self.ok(at.checkbox(key="nrr_gics_compliance").check().run())
+        self.go(at, "Run history")
+        self.go(at, "New run")
+        self.ok(at.button_group(key="nr_kind").set_value(new_run.KIND_TRADING).run())
+        self.ok(at.button_group(key="nr_kind").set_value(new_run.KIND_EOD).run())
+        self.ok(at.button_group(key="nr_date_kind").set_value(new_run.AS_OF).run())
+        self.ok(at.checkbox(key="nr_op_compliance").uncheck().run())  # hides the checks
+        self.ok(at.button_group(key="nr_date_kind").set_value(new_run.RANGE).run())
+        self.ok(at.checkbox(key="nr_op_compliance").check().run())
+        self.assertEqual(at.session_state["nr_funds"], ["KNG"])
+        self.assertTrue(at.checkbox(key="nrf_KNG").value)
         self.assertTrue(at.checkbox(key="nr_op_reconciliation").value)
-        self.assertEqual(at.date_input(key="nr_range").value, (date(2026, 10, 1), FRIDAY))
-        self.assertEqual(at.multiselect(key="nr_rules").value, ["gics_compliance"])
+        self.assertEqual((at.date_input(key="nr_start").value, at.date_input(key="nr_end").value),
+                         (date(2026, 10, 1), FRIDAY))
+        self.assertEqual(at.session_state["nr_rules"], ["gics_compliance"])
+        self.assertTrue(at.checkbox(key="nrr_gics_compliance").value)
 
     def test_run_with_fake_worker_shows_downloads(self) -> None:
-        at = self.app()
-        self.ok(at.multiselect(key="nr_funds").set_value(["KNG", "RDVI"]).run())
+        at = self.pick(self.app(), "KNG", "RDVI")
         self.ok(at.text_input(key="nr_tag").input("ui test").run())
         run_dir = self.run_once(at)
         self.assertEqual(run_dir.parent, self.root.resolve())
@@ -229,28 +338,78 @@ class NewRunPageTest(AppTestCase):
         sent = history.load_request(run_dir)
         self.assertEqual((sent.funds, sent.send_email, sent.output_tag), (("KNG", "RDVI"), False, "ui_test"))
         self.assertEqual(Path(sent.output_dir), run_dir / runner.REPORTS)
-        self.assertIn("OK", self.texts(at.success))
+        page = self.shown(at)
+        self.assertIn(">OK</span>", page)  # the status banner
         labels = [b.proto.label for b in at.download_button]
         self.assertEqual(labels[0], "Download all (zip)")
         self.assertEqual(len(labels), 3)  # zip + xlsx + pdf
-        self.assertTrue(any(label.endswith(".pdf") and "Compliance (PDF)" in label for label in labels))
+        self.assertTrue(any(label.endswith("Compliance (PDF)") for label in labels))
+        self.assertTrue(any(b.proto.help.endswith(".pdf") for b in at.download_button[1:]))  # file name as tooltip
         self.assertFalse((run_dir / f"{run_dir.name}.zip").exists())  # built only when downloaded
         self.assertTrue(history.zip_bytes(run_dir).startswith(b"PK"))
-        self.assertIn("| day | processed_funds | funds_with_errors |", self.texts(at.markdown))  # per-day summary
+        self.assertIn("Summary per day", page)  # no views.json from the fake worker: the summary table
+        self.assertIn("processed_funds", page)
         self.assertIn("Publishing is off", self.texts(at.caption))
+        self.assertEqual(at.button_group(key="nr_pane").value, new_run.RESULTS)
+        self.ok(at.button_group(key="nr_pane").set_value(new_run.GUIDE).run())
+        self.assertIn("What will be checked", self.shown(at))
+        self.assertFalse(at.download_button)
+
+    def test_results_render_from_views_json(self) -> None:
+        at = self.pick(self.app(), "KNG", "TDVI")
+        run_dir = self.run_once(at)
+        (run_dir / runner.VIEWS).write_text(json.dumps(ui_views_fixture.eod_views()), encoding="utf-8")
+        self.ok(at.run())
+        page = self.shown(at)
+        self.assertIn("fm-matrix", page)  # the overview: funds × checks
+        for label in ("Overall", "GICS", "40 Act", "IRS", "NAV", "Holdings"):
+            self.assertIn(f">{label}</th>", page)
+        self.assertEqual(at.button_group(key=f"nr-fund-{run_dir.name}").value, "KNG")  # the first failing fund
+        self.assertIn("IRS Diversification", page)
+        self.assertIn('<td class="v-fail">FAIL</td>', page)  # FAIL rows in soft red
+        self.assertIn("N/A (not evaluated)", page)  # a row's reason under its value
+        self.assertIn("&lt;META&gt;", page)  # values are escaped
+        self.assertIn("IRS Condition 1: 90% of income qualifying.", page)  # the rule's footnotes
+        self.assertIn("No shares outstanding data", page)  # fund notes
+        self.assertIn("Industry exposure (12)", page)
+        self.assertIn("Showing the first 2 of 12", page)
+        self.assertIn("NAV Reconciliation", page)
+        self.assertIn("Holdings Reconciliation", page)
+        self.assertIn("80 holdings breaks", page)
+        self.ok(at.button_group(key=f"nr-fund-{run_dir.name}").set_value("TDVI").run())
+        page = self.shown(at)
+        self.assertIn("TDVI: price feed was late", page)  # fund errors
+        self.assertNotIn("NAV Reconciliation", page)  # no NAV view for TDVI
+        self.assertGreaterEqual(len(at.download_button), 2)  # the downloads stay under the results
+
+    def test_trading_results_render_from_views_json(self) -> None:
+        at = self.pick(self.app(), "DOGG")
+        run_dir = self.run_once(at)
+        (run_dir / runner.VIEWS).write_text(json.dumps(ui_views_fixture.trading_views()), encoding="utf-8")
+        self.ok(at.run())
+        page = self.shown(at)
+        self.assertIn("trading day", page)
+        self.assertIn("Out Of Compliance", page)
+        self.assertIn('class="hl-bad"', page)
+        self.assertIn("Checks Before / After Trades", page)
+        self.assertIn("Trade Activity", page)
+        self.assertIn("7,240,344.52", page)
+        side = at.button_group(key=f"nr-side-{run_dir.name}")
+        self.assertEqual(side.value, "After trades (ex-post)")
+        self.ok(side.set_value("Before trades (ex-ante)").run())
+        self.assertIn('<td class="v-pass">PASS</td>', self.shown(at))
 
     def test_blank_tag_uses_the_cli_name(self) -> None:
-        at = self.app()
-        self.ok(at.multiselect(key="nr_funds").set_value(["KNG"]).run())
-        self.assertIn("tag compliance", self.texts(at.caption))
+        at = self.pick(self.app(), "KNG")
+        self.assertIn("Output tag “compliance”", self.shown(at))
         run_dir = self.run_once(at)
         self.assertEqual(history.load_request(run_dir).output_tag, "compliance")
 
     def test_worker_errors_and_log_are_redacted(self) -> None:
-        at = self.app()
+        at = self.pick(self.app(), "KNG")
         self.ok(at.text_input(key="nr_tag").input("leak").run())
         self.run_once(at)
-        shown = self.texts(at.error) + self.texts(at.code)
+        shown = self.shown(at)
         self.assertIn("Could not parse URL", shown)
         self.assertIn("cannot connect to", shown)
         self.assertNotIn("Hunter2Secret", shown)
@@ -258,7 +417,7 @@ class NewRunPageTest(AppTestCase):
     def test_publish_copies_to_the_publish_root(self) -> None:
         publish = self.tmp / "published"
         with mock.patch.dict(os.environ, {"FUNDMANAGER_UI_PUBLISH_ROOT": str(publish)}):
-            at = self.app()
+            at = self.pick(self.app(), "KNG")
             run_dir = self.run_once(at)
             sure, button = f"nr-publish-sure-{run_dir.name}", f"nr-publish-{run_dir.name}"
             self.assertTrue(at.button(key=button).disabled)  # behind a confirmation
@@ -270,18 +429,24 @@ class NewRunPageTest(AppTestCase):
                           % new_run.default_as_of()])
 
     def test_active_run_disables_the_form_and_shows_progress(self) -> None:
-        at = self.app()
+        at = self.pick(self.app(), "KNG")
         self.ok(at.text_input(key="nr_tag").input("slow").run())
         self.ok(at.button(key="nr_run").click().run())
         run_dir = Path(at.session_state["nr_watch"])
         fresh = self.app()  # a second browser session reattaches through the lock file
         self.assertTrue(fresh.button(key="nr_run").disabled)
+        self.assertTrue(fresh.checkbox(key="nrf_KNG").disabled)
+        self.assertTrue(fresh.button(key="nr_chip_ETF_FUNDS").disabled)
+        self.assertTrue(fresh.button(key="nr_reset").disabled)
         self.assertEqual(fresh.session_state["nr_watch"], str(run_dir))
-        self.assertIn("Run in progress", self.texts(fresh.subheader))
+        self.assertIn("Run in progress", self.shown(fresh))
+        self.assertNotIn("Pick at least one fund", self.shown(fresh))  # no validation noise while locked
         self.ok(fresh.button(key=f"cancel-{run_dir.name}").click().run())
         self.assertTrue(runner.wait(run_dir, timeout=TIMEOUT))
         self.ok(fresh.run())
-        self.assertIn("CANCELLED", self.texts(fresh.error))
+        self.assertIn(">CANCELLED</span>", self.shown(fresh))
+        self.assertTrue(fresh.button(key="nr_run").disabled)  # unlocked, but this session has no fund picked
+        self.pick(fresh, "KNG")
         self.assertFalse(fresh.button(key="nr_run").disabled)
 
 
@@ -324,7 +489,10 @@ class ProgressPanelTest(AppTestCase):
                                    user="tester", root=self.root)
         at = AppTest.from_string(PANEL_SCRIPT.format(repo=str(REPO), run_dir=str(run_dir)), default_timeout=TIMEOUT)
         self.ok(at.run())
-        self.assertIn("Run in progress", self.texts(at.subheader))
+        page = self.shown(at)
+        self.assertIn("Run in progress", page)
+        self.assertIn("fm-steps", page)  # the stage stepper
+        self.assertTrue(at.get("progress"))
         runner.cancel(run_dir)
         self.assertTrue(runner.wait(run_dir, timeout=TIMEOUT))
         self.ok(at.run())
@@ -334,28 +502,56 @@ class ProgressPanelTest(AppTestCase):
 class OtherPagesTest(AppTestCase):
     def test_history_and_rerun(self) -> None:
         at = self.app()
-        self.ok(at.multiselect(key="nr_cohorts").set_value(["ETF_FUNDS"]).run())
-        self.ok(at.multiselect(key="nr_exclude").set_value(["TDVI"]).run())
+        self.ok(at.button(key="nr_chip_ETF_FUNDS").click().run())
+        self.ok(at.checkbox(key="nrf_TDVI").uncheck().run())
         self.ok(at.checkbox(key="nr_op_reconciliation").check().run())
         run_dir = self.run_once(at)
-        self.assertEqual(history.load_request(run_dir).output_tag, "eod")  # the CLI preset's name
-        self.ok(at.sidebar.radio(key="page").set_value("Run history").run())
+        sent = history.load_request(run_dir)
+        self.assertEqual((sent.output_tag, sent.funds), ("eod", ("KNG", "RDVI")))  # the CLI preset's name
+        self.ok(at.button(key="nr_reset").click().run())
+        self.go(at, "Run history")
         self.assertEqual(at.title[0].value, "Run history")
-        self.assertIn(f"| {run_dir.name} |", self.texts(at.markdown))
+        self.assertIn(f'<td class="">{run_dir.name}</td>', self.shown(at))
         self.ok(at.button(key="hist_rerun").click().run())
         self.assertEqual(at.title[0].value, "New run")
-        self.assertEqual(at.multiselect(key="nr_cohorts").value, ["ETF_FUNDS"])
-        self.assertEqual(at.multiselect(key="nr_exclude").value, ["TDVI"])
+        self.assertEqual(at.session_state["nr_funds"], ["KNG", "RDVI"])
+        self.assertTrue(at.checkbox(key="nrf_RDVI").value)
+        self.assertFalse(at.checkbox(key="nrf_TDVI").value)
         self.assertTrue(at.checkbox(key="nr_op_reconciliation").value)
         self.assertFalse(at.checkbox(key="nr_email").value)
-        self.ok(at.sidebar.radio(key="page").set_value("Reports").run())
+        self.assertIn("Loaded the settings of", self.shown(at))
+        self.go(at, "Reports")
         self.assertEqual(at.title[0].value, "Reports")
         self.assertEqual(at.selectbox(key="rep_day").options, [str(new_run.default_as_of())])  # the report date
         self.assertGreaterEqual(len(at.download_button), 2)
 
+    def test_rerun_of_a_group_request_ticks_its_funds(self) -> None:
+        run_dir = self.root / "20261101-080000-cli-eod"
+        run_dir.mkdir(parents=True)
+        request = api.RunRequest(operations=("compliance",), start_date=FRIDAY, cohorts=("ETF_FUNDS",),
+                                 exclude=("RDVI",), compliance_tests=("gics_compliance",))
+        (run_dir / runner.REQUEST).write_text(api.request_to_json(request), encoding="utf-8")
+        at = self.app()
+        at.session_state["nr_prefill"] = str(run_dir)  # what the history page's Re-run callback sets
+        self.ok(at.run())
+        self.assertEqual(at.session_state["nr_funds"], ["KNG", "TDVI"])  # the group less the exclusion
+        self.assertEqual(at.session_state["nr_rules"], ["gics_compliance"])
+        self.assertFalse(at.checkbox(key="nr_rules_all").value)
+        self.assertEqual(at.date_input(key="nr_as_of").value, FRIDAY)
+
+    def test_history_rows_open_the_results_view(self) -> None:
+        at = self.pick(self.app(), "KNG", "TDVI")
+        run_dir = self.run_once(at)
+        (run_dir / runner.VIEWS).write_text(json.dumps(ui_views_fixture.eod_views()), encoding="utf-8")
+        self.go(at, "Run history")
+        page = self.shown(at)
+        self.assertIn("fm-matrix", page)
+        self.assertIn("IRS Diversification", page)
+        self.assertEqual(at.button_group(key=f"hist-fund-{run_dir.name}").value, "KNG")
+
     def test_publish_is_not_offered_for_an_unsuccessful_run(self) -> None:
         with mock.patch.dict(os.environ, {"FUNDMANAGER_UI_PUBLISH_ROOT": str(self.tmp / "published")}):
-            at = self.app()
+            at = self.pick(self.app(), "KNG")
             run_dir = self.run_once(at)
             runner.update_meta(run_dir, cancelled=True)
             self.ok(at.run())
@@ -364,10 +560,10 @@ class OtherPagesTest(AppTestCase):
 
     def test_publish_confirmation_does_not_carry_over_to_another_run(self) -> None:
         with mock.patch.dict(os.environ, {"FUNDMANAGER_UI_PUBLISH_ROOT": str(self.tmp / "published")}):
-            at = self.app()
+            at = self.pick(self.app(), "KNG")
             first = self.run_once(at)
             second = self.run_once(at)
-            self.ok(at.sidebar.radio(key="page").set_value("Run history").run())
+            self.go(at, "Run history")
             self.assertEqual(at.selectbox(key="hist_pick").value, second.name)
             self.ok(at.checkbox(key=f"hist-publish-sure-{second.name}").check().run())
             self.assertFalse(at.button(key=f"hist-publish-{second.name}").disabled)
@@ -379,7 +575,7 @@ class OtherPagesTest(AppTestCase):
         with mock.patch.dict(os.environ, {"FUNDMANAGER_UI_PASSWORD": "s3cret"}):
             at = self.app()
             self.assertEqual(len(at.text_input), 1)
-            self.assertFalse(at.multiselect)
+            self.assertFalse(at.checkbox)
             at.text_input(key="login_password").input("wrong")
             self.ok(at.button[0].click().run())
             self.assertIn("Wrong password", self.texts(at.error))
@@ -391,7 +587,7 @@ class OtherPagesTest(AppTestCase):
         with mock.patch.dict(os.environ, {"FUNDMANAGER_UI_USER_HEADER": "X-Forwarded-User"}):
             at = self.app()
         self.assertIn("Not signed in", self.texts(at.error))
-        self.assertFalse(at.multiselect)
+        self.assertFalse(at.checkbox)
 
     def test_catalog_failure_falls_back_to_tickers_and_is_cached(self) -> None:
         with mock.patch.object(api, "catalog", side_effect=RuntimeError("db down at mysql://secret")) as failing:
@@ -399,7 +595,8 @@ class OtherPagesTest(AppTestCase):
             errors = self.texts(at.error)
             self.assertIn("Could not load the fund groups", errors)
             self.assertNotIn("secret", errors)
-            self.assertEqual(at.multiselect(key="nr_cohorts").options, [])
+            self.assertFalse([b for b in at.button if (b.key or "").startswith("nr_chip_") and b.key != "nr_chip__clear"])
+            self.assertEqual(len([c for c in at.checkbox if c.key.startswith("nrf_")]), len(FUNDS))  # tickers
             self.ok(at.checkbox(key="nr_op_reconciliation").check().run())
             self.ok(at.checkbox(key="nr_op_reconciliation").uncheck().run())
             self.assertEqual(failing.call_count, 1)  # not retried on every click
@@ -421,6 +618,12 @@ class RerunPrefillTest(unittest.TestCase):
         rebuilt = self.round_trip(compliance_tests=tests)
         self.assertEqual(set(rebuilt.compliance_tests), set(tests))
         self.assertEqual(tuple(self.round_trip().compliance_tests), tuple(FULL_COMPLIANCE_TESTS))
+
+    def test_rules_choice(self) -> None:
+        self.assertEqual(new_run.rules_choice(CATALOG, CHECKS), (new_run.ALL_RULES, []))
+        self.assertEqual(new_run.rules_choice(CATALOG, ["real_estate_check", "gics_compliance"]),
+                         (new_run.CHOOSE_RULES, ["gics_compliance", "real_estate_check"]))  # catalog order
+        self.assertEqual(new_run.rules_choice(CATALOG, CHECKS + ["summary"])[0], new_run.CHOOSE_RULES)  # exact list
 
 
 if __name__ == "__main__":
